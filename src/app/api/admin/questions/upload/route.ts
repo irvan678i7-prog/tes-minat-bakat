@@ -84,7 +84,6 @@ export async function POST(req: NextRequest) {
       continue;
     }
     const existingCount = await prisma.question.count({ where: { subtestId: subtest.id } });
-    await prisma.question.deleteMany({ where: { subtestId: subtest.id } });
 
     const data = list.map((r, i) => {
       const opts = buildOptions(r);
@@ -105,9 +104,15 @@ export async function POST(req: NextRequest) {
         scoringTag: r.scoringTag ? String(r.scoringTag) : null,
       };
     });
-    if (data.length > 0) {
-      await prisma.question.createMany({ data });
-    }
+
+    // Cascade-replace: drop dependent answer rows before removing old questions,
+    // then insert new ones. Existing reports stay intact because Result.payload is
+    // already computed (in-memory grading) and stored as JSON.
+    await prisma.$transaction([
+      prisma.answer.deleteMany({ where: { question: { subtestId: subtest.id } } }),
+      prisma.question.deleteMany({ where: { subtestId: subtest.id } }),
+      ...(data.length > 0 ? [prisma.question.createMany({ data })] : []),
+    ]);
     summary.push({ subtestCode: code, created: data.length, replaced: existingCount });
   }
 
