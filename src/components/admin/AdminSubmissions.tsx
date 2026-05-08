@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import toast from "react-hot-toast";
 
 type Sub = {
   id: string;
@@ -28,15 +29,38 @@ export default function AdminSubmissions() {
   const [filterSchool, setFilterSchool] = useState("");
   const [filterGrade, setFilterGrade] = useState("");
   const [filterKind, setFilterKind] = useState<"" | "MINAT" | "BAKAT">("");
+  const [deleting, setDeleting] = useState<string | null>(null);
 
-  useEffect(() => {
+  const refresh = () => {
     fetch("/api/admin/submissions")
       .then((r) => r.json())
       .then((d) => setItems(d.submissions || []));
     fetch("/api/admin/classes")
       .then((r) => r.json())
       .then((d) => setClasses(d.classes || []));
+  };
+
+  useEffect(() => {
+    refresh();
   }, []);
+
+  const onDelete = async (s: Sub) => {
+    const label = s.fullName || s.tokenCode;
+    if (!confirm(`Hapus data peserta "${label}" (${s.testKind})? Tindakan ini permanen dan tidak bisa dibatalkan.`)) return;
+    setDeleting(s.id);
+    try {
+      const res = await fetch(`/api/admin/submissions/${s.id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "Gagal menghapus data");
+        return;
+      }
+      toast.success(`Data "${label}" dihapus`);
+      setItems((prev) => prev.filter((it) => it.id !== s.id));
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   const filteredItems = items.filter(
     (s) =>
@@ -130,18 +154,30 @@ export default function AdminSubmissions() {
                   {s.iqEstimate ?? "—"}
                 </td>
                 <td>
-                  {s.finishedAt ? (
-                    <a
-                      href={`/api/admin/submissions/${s.id}/pdf`}
-                      className="brut-btn brut-btn-pink text-xs"
-                      target="_blank"
-                      rel="noreferrer"
+                  <div className="flex items-center gap-2">
+                    {s.finishedAt ? (
+                      <a
+                        href={`/api/admin/submissions/${s.id}/pdf`}
+                        className="brut-btn brut-btn-pink text-xs"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        PDF
+                      </a>
+                    ) : (
+                      <span className="brut-tag" style={{ background: "#facc15" }}>BERLANGSUNG</span>
+                    )}
+                    <button
+                      type="button"
+                      className="brut-btn brut-btn-black text-xs"
+                      style={{ background: "#ff4d8d" }}
+                      onClick={() => onDelete(s)}
+                      disabled={deleting === s.id}
+                      title="Hapus data peserta ini"
                     >
-                      PDF
-                    </a>
-                  ) : (
-                    <span className="brut-tag" style={{ background: "#facc15" }}>BERLANGSUNG</span>
-                  )}
+                      {deleting === s.id ? "..." : "HAPUS"}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
