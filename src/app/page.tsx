@@ -7,7 +7,7 @@ export default function Home() {
       <header className="border-b-4 border-black bg-yellow-300">
         <div className="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
           <h1 className="text-2xl md:text-3xl font-black tracking-tight uppercase">
-            TES MINAT &amp; BAKAT <span className="bg-black text-white px-2 ml-1">SMK</span>
+            TES MINAT &amp; BAKAT
           </h1>
           <Link href="/admin/login" className="brut-btn brut-btn-black text-sm">
             ADMIN

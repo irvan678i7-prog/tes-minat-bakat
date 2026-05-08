@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getAdminFromRequest } from "@/lib/auth";
 import { buildRekapPDF } from "@/lib/pdf-rekap";
-import { gradeAnswers, scoreSubmission, type ScoringPayload } from "@/lib/scoring";
+import { scoreSubmission, type ScoringPayload } from "@/lib/scoring";
 
 export async function GET(req: NextRequest) {
   const admin = getAdminFromRequest(req);
@@ -38,7 +38,6 @@ export async function GET(req: NextRequest) {
       let payload = s.result?.payload as unknown as ScoringPayload | null;
       let iq = s.result?.iqEstimate ?? null;
       if (!payload) {
-        await gradeAnswers(s.id);
         payload = await scoreSubmission(s.id);
         const topProfiles = payload.bakat?.topProfiles.map((p) => p.name);
         const topPrograms = payload.minat?.programs.map((p) => p.bidang);

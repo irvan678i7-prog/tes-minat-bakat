@@ -2,22 +2,38 @@ import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { prisma } from "@/lib/db";
 import { getAdminFromRequest } from "@/lib/auth";
+import { sheetNameForCode } from "../template/route";
 
-type Row = {
+type Row = Record<string, unknown> & {
   subtestCode?: string;
   questionNo?: number | string;
   prompt?: string;
   imageUrl?: string;
   parts?: number | string;
-  optionA?: string; optionB?: string; optionC?: string; optionD?: string;
-  optionE?: string; optionF?: string; optionG?: string; optionH?: string;
-  optionI?: string; optionJ?: string; optionK?: string; optionL?: string;
-  optionM?: string; optionN?: string; optionO?: string; optionP?: string;
-  optionQ?: string; optionR?: string; optionS?: string; optionT?: string;
-  optionU?: string; optionV?: string; optionW?: string; optionX?: string;
-  correctAnswer?: string;     // for parts=1: "A"; for parts>1: "A;B;C" or "A,B,C"
+  correctAnswer?: string;
   scoringTag?: string;
 };
+
+const OPTION_KEYS = "ABCDEFGHIJKLMNOPQRSTUVWX".split("");
+
+function buildOptions(r: Row): { key: string; label: string; imageUrl?: string }[] {
+  const opts: { key: string; label: string; imageUrl?: string }[] = [];
+  for (const k of OPTION_KEYS) {
+    const labelVal = r[`option${k}`];
+    const imageVal = r[`option${k}Image`];
+    const hasLabel = labelVal !== undefined && labelVal !== null && String(labelVal).trim() !== "";
+    const hasImage = imageVal !== undefined && imageVal !== null && String(imageVal).trim() !== "";
+    if (hasLabel || hasImage) {
+      const item: { key: string; label: string; imageUrl?: string } = {
+        key: k,
+        label: hasLabel ? String(labelVal) : "",
+      };
+      if (hasImage) item.imageUrl = String(imageVal).trim();
+      opts.push(item);
+    }
+  }
+  return opts;
+}
 
 export async function POST(req: NextRequest) {
   const admin = getAdminFromRequest(req);
@@ -29,63 +45,70 @@ export async function POST(req: NextRequest) {
 
   const buf = Buffer.from(await file.arrayBuffer());
   const wb = XLSX.read(buf, { type: "buffer" });
-  const wsName = wb.SheetNames[0];
-  if (!wsName) return NextResponse.json({ error: "Workbook kosong" }, { status: 400 });
-  const rows = XLSX.utils.sheet_to_json<Row>(wb.Sheets[wsName], { defval: "" });
-
-  // Group by subtestCode
-  const grouped: Record<string, Row[]> = {};
-  for (const r of rows) {
-    if (!r.subtestCode) continue;
-    const code = String(r.subtestCode).trim();
-    if (!grouped[code]) grouped[code] = [];
-    grouped[code].push(r);
+  if (wb.SheetNames.length === 0) {
+    return NextResponse.json({ error: "Workbook kosong" }, { status: 400 });
   }
 
-  const summary: { subtestCode: string; created: number; replaced: number }[] = [];
+  // Resolve subtests once by code; map both code and sheet-name-of-code to subtest.
+  const allSubtests = await prisma.subtest.findMany();
+  const codeToSubtest = new Map(allSubtests.map((s) => [s.code, s]));
+  const sheetNameToCode = new Map(allSubtests.map((s) => [sheetNameForCode(s.code), s.code]));
+
+  // Group rows by subtest code. Support both modes:
+  // (a) per-subtest sheet — sheet name == sheetNameForCode(code), no subtestCode column needed.
+  // (b) legacy single-sheet — every row has a subtestCode column.
+  const grouped: Record<string, Row[]> = {};
+  for (const sheetName of wb.SheetNames) {
+    if (sheetName.toUpperCase() === "PETUNJUK" || sheetName.toUpperCase() === "REFERENSI-SUBTES") continue;
+    const rows = XLSX.utils.sheet_to_json<Row>(wb.Sheets[sheetName], { defval: "" });
+    const codeFromSheet = sheetNameToCode.get(sheetName) || sheetName;
+    for (const r of rows) {
+      const explicit = r.subtestCode ? String(r.subtestCode).trim() : "";
+      const code = explicit || codeFromSheet;
+      if (!code) continue;
+      // Skip rows with empty prompt AND no image AND no options (treat as blank)
+      const opts = buildOptions(r);
+      const promptStr = String(r.prompt ?? "").trim();
+      const imageStr = String(r.imageUrl ?? "").trim();
+      if (!promptStr && !imageStr && opts.length === 0) continue;
+      if (!grouped[code]) grouped[code] = [];
+      grouped[code].push(r);
+    }
+  }
+
+  const summary: { subtestCode: string; created: number; replaced: number; skipped?: boolean }[] = [];
   for (const [code, list] of Object.entries(grouped)) {
-    const subtest = await prisma.subtest.findUnique({ where: { code } });
+    const subtest = codeToSubtest.get(code);
     if (!subtest) {
-      summary.push({ subtestCode: code, created: 0, replaced: 0 });
+      summary.push({ subtestCode: code, created: 0, replaced: 0, skipped: true });
       continue;
     }
-    // Replace strategy: delete existing questions for this subtest then insert.
     const existingCount = await prisma.question.count({ where: { subtestId: subtest.id } });
     await prisma.question.deleteMany({ where: { subtestId: subtest.id } });
 
-    let created = 0;
-    for (const r of list) {
-      const opts: { key: string; label: string }[] = [];
-      const optionKeys = "ABCDEFGHIJKLMNOPQRSTUVWX".split("");
-      for (const k of optionKeys) {
-        const val = (r as Record<string, unknown>)[`option${k}`];
-        if (val !== undefined && val !== null && String(val).trim() !== "") {
-          opts.push({ key: k, label: String(val) });
-        }
-      }
+    const data = list.map((r, i) => {
+      const opts = buildOptions(r);
       const parts = Number(r.parts ?? 1) || 1;
-      let correct: unknown;
       const correctStr = String(r.correctAnswer ?? "").trim();
-      if (parts > 1) {
-        correct = correctStr.split(/[,;|]/).map((s) => s.trim().toUpperCase()).filter(Boolean);
-      } else {
-        correct = correctStr.toUpperCase();
-      }
-      await prisma.question.create({
-        data: {
-          subtestId: subtest.id,
-          questionNo: Number(r.questionNo ?? created + 1) || created + 1,
-          prompt: String(r.prompt ?? ""),
-          imageUrl: r.imageUrl ? String(r.imageUrl) : null,
-          parts,
-          options: opts as unknown as object,
-          correct: correct as object,
-          scoringTag: r.scoringTag ? String(r.scoringTag) : null,
-        },
-      });
-      created += 1;
+      const correct =
+        parts > 1
+          ? correctStr.split(/[,;|]/).map((s) => s.trim().toUpperCase()).filter(Boolean)
+          : correctStr.toUpperCase();
+      return {
+        subtestId: subtest.id,
+        questionNo: Number(r.questionNo ?? i + 1) || i + 1,
+        prompt: String(r.prompt ?? ""),
+        imageUrl: r.imageUrl ? String(r.imageUrl).trim() || null : null,
+        parts,
+        options: opts as unknown as object,
+        correct: correct as unknown as object,
+        scoringTag: r.scoringTag ? String(r.scoringTag) : null,
+      };
+    });
+    if (data.length > 0) {
+      await prisma.question.createMany({ data });
     }
-    summary.push({ subtestCode: code, created, replaced: existingCount });
+    summary.push({ subtestCode: code, created: data.length, replaced: existingCount });
   }
 
   return NextResponse.json({ ok: true, summary });

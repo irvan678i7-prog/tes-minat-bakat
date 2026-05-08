@@ -35,6 +35,56 @@ export type ScoringPayload = {
   recommendations: { majors: string[]; careers: string[] };
 };
 
+type AnswerRow = {
+  selected: unknown;
+  question: {
+    subtestId: string;
+    subtest: { code: string; name: string };
+    parts: number;
+    correct: unknown;
+    scoringTag: string | null;
+  };
+};
+
+type SubWithAnswers = {
+  testKind: "BAKAT" | "MINAT";
+  answers: AnswerRow[];
+};
+
+/**
+ * Compute per-answer correctness in memory (no DB writes). Returns
+ * { isCorrect, partialScore } for each input answer in the same order.
+ */
+function gradeAnswerRows(answers: AnswerRow[]): { isCorrect: boolean; partialScore: number }[] {
+  return answers.map((ans) => {
+    const correct = ans.question.correct as unknown;
+    const selected = ans.selected as unknown;
+    const parts = ans.question.parts || 1;
+    let isCorrect = false;
+    let partialScore = 0;
+    if (parts > 1 && Array.isArray(correct) && Array.isArray(selected)) {
+      let okCount = 0;
+      for (let i = 0; i < correct.length; i++) {
+        const c = String(correct[i] ?? "").trim().toUpperCase();
+        const s = String(selected[i] ?? "").trim().toUpperCase();
+        if (c && c === s) okCount += 1;
+      }
+      partialScore = okCount;
+      isCorrect = okCount === correct.length;
+    } else if (typeof correct === "string" || typeof correct === "number") {
+      const c = String(correct).trim().toUpperCase();
+      const s = String(Array.isArray(selected) ? selected[0] : selected ?? "").trim().toUpperCase();
+      isCorrect = c.length > 0 && c === s;
+      partialScore = isCorrect ? 1 : 0;
+    } else if (correct == null) {
+      const s = String(Array.isArray(selected) ? selected[0] : selected ?? "").trim();
+      isCorrect = s.length > 0;
+      partialScore = isCorrect ? 1 : 0;
+    }
+    return { isCorrect, partialScore };
+  });
+}
+
 export async function scoreSubmission(submissionId: string): Promise<ScoringPayload> {
   const sub = await prisma.submission.findUniqueOrThrow({
     where: { id: submissionId },
@@ -42,27 +92,31 @@ export async function scoreSubmission(submissionId: string): Promise<ScoringPayl
       answers: { include: { question: { include: { subtest: true } } } },
     },
   });
+  return computeScoringPayload(sub);
+}
 
+/**
+ * Compute the full scoring payload from a pre-loaded submission. No DB calls.
+ * Use this from the finish endpoint to avoid an extra round-trip.
+ */
+export function computeScoringPayload(sub: SubWithAnswers): ScoringPayload {
   if (sub.testKind === "BAKAT") return scoreBakat(sub);
   return scoreMinat(sub);
 }
 
-type SubWithAnswers = Awaited<ReturnType<typeof prisma.submission.findUniqueOrThrow>> & {
-  answers: { selected: unknown; partialScore: number; isCorrect: boolean; question: { subtestId: string; subtest: { code: string; name: string }; parts: number; correct: unknown; scoringTag: string | null } }[];
-};
-
 function scoreBakat(sub: SubWithAnswers): ScoringPayload {
-  // Aggregate raw counts per subtest from saved answers (we expect Answer.partialScore
-  // to already store the per-question score for parts>1 questions; otherwise use isCorrect).
+  const grades = gradeAnswerRows(sub.answers);
   const perSubtest: Record<string, { name: string; raw: number; max: number }> = {};
-  for (const ans of sub.answers) {
+  for (let i = 0; i < sub.answers.length; i++) {
+    const ans = sub.answers[i];
+    const g = grades[i];
     const code = ans.question.subtest.code;
     if (!perSubtest[code]) perSubtest[code] = { name: ans.question.subtest.name, raw: 0, max: 0 };
     perSubtest[code].max += Math.max(1, ans.question.parts || 1);
     if (ans.question.parts && ans.question.parts > 1) {
-      perSubtest[code].raw += ans.partialScore || 0;
+      perSubtest[code].raw += g.partialScore || 0;
     } else {
-      perSubtest[code].raw += ans.isCorrect ? 1 : 0;
+      perSubtest[code].raw += g.isCorrect ? 1 : 0;
     }
   }
 
@@ -166,52 +220,4 @@ function scoreMinat(sub: SubWithAnswers): ScoringPayload {
     minat: { bidangScores, topBidang, programs },
     recommendations: { majors, careers },
   };
-}
-
-/** Update Answer rows so partialScore/isCorrect reflect grading vs. correct keys. */
-export async function gradeAnswers(submissionId: string): Promise<void> {
-  const sub = await prisma.submission.findUniqueOrThrow({
-    where: { id: submissionId },
-    include: { answers: { include: { question: true } } },
-  });
-
-  for (const ans of sub.answers) {
-    const correct = ans.question.correct as unknown;
-    const selected = ans.selected as unknown;
-    const parts = ans.question.parts || 1;
-
-    let isCorrect = false;
-    let partialScore = 0;
-
-    if (parts > 1 && Array.isArray(correct) && Array.isArray(selected)) {
-      let okCount = 0;
-      for (let i = 0; i < correct.length; i++) {
-        const c = String(correct[i] ?? "").trim().toUpperCase();
-        const s = String(selected[i] ?? "").trim().toUpperCase();
-        if (c && c === s) okCount += 1;
-      }
-      partialScore = okCount;
-      // Per buku Subtes 4 (Penalaran Urutan): kalau salah satu salah → 0.
-      // Subtes 6 (Tiga Dimensi): hitung benar per slot.
-      if (ans.question.subtestId) {
-        // Use heuristic via subtest code already in question
-      }
-      isCorrect = okCount === correct.length;
-    } else if (typeof correct === "string" || typeof correct === "number") {
-      const c = String(correct).trim().toUpperCase();
-      const s = String(Array.isArray(selected) ? selected[0] : selected ?? "").trim().toUpperCase();
-      isCorrect = c.length > 0 && c === s;
-      partialScore = isCorrect ? 1 : 0;
-    } else if (correct == null) {
-      // No correct key (e.g., MINAT subtests). Mark "answered" as a soft success.
-      const s = String(Array.isArray(selected) ? selected[0] : selected ?? "").trim();
-      isCorrect = s.length > 0;
-      partialScore = isCorrect ? 1 : 0;
-    }
-
-    await prisma.answer.update({
-      where: { id: ans.id },
-      data: { isCorrect, partialScore },
-    });
-  }
 }
