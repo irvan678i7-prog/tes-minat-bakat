@@ -1,65 +1,82 @@
-import Image from "next/image";
+import Link from "next/link";
+import StudentTokenForm from "@/components/StudentTokenForm";
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <div className="min-h-screen flex flex-col">
+      <header className="border-b-4 border-black bg-yellow-300">
+        <div className="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
+          <h1 className="text-2xl md:text-3xl font-black tracking-tight uppercase">
+            TES MINAT &amp; BAKAT <span className="bg-black text-white px-2 ml-1">SMK</span>
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+          <Link href="/admin/login" className="brut-btn brut-btn-black text-sm">
+            ADMIN
+          </Link>
+        </div>
+      </header>
+
+      <main className="flex-1 max-w-6xl mx-auto px-6 py-12 w-full">
+        <section className="mb-10">
+          <h2 className="text-4xl md:text-5xl font-black uppercase leading-tight">
+            Pilih Jenis <span className="bg-pink-400 px-2 border-4 border-black">TES</span>
+          </h2>
+          <p className="mt-3 text-lg font-semibold max-w-2xl">
+            Masukkan token yang diberikan oleh admin / guru pembimbing. Token aktif
+            <span className="brut-tag mx-1">5 menit</span> sejak dibuat.
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+        </section>
+
+        <section className="grid md:grid-cols-2 gap-8">
+          <div className="brut-card" style={{ background: "#22d3ee" }}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-3xl font-black uppercase">Tes Minat</h3>
+              <span className="brut-tag" style={{ background: "#000", color: "#fff" }}>A–H</span>
+            </div>
+            <p className="font-semibold mb-4">
+              Mengukur ketertarikan terhadap bidang tertentu lewat 28 soal pasangan kata,
+              dilanjutkan pemetaan ke 8 program keahlian (A — Komunikasi sampai H — Teknik &amp; Maritim).
+            </p>
+            <ul className="font-semibold mb-4 list-disc list-inside">
+              <li>Tidak ada jawaban benar / salah</li>
+              <li>Hasil: rekomendasi jurusan keahlian</li>
+            </ul>
+            <StudentTokenForm testKind="MINAT" />
+          </div>
+
+          <div className="brut-card" style={{ background: "#facc15" }}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-3xl font-black uppercase">Tes Bakat</h3>
+              <span className="brut-tag" style={{ background: "#000", color: "#fff" }}>9 SUBTES</span>
+            </div>
+            <p className="font-semibold mb-4">
+              Mengukur kemampuan kognitif: penalaran visual, numerik, verbal, urutan, spasial,
+              tiga dimensi, sistematisasi, kosa kata, &amp; figural angka.
+            </p>
+            <ul className="font-semibold mb-4 list-disc list-inside">
+              <li>Tiap subtes punya batas waktu</li>
+              <li>Hasil: profil bakat + IQ prediksi + rekomendasi</li>
+            </ul>
+            <StudentTokenForm testKind="BAKAT" />
+          </div>
+        </section>
+
+        <section className="mt-12 brut-card" style={{ background: "#fff" }}>
+          <h3 className="text-2xl font-black uppercase mb-3">Bagaimana cara mengikuti tes?</h3>
+          <ol className="list-decimal list-inside font-semibold space-y-2">
+            <li>Minta token kepada admin / guru.</li>
+            <li>Pilih jenis tes (Minat atau Bakat) sesuai token.</li>
+            <li>Isi data diri.</li>
+            <li>Kerjakan soal sesuai waktu yang disediakan tiap subtes.</li>
+            <li>Selesai. Hasil akan dilihat &amp; diunduh oleh admin/guru.</li>
+          </ol>
+        </section>
       </main>
+
+      <footer className="border-t-4 border-black bg-black text-white">
+        <div className="max-w-6xl mx-auto px-6 py-4 text-sm font-bold uppercase tracking-wider">
+          © {new Date().getFullYear()} Tes Minat &amp; Bakat — Brutalism Edition
+        </div>
+      </footer>
     </div>
   );
 }
