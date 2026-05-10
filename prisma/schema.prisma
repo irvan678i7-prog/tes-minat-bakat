@@ -59,6 +59,7 @@ model Subtest {
   testKind     TestKind
   name         String
   description  String
+  instructions String     @default("")
   durationSec  Int
   orderIndex   Int        @default(0)
   questions    Question[]
@@ -75,9 +76,10 @@ model Question {
   options       Json
   correct       Json
   scoringTag    String?
+  isExample     Boolean         @default(false)
   createdAt     DateTime        @default(now())
 
-  @@unique([subtestId, questionNo])
+  @@unique([subtestId, questionNo, isExample])
   answers       Answer[]
 }
 

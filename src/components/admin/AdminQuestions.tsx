@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
 
 type Subtest = {
@@ -9,6 +9,7 @@ type Subtest = {
   testKind: "MINAT" | "BAKAT";
   name: string;
   description: string;
+  instructions?: string;
   durationSec: number;
   questionCount: number;
 };
@@ -24,52 +25,43 @@ type Question = {
   options: OptionItem[] | unknown;
   correct: unknown;
   scoringTag: string | null;
+  isExample?: boolean;
 };
 
 export default function AdminQuestions() {
   const [subs, setSubs] = useState<Subtest[]>([]);
-  const [pending, startTransition] = useTransition();
   const [imageBusy, setImageBusy] = useState(false);
   const [previewSub, setPreviewSub] = useState<Subtest | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [editInstrSub, setEditInstrSub] = useState<Subtest | null>(null);
   const imgRef = useRef<HTMLInputElement>(null);
 
-  const load = () => fetch("/api/admin/subtests").then((r) => r.json()).then((d) => setSubs(d.subtests || []));
+  const load = () =>
+    fetch("/api/admin/subtests")
+      .then((r) => r.json())
+      .then((d) => setSubs(d.subtests || []));
   useEffect(() => {
     load();
   }, []);
 
-  const updateDuration = (id: string, durationSec: number) =>
+  const updateField = (id: string, body: Record<string, unknown>) =>
     fetch("/api/admin/subtests", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, durationSec }),
+      body: JSON.stringify({ id, ...body }),
     })
       .then((r) => r.json())
-      .then(() => {
-        toast.success("Waktu diperbarui");
-        load();
-      });
+      .then(() => load());
 
-  const upload = () =>
-    startTransition(async () => {
-      const f = fileRef.current?.files?.[0];
-      if (!f) {
-        toast.error("Pilih file XLSX");
-        return;
-      }
-      const fd = new FormData();
-      fd.append("file", f);
-      const res = await fetch("/api/admin/questions/upload", { method: "POST", body: fd });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(data.error || "Gagal upload");
-        return;
-      }
-      toast.success(`Sukses: ${data.summary.length} subtes diproses`);
-      if (fileRef.current) fileRef.current.value = "";
-      load();
-    });
+  const updateDuration = async (id: string, durationSec: number) => {
+    await updateField(id, { durationSec });
+    toast.success("Waktu diperbarui");
+  };
+
+  const saveInstructions = async (id: string, instructions: string) => {
+    await updateField(id, { instructions });
+    toast.success("Instruksi disimpan");
+    setEditInstrSub(null);
+  };
 
   const uploadImage = async () => {
     const f = imgRef.current?.files?.[0];
@@ -91,43 +83,32 @@ export default function AdminQuestions() {
 
   return (
     <div className="space-y-6">
-      <div className="grid md:grid-cols-2 gap-6">
-        <div className="brut-card" style={{ background: "#facc15" }}>
-          <h3 className="text-xl font-black uppercase mb-2">Upload Soal (XLSX)</h3>
-          <p className="text-sm font-bold mb-2">
-            Template kini berisi <span className="bg-black text-white px-1">satu sheet per subtes</span>{" "}
-            beserta kolom <code>optionAImage</code> dst. untuk gambar pilihan jawaban.
-          </p>
-          <p className="text-xs font-semibold mb-3">
-            Format diganti per subtes (replace). Baris kosong diabaikan.
-          </p>
-          <div className="flex flex-col gap-2">
-            <a href="/api/admin/questions/template" className="brut-btn brut-btn-black inline-block text-center">
-              UNDUH TEMPLATE
-            </a>
-            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="brut-input w-full" />
-            <button onClick={upload} disabled={pending} className="brut-btn">
-              {pending ? "MEMUAT..." : "UPLOAD"}
-            </button>
-          </div>
-        </div>
-
-        <div className="brut-card" style={{ background: "#22d3ee" }}>
-          <h3 className="text-xl font-black uppercase mb-2">Upload Gambar Soal</h3>
-          <p className="text-sm font-bold mb-3">
-            Upload gambar; URL otomatis tersalin ke clipboard. Pakai untuk kolom{" "}
-            <code>imageUrl</code> atau <code>option*Image</code>.
-          </p>
-          <div className="flex flex-col gap-2">
-            <input ref={imgRef} type="file" accept="image/*" className="brut-input w-full" />
-            <button onClick={uploadImage} disabled={imageBusy} className="brut-btn brut-btn-black">
-              {imageBusy ? "MENGUPLOAD..." : "UPLOAD GAMBAR"}
-            </button>
-          </div>
+      <div className="brut-card" style={{ background: "#22d3ee" }}>
+        <h3 className="text-xl font-black uppercase mb-2">Upload Gambar Soal</h3>
+        <p className="text-sm font-bold mb-3">
+          Upload gambar; URL otomatis tersalin ke clipboard. Tempel ke kolom{" "}
+          <code>imageUrl</code> atau <code>option*Image</code> di template XLSX subtes.
+        </p>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input ref={imgRef} type="file" accept="image/*" className="brut-input flex-1" />
+          <button onClick={uploadImage} disabled={imageBusy} className="brut-btn brut-btn-black">
+            {imageBusy ? "MENGUPLOAD..." : "UPLOAD GAMBAR"}
+          </button>
         </div>
       </div>
 
-      <h3 className="text-2xl font-black uppercase mt-2">Daftar Subtes</h3>
+      <div className="brut-card" style={{ background: "#fef3c7" }}>
+        <h3 className="text-xl font-black uppercase mb-1">Bank Soal per Subtes</h3>
+        <p className="text-sm font-bold">
+          Setiap subtes punya <span className="bg-black text-white px-1">TEMPLATE</span>,{" "}
+          <span className="bg-black text-white px-1">UPLOAD</span>,{" "}
+          <span className="bg-black text-white px-1">INSTRUKSI</span>, dan{" "}
+          <span className="bg-black text-white px-1">PREVIEW</span> sendiri. Template setiap subtes
+          memuat sheet <code>CONTOH SOAL</code> dan <code>SOAL</code> yang dipisah—soal contoh
+          ditampilkan ke siswa sebelum timer mulai.
+        </p>
+      </div>
+
       <div className="overflow-x-auto">
         <table className="brut-table">
           <thead>
@@ -158,14 +139,37 @@ export default function AdminQuestions() {
                   <DurationEditor seconds={s.durationSec} onSave={(v) => updateDuration(s.id, v * 60)} />
                 </td>
                 <td>
-                  <button
-                    className="brut-btn brut-btn-black text-xs"
-                    disabled={s.questionCount === 0}
-                    onClick={() => setPreviewSub(s)}
-                    title={s.questionCount === 0 ? "Belum ada soal" : "Preview soal"}
-                  >
-                    PREVIEW
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <a
+                      href={`/api/admin/subtests/${s.id}/template`}
+                      className="brut-btn brut-btn-black text-xs"
+                      title="Unduh template XLSX khusus subtes ini"
+                    >
+                      TEMPLATE
+                    </a>
+                    <SubtestUploader
+                      subtestId={s.id}
+                      onDone={() => {
+                        toast.success("Soal subtes diperbarui");
+                        load();
+                      }}
+                    />
+                    <button
+                      className="brut-btn brut-btn-white text-xs"
+                      onClick={() => setEditInstrSub(s)}
+                      title="Edit instruksi yang tampil ke siswa sebelum timer"
+                    >
+                      INSTRUKSI
+                    </button>
+                    <button
+                      className="brut-btn brut-btn-pink text-xs"
+                      disabled={s.questionCount === 0}
+                      onClick={() => setPreviewSub(s)}
+                      title={s.questionCount === 0 ? "Belum ada soal" : "Preview soal"}
+                    >
+                      PREVIEW
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -173,10 +177,60 @@ export default function AdminQuestions() {
         </table>
       </div>
 
-      {previewSub && (
-        <PreviewModal subtest={previewSub} onClose={() => setPreviewSub(null)} />
+      {previewSub && <PreviewModal subtest={previewSub} onClose={() => setPreviewSub(null)} />}
+      {editInstrSub && (
+        <InstructionsModal
+          subtest={editInstrSub}
+          onClose={() => setEditInstrSub(null)}
+          onSave={(text) => saveInstructions(editInstrSub.id, text)}
+        />
       )}
     </div>
+  );
+}
+
+function SubtestUploader({ subtestId, onDone }: { subtestId: string; onDone: () => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+
+  const onChange = async () => {
+    const f = inputRef.current?.files?.[0];
+    if (!f) return;
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      const res = await fetch(`/api/admin/subtests/${subtestId}/upload`, {
+        method: "POST",
+        body: fd,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "Gagal upload");
+        return;
+      }
+      const soal = data.soal?.created ?? 0;
+      const contoh = data.contoh?.created ?? 0;
+      toast.success(`Sukses: ${soal} soal + ${contoh} contoh`);
+      onDone();
+    } finally {
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  };
+
+  return (
+    <label className={`brut-btn text-xs cursor-pointer ${busy ? "opacity-60" : ""}`}>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".xlsx,.xls,.csv"
+        className="hidden"
+        onChange={onChange}
+        disabled={busy}
+      />
+      {busy ? "MEMUAT..." : "UPLOAD"}
+    </label>
   );
 }
 
@@ -208,6 +262,58 @@ function DurationEditor({ seconds, onSave }: { seconds: number; onSave: (mins: n
   );
 }
 
+function InstructionsModal({
+  subtest,
+  onClose,
+  onSave,
+}: {
+  subtest: Subtest;
+  onClose: () => void;
+  onSave: (text: string) => void;
+}) {
+  const [text, setText] = useState(subtest.instructions || "");
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/60 flex items-start md:items-center justify-center p-2 md:p-6 overflow-y-auto"
+      onClick={onClose}
+    >
+      <div
+        className="brut-card bg-white w-full max-w-2xl my-4"
+        style={{ background: "#fff" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-3 gap-3">
+          <div>
+            <p className="text-xs font-black uppercase">{subtest.testKind} • {subtest.code}</p>
+            <h3 className="text-2xl font-black uppercase">Instruksi: {subtest.name}</h3>
+          </div>
+          <button className="brut-btn brut-btn-black" onClick={onClose}>
+            TUTUP
+          </button>
+        </div>
+        <p className="text-sm font-bold mb-2">
+          Tampil ke siswa sebelum timer mulai. Pakai untuk menjelaskan cara kerja subtes,
+          contoh tipe soal, dan strategi pengerjaan.
+        </p>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={8}
+          maxLength={4000}
+          className="brut-input w-full font-semibold"
+          placeholder="Contoh: Pada subtes ini Anda akan diminta untuk… Pilih jawaban yang paling tepat. Setiap soal hanya boleh dijawab satu kali."
+        />
+        <div className="flex justify-between items-center mt-3">
+          <span className="text-xs font-bold opacity-70">{text.length}/4000</span>
+          <button className="brut-btn brut-btn-pink" onClick={() => onSave(text)}>
+            SIMPAN INSTRUKSI
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PreviewModal({ subtest, onClose }: { subtest: Subtest; onClose: () => void }) {
   const [questions, setQuestions] = useState<Question[] | null>(null);
 
@@ -227,6 +333,8 @@ function PreviewModal({ subtest, onClose }: { subtest: Subtest; onClose: () => v
   }, [subtest.id]);
 
   const loading = questions === null;
+  const examples = (questions || []).filter((q) => q.isExample);
+  const real = (questions || []).filter((q) => !q.isExample);
 
   return (
     <div
@@ -254,9 +362,26 @@ function PreviewModal({ subtest, onClose }: { subtest: Subtest; onClose: () => v
         )}
         {!loading && questions && questions.length > 0 && (
           <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-            {questions.map((q) => (
-              <QuestionPreview key={q.id} q={q} />
-            ))}
+            {examples.length > 0 && (
+              <div>
+                <h4 className="text-lg font-black uppercase mb-2">Contoh Soal ({examples.length})</h4>
+                <div className="space-y-3">
+                  {examples.map((q) => (
+                    <QuestionPreview key={q.id} q={q} />
+                  ))}
+                </div>
+              </div>
+            )}
+            {real.length > 0 && (
+              <div>
+                <h4 className="text-lg font-black uppercase mb-2">Soal ({real.length})</h4>
+                <div className="space-y-3">
+                  {real.map((q) => (
+                    <QuestionPreview key={q.id} q={q} />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -276,10 +401,10 @@ function QuestionPreview({ q }: { q: Question }) {
         : [],
   );
   return (
-    <div className="brut-card" style={{ background: "#f5f5f5" }}>
+    <div className="brut-card" style={{ background: q.isExample ? "#e0f2fe" : "#f5f5f5" }}>
       <div className="flex items-baseline gap-2 mb-2 flex-wrap">
-        <span className="brut-tag" style={{ background: "#facc15" }}>
-          NO {q.questionNo}
+        <span className="brut-tag" style={{ background: q.isExample ? "#000" : "#facc15", color: q.isExample ? "#fff" : "#000" }}>
+          {q.isExample ? "CONTOH" : "NO"} {q.questionNo}
         </span>
         {q.parts > 1 && (
           <span className="brut-tag" style={{ background: "#22d3ee" }}>

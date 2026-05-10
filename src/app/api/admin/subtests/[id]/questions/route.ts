@@ -11,7 +11,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   const qs = await prisma.question.findMany({
     where: { subtestId: id },
-    orderBy: { questionNo: "asc" },
+    orderBy: [{ isExample: "desc" }, { questionNo: "asc" }],
     select: {
       id: true,
       questionNo: true,
@@ -21,6 +21,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       options: true,
       correct: true,
       scoringTag: true,
+      isExample: true,
     },
   });
   return NextResponse.json({

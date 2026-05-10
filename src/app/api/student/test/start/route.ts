@@ -27,9 +27,16 @@ export async function GET(req: NextRequest) {
   const answeredQuestionIds = new Set(sub.answers.map((a) => a.questionId));
   const subtestProgress = await Promise.all(
     subtests.map(async (s) => {
-      const total = await prisma.question.count({ where: { subtestId: s.id } });
+      // Only count non-example questions (isExample=false) toward progress.
+      const total = await prisma.question.count({
+        where: { subtestId: s.id, isExample: false },
+      });
       const answered = await prisma.question.count({
-        where: { subtestId: s.id, id: { in: Array.from(answeredQuestionIds) } },
+        where: {
+          subtestId: s.id,
+          isExample: false,
+          id: { in: Array.from(answeredQuestionIds) },
+        },
       });
       return { ...s, total, answered, done: total > 0 && answered >= total };
     }),
@@ -47,6 +54,7 @@ export async function GET(req: NextRequest) {
       code: s.code,
       name: s.name,
       description: s.description,
+      instructions: s.instructions ?? "",
       durationSec: s.durationSec,
       total: s.total,
       answered: s.answered,
@@ -75,7 +83,12 @@ export async function POST(req: NextRequest) {
   }
 
   const seed = `${sub.randomSeed}:${subtest.code}`;
-  const questions = shuffle(subtest.questions, seed).map((q) => {
+  const realQuestions = subtest.questions.filter((q) => !q.isExample);
+  const exampleQuestions = subtest.questions
+    .filter((q) => q.isExample)
+    .sort((a, b) => a.questionNo - b.questionNo);
+
+  const questions = shuffle(realQuestions, seed).map((q) => {
     // Optionally shuffle option order too — but careful for letter-keyed answers.
     // We do NOT shuffle options because keys (A/B/C..) carry semantic meaning
     // for some subtests (e.g. spasial B/S, minat letters).
@@ -89,11 +102,21 @@ export async function POST(req: NextRequest) {
     };
   });
 
-  // Existing saved answers (for resume)
+  const examples = exampleQuestions.map((q) => ({
+    id: q.id,
+    questionNo: q.questionNo,
+    prompt: q.prompt,
+    imageUrl: q.imageUrl,
+    parts: q.parts,
+    options: q.options,
+    correct: q.correct,
+  }));
+
+  // Existing saved answers (for resume) — only for real questions.
   const existing = await prisma.answer.findMany({
     where: {
       submissionId: sub.id,
-      questionId: { in: subtest.questions.map((q) => q.id) },
+      questionId: { in: realQuestions.map((q) => q.id) },
     },
   });
   const answersMap: Record<string, unknown> = {};
@@ -105,9 +128,11 @@ export async function POST(req: NextRequest) {
       code: subtest.code,
       name: subtest.name,
       description: subtest.description,
+      instructions: subtest.instructions ?? "",
       durationSec: subtest.durationSec,
     },
     questions,
+    examples,
     existingAnswers: answersMap,
   });
 }
