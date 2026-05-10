@@ -17,9 +17,14 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
     include: { questions: true },
   });
   if (!subtest || subtest.testKind !== sub.testKind) redirect("/test");
-  if (subtest.questions.length === 0) redirect("/test");
 
-  const questions = shuffle(subtest.questions, `${sub.randomSeed}:${subtest.code}`).map((q) => ({
+  const realQuestions = subtest.questions.filter((q) => !q.isExample);
+  const exampleQuestions = subtest.questions
+    .filter((q) => q.isExample)
+    .sort((a, b) => a.questionNo - b.questionNo);
+  if (realQuestions.length === 0) redirect("/test");
+
+  const questions = shuffle(realQuestions, `${sub.randomSeed}:${subtest.code}`).map((q) => ({
     id: q.id,
     questionNo: q.questionNo,
     prompt: q.prompt,
@@ -28,8 +33,18 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
     options: q.options,
   }));
 
+  const examples = exampleQuestions.map((q) => ({
+    id: q.id,
+    questionNo: q.questionNo,
+    prompt: q.prompt,
+    imageUrl: q.imageUrl,
+    parts: q.parts,
+    options: q.options,
+    correct: q.correct,
+  }));
+
   const existing = await prisma.answer.findMany({
-    where: { submissionId: sub.id, questionId: { in: subtest.questions.map((q) => q.id) } },
+    where: { submissionId: sub.id, questionId: { in: realQuestions.map((q) => q.id) } },
   });
   const existingMap: Record<string, unknown> = {};
   for (const a of existing) existingMap[a.questionId] = a.selected;
@@ -40,9 +55,11 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
         code: subtest.code,
         name: subtest.name,
         description: subtest.description,
+        instructions: subtest.instructions,
         durationSec: subtest.durationSec,
       }}
       questions={questions}
+      examples={examples}
       existingAnswers={existingMap}
     />
   );

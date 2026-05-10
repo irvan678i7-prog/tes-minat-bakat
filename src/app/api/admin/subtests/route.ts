@@ -17,6 +17,7 @@ export async function GET(req: NextRequest) {
       testKind: s.testKind,
       name: s.name,
       description: s.description,
+      instructions: s.instructions ?? "",
       durationSec: s.durationSec,
       orderIndex: s.orderIndex,
       questionCount: s._count.questions,
@@ -28,6 +29,7 @@ const PatchBody = z.object({
   id: z.string().min(1),
   durationSec: z.number().int().min(30).max(60 * 60).optional(),
   description: z.string().optional(),
+  instructions: z.string().max(4000).optional(),
   name: z.string().optional(),
 });
 
