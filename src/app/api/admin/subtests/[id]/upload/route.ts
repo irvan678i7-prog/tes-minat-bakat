@@ -35,6 +35,22 @@ function buildOptions(r: Row): { key: string; label: string; imageUrl?: string }
   return opts;
 }
 
+// MINAT: opsi di template selalu A,B (sepasang). scoringTag (mis. "A,B" atau
+// "B,C") menentukan huruf BIDANG/PROGRAM yang sebenarnya dipilih siswa. Kita
+// remap key opsi sesuai scoringTag supaya scoring tinggal hitung huruf yang
+// dipilih = huruf bidang/program.
+function remapMinatOptions(
+  opts: { key: string; label: string; imageUrl?: string }[],
+  scoringTag: string,
+): { key: string; label: string; imageUrl?: string }[] {
+  const tags = scoringTag
+    .split(/[,;|/]/)
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean);
+  if (tags.length < 2 || opts.length < 2) return opts;
+  return opts.map((o, i) => ({ ...o, key: tags[i] ?? o.key }));
+}
+
 function resolveInputMode(r: Row, fallback: InputMode): InputMode {
   const raw = String(r.inputMode ?? "").trim().toUpperCase();
   if (raw === "TEXT") return "TEXT";
@@ -47,6 +63,7 @@ function rowsToData(
   subtestId: string,
   isExample: boolean,
   fallbackMode: InputMode,
+  isMinat: boolean,
 ): {
   subtestId: string;
   questionNo: number;
@@ -61,7 +78,9 @@ function rowsToData(
 }[] {
   return list.map((r, i) => {
     const inputMode = resolveInputMode(r, fallbackMode);
-    const opts = inputMode === "TEXT" ? [] : buildOptions(r);
+    const rawOpts = inputMode === "TEXT" ? [] : buildOptions(r);
+    const tag = r.scoringTag ? String(r.scoringTag).trim() : "";
+    const opts = isMinat && rawOpts.length > 0 && tag ? remapMinatOptions(rawOpts, tag) : rawOpts;
     const parts = Number(r.parts ?? 1) || 1;
     const correctStr = String(r.correctAnswer ?? "").trim();
     let correct: string | string[];
@@ -148,9 +167,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   const seed = [...BAKAT_SUBTESTS, ...MINAT_SUBTESTS].find((x) => x.code === sub.code);
   const fallbackMode: InputMode = seed?.defaultInputMode ?? "CHOICE";
+  const isMinat = sub.testKind === "MINAT";
 
-  const soalData = rowsToData(soalRows, sub.id, false, fallbackMode);
-  const contohData = rowsToData(contohRows, sub.id, true, fallbackMode);
+  const soalData = rowsToData(soalRows, sub.id, false, fallbackMode, isMinat);
+  const contohData = rowsToData(contohRows, sub.id, true, fallbackMode, isMinat);
 
   // Cascade-replace per (subtestId, isExample) bucket. Existing reports stay
   // intact because Result.payload is already computed and stored as JSON.
