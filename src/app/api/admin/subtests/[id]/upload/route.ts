@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { prisma } from "@/lib/db";
 import { getAdminFromRequest } from "@/lib/auth";
+import { BAKAT_SUBTESTS, MINAT_SUBTESTS, type InputMode } from "@/lib/test-config";
 
 type Row = Record<string, unknown> & {
   questionNo?: number | string;
   prompt?: string;
   imageUrl?: string;
   parts?: number | string;
+  inputMode?: string;
   correctAnswer?: string;
   scoringTag?: string;
 };
@@ -33,10 +35,18 @@ function buildOptions(r: Row): { key: string; label: string; imageUrl?: string }
   return opts;
 }
 
+function resolveInputMode(r: Row, fallback: InputMode): InputMode {
+  const raw = String(r.inputMode ?? "").trim().toUpperCase();
+  if (raw === "TEXT") return "TEXT";
+  if (raw === "CHOICE") return "CHOICE";
+  return fallback;
+}
+
 function rowsToData(
   list: Row[],
   subtestId: string,
   isExample: boolean,
+  fallbackMode: InputMode,
 ): {
   subtestId: string;
   questionNo: number;
@@ -47,15 +57,26 @@ function rowsToData(
   correct: object;
   scoringTag: string | null;
   isExample: boolean;
+  inputMode: string;
 }[] {
   return list.map((r, i) => {
-    const opts = buildOptions(r);
+    const inputMode = resolveInputMode(r, fallbackMode);
+    const opts = inputMode === "TEXT" ? [] : buildOptions(r);
     const parts = Number(r.parts ?? 1) || 1;
     const correctStr = String(r.correctAnswer ?? "").trim();
-    const correct =
-      parts > 1
-        ? correctStr.split(/[,;|]/).map((s) => s.trim().toUpperCase()).filter(Boolean)
-        : correctStr.toUpperCase();
+    let correct: string | string[];
+    if (inputMode === "TEXT") {
+      // For TEXT mode, store raw strings (case preserved). Comparison normalizes later.
+      correct =
+        parts > 1
+          ? correctStr.split(/[,;|]/).map((s) => s.trim()).filter(Boolean)
+          : correctStr;
+    } else {
+      correct =
+        parts > 1
+          ? correctStr.split(/[,;|]/).map((s) => s.trim().toUpperCase()).filter(Boolean)
+          : correctStr.toUpperCase();
+    }
     return {
       subtestId,
       questionNo: Number(r.questionNo ?? i + 1) || i + 1,
@@ -66,6 +87,7 @@ function rowsToData(
       correct: correct as unknown as object,
       scoringTag: r.scoringTag ? String(r.scoringTag) : null,
       isExample,
+      inputMode,
     };
   });
 }
@@ -74,7 +96,8 @@ function nonEmpty(r: Row): boolean {
   const opts = buildOptions(r);
   const promptStr = String(r.prompt ?? "").trim();
   const imageStr = String(r.imageUrl ?? "").trim();
-  return !!(promptStr || imageStr || opts.length > 0);
+  const correctStr = String(r.correctAnswer ?? "").trim();
+  return !!(promptStr || imageStr || opts.length > 0 || correctStr);
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -123,8 +146,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     where: { subtestId: sub.id, isExample: true },
   });
 
-  const soalData = rowsToData(soalRows, sub.id, false);
-  const contohData = rowsToData(contohRows, sub.id, true);
+  const seed = [...BAKAT_SUBTESTS, ...MINAT_SUBTESTS].find((x) => x.code === sub.code);
+  const fallbackMode: InputMode = seed?.defaultInputMode ?? "CHOICE";
+
+  const soalData = rowsToData(soalRows, sub.id, false, fallbackMode);
+  const contohData = rowsToData(contohRows, sub.id, true, fallbackMode);
 
   // Cascade-replace per (subtestId, isExample) bucket. Existing reports stay
   // intact because Result.payload is already computed and stored as JSON.

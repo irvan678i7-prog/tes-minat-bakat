@@ -13,6 +13,8 @@ type Question = {
   imageUrl: string | null;
   parts: number;
   options: unknown;
+  inputMode?: "CHOICE" | "TEXT";
+  partLabels?: string[];
 };
 
 type ExampleQuestion = Question & { correct: unknown };
@@ -35,6 +37,16 @@ function correctSetFor(q: ExampleQuestion): Set<string> {
     return new Set([String(q.correct).toUpperCase()]);
   }
   return new Set();
+}
+
+function correctTextFor(q: ExampleQuestion): string[] {
+  if (Array.isArray(q.correct)) return q.correct.map((x) => String(x));
+  if (q.correct != null && String(q.correct).trim() !== "") return [String(q.correct)];
+  return [];
+}
+
+function partLabel(q: { parts: number; partLabels?: string[] }, partIdx: number): string {
+  return q.partLabels?.[partIdx] ?? String(partIdx + 1);
 }
 
 export default function SubtestRunner({
@@ -138,6 +150,48 @@ export default function SubtestRunner({
     next[partIdx] = key;
     save(q.id, next);
   };
+
+  // Local buffer for in-progress text typing per question; commits to server
+  // on blur or after a 500ms debounce.
+  const [typingBuf, setTypingBuf] = useState<Record<string, string | string[]>>({});
+
+  const handleTypeSingle = (val: string) => {
+    if (!q) return;
+    setTypingBuf((b) => ({ ...b, [q.id]: val }));
+    setAnswers((s) => ({ ...s, [q.id]: val }));
+  };
+
+  const handleTypePart = (partIdx: number, val: string) => {
+    if (!q) return;
+    const cur =
+      (typingBuf[q.id] as string[]) ||
+      ((answers[q.id] as string[]) || []).slice();
+    while (cur.length < q.parts) cur.push("");
+    cur[partIdx] = val;
+    setTypingBuf((b) => ({ ...b, [q.id]: cur.slice() }));
+    setAnswers((s) => ({ ...s, [q.id]: cur.slice() }));
+  };
+
+  const commitText = () => {
+    if (!q) return;
+    const v = typingBuf[q.id];
+    if (v == null) return;
+    save(q.id, v);
+    setTypingBuf((b) => {
+      const { [q.id]: _ignored, ...rest } = b;
+      void _ignored;
+      return rest;
+    });
+  };
+
+  // Auto-commit text answers 600ms after last keystroke for the current question
+  useEffect(() => {
+    if (!q) return;
+    if (typingBuf[q.id] == null) return;
+    const id = setTimeout(() => commitText(), 600);
+    return () => clearTimeout(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typingBuf, q?.id]);
 
   const goNext = () => setIdx((i) => Math.min(i + 1, questions.length - 1));
   const goPrev = () => setIdx((i) => Math.max(i - 1, 0));
@@ -288,7 +342,55 @@ export default function SubtestRunner({
             </div>
           )}
 
-          {q.parts <= 1 ? (
+          {q.inputMode === "TEXT" ? (
+            q.parts <= 1 ? (
+              <div className="mt-4">
+                <label className="text-sm font-black uppercase block mb-2">Jawaban Anda</label>
+                <input
+                  type="text"
+                  inputMode="text"
+                  autoComplete="off"
+                  value={
+                    (typingBuf[q.id] as string) ??
+                    ((answers[q.id] as string) || "")
+                  }
+                  onChange={(e) => handleTypeSingle(e.target.value)}
+                  onBlur={commitText}
+                  placeholder="Ketik jawaban di sini"
+                  className="w-full border-4 border-black px-4 py-3 text-xl font-bold bg-white"
+                />
+              </div>
+            ) : (
+              <div className="space-y-3 mt-4">
+                {Array.from({ length: q.parts }).map((_, partIdx) => {
+                  const buf = typingBuf[q.id] as string[] | undefined;
+                  const arr = (answers[q.id] as string[]) || [];
+                  const value = (buf?.[partIdx] ?? arr[partIdx] ?? "");
+                  return (
+                    <div
+                      key={partIdx}
+                      className="brut-card"
+                      style={{ background: "#facc15" }}
+                    >
+                      <label className="text-sm font-black uppercase mb-2 block">
+                        Bagian {partLabel(q, partIdx)}
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="text"
+                        autoComplete="off"
+                        value={value}
+                        onChange={(e) => handleTypePart(partIdx, e.target.value)}
+                        onBlur={commitText}
+                        placeholder={`Jawaban bagian ${partLabel(q, partIdx)}`}
+                        className="w-full border-4 border-black px-3 py-2 text-lg font-bold bg-white"
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )
+          ) : q.parts <= 1 ? (
             <div className="grid sm:grid-cols-2 gap-3 mt-4">
               {opts.map((o) => {
                 const sel = answers[q.id] === o.key;
@@ -315,7 +417,7 @@ export default function SubtestRunner({
                 const value = cur[partIdx] || "";
                 return (
                   <div key={partIdx} className="brut-card" style={{ background: "#facc15" }}>
-                    <div className="text-sm font-black uppercase mb-2">Bagian {partIdx + 1}</div>
+                    <div className="text-sm font-black uppercase mb-2">Bagian {partLabel(q, partIdx)}</div>
                     <div className="flex flex-wrap gap-2">
                       {opts.map((o) => {
                         const sel = value === o.key;
@@ -390,6 +492,8 @@ function ExamplePreview({ q }: { q: ExampleQuestion }) {
     (o) => o && typeof o === "object",
   );
   const correctSet = correctSetFor(q);
+  const correctTexts = correctTextFor(q);
+  const isText = q.inputMode === "TEXT";
 
   return (
     <div className="border-2 border-black p-3 bg-white">
@@ -397,6 +501,11 @@ function ExamplePreview({ q }: { q: ExampleQuestion }) {
         <span className="brut-tag" style={{ background: "#000", color: "#fff" }}>
           CONTOH {q.questionNo}
         </span>
+        {isText ? (
+          <span className="brut-tag" style={{ background: "#a3e635" }}>
+            JAWABAN ISIAN
+          </span>
+        ) : null}
         {q.parts > 1 && (
           <span className="brut-tag" style={{ background: "#facc15" }}>
             {q.parts} bagian
@@ -416,7 +525,29 @@ function ExamplePreview({ q }: { q: ExampleQuestion }) {
           />
         </div>
       )}
-      {opts.length > 0 && (
+      {isText && (
+        <div className="mt-2 border-2 border-black p-2" style={{ background: "#fff7ed" }}>
+          <div className="text-xs font-black uppercase mb-1">Kunci Jawaban (Contoh)</div>
+          {q.parts > 1 ? (
+            <div className="flex flex-wrap gap-2">
+              {Array.from({ length: q.parts }).map((_, i) => (
+                <span
+                  key={i}
+                  className="brut-tag"
+                  style={{ background: "#a3e635" }}
+                >
+                  Bagian {partLabel(q, i)} = {correctTexts[i] || "—"}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <span className="brut-tag" style={{ background: "#a3e635" }}>
+              {correctTexts[0] || "—"}
+            </span>
+          )}
+        </div>
+      )}
+      {!isText && opts.length > 0 && (
         <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {opts.map((o) => {
             const isCorrect = correctSet.has(String(o.key).toUpperCase());

@@ -80,21 +80,34 @@ export default function AdminPanduan() {
               </td>
             </tr>
             <tr>
-              <td><Code>optionA, optionB, …</Code></td>
+              <td><Code>inputMode</Code></td>
               <td>Ya</td>
-              <td>Teks pilihan jawaban.</td>
+              <td>
+                <Code>CHOICE</Code> = pilihan ganda (siswa pilih A/B/C…). <Code>TEXT</Code> ={" "}
+                soal isian (siswa <strong>mengetik</strong> jawaban). Default per subtes sudah
+                tertulis di sheet <Code>PETUNJUK</Code>.
+              </td>
+            </tr>
+            <tr>
+              <td><Code>optionA, optionB, …</Code></td>
+              <td>Khusus CHOICE</td>
+              <td>Teks pilihan jawaban. Untuk <Code>inputMode=TEXT</Code>, kolom ini diabaikan.</td>
             </tr>
             <tr>
               <td><Code>optionAImage, optionBImage, …</Code></td>
               <td>Opsional</td>
-              <td>URL gambar untuk soal visual / pilihan jawaban gambar.</td>
+              <td>URL gambar untuk soal visual / pilihan jawaban gambar (CHOICE saja).</td>
             </tr>
             <tr>
               <td><Code>correctAnswer</Code></td>
               <td>Bakat: ya<br />Minat: kosong</td>
               <td>
-                Untuk Bakat: huruf kunci (<Code>A</Code>). Multi-bagian: pisah pakai{" "}
-                <Code>;</Code> (<Code>A;B;C</Code>). Untuk Minat: <strong>biarkan kosong</strong>.
+                <strong>CHOICE</strong>: huruf kunci (<Code>A</Code>). Multi-bagian: pisah pakai{" "}
+                <Code>;</Code> (<Code>A;B;C</Code>).{" "}
+                <strong>TEXT</strong>: ketik jawaban yang diharapkan (mis. <Code>42</Code>,{" "}
+                <Code>B</Code>, atau multi-bagian <Code>5;9</Code> / <Code>A;B;C</Code>).
+                Pencocokan abaikan huruf besar/kecil &amp; spasi. Untuk Minat:{" "}
+                <strong>biarkan kosong</strong>.
               </td>
             </tr>
             <tr>
@@ -226,20 +239,93 @@ export default function AdminPanduan() {
         </ul>
       </Section>
 
-      <Section title="6. Contoh Pengisian Singkat" color="#a3e635">
+      <Section title="6. Subtes dengan Soal Isian (TEXT)" color="#fde68a">
         <p className="text-sm font-semibold mb-2">
-          Subtes <Code>BAKAT_2_NUMERIK</Code>, soal nomor 1: lanjutkan deret 2, 4, 8, 16, …
+          Beberapa subtes Bakat tidak cocok dengan pilihan ganda — siswa
+          <strong> mengetik</strong> jawabannya. Pada subtes berikut kolom <Code>inputMode</Code>{" "}
+          default-nya <Code>TEXT</Code>, kolom <Code>option*</Code> diabaikan, dan{" "}
+          <Code>correctAnswer</Code> berisi jawaban yang diharapkan:
+        </p>
+        <table className="brut-table text-sm mb-3">
+          <thead>
+            <tr>
+              <th>Subtes</th>
+              <th>Format Jawaban</th>
+              <th>Contoh <Code>correctAnswer</Code></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><Code>BAKAT_2_NUMERIK</Code> — Penalaran Numerik</td>
+              <td>Ketik angka yang hilang.</td>
+              <td><Code>42</Code></td>
+            </tr>
+            <tr>
+              <td><Code>BAKAT_4_URUTAN</Code> — Penalaran Urutan</td>
+              <td>2 isian (<Code>parts=2</Code>): bagian 1 &amp; 2.</td>
+              <td><Code>5;9</Code></td>
+            </tr>
+            <tr>
+              <td><Code>BAKAT_6_3DIMENSI</Code> — Tiga Dimensi</td>
+              <td>3 isian (<Code>parts=3</Code>): sisi I, II, III.</td>
+              <td><Code>A;B;C</Code></td>
+            </tr>
+            <tr>
+              <td><Code>BAKAT_7_SISTEMATISASI</Code> — Sistematisasi</td>
+              <td>Ketik huruf jawaban.</td>
+              <td><Code>B</Code></td>
+            </tr>
+            <tr>
+              <td><Code>BAKAT_9_FIGURAL</Code> — Figural Angka</td>
+              <td>Ketik angka jawaban.</td>
+              <td><Code>23</Code></td>
+            </tr>
+          </tbody>
+        </table>
+        <p className="text-xs font-bold opacity-80">
+          Pencocokan jawaban siswa abaikan huruf besar/kecil dan spasi tambahan{" "}
+          (mis. siswa ketik <Code>b</Code> tetap dianggap benar untuk kunci <Code>B</Code>).
+        </p>
+      </Section>
+
+      <Section title="7. Contoh Pengisian Singkat" color="#a3e635">
+        <p className="text-sm font-semibold mb-2">
+          Subtes <Code>BAKAT_8_KOSAKATA</Code> (CHOICE), soal nomor 1:
+        </p>
+        <pre className="text-xs bg-black text-white p-3 overflow-x-auto border-4 border-black">
+{`questionNo: 1
+prompt:     "Sinonim dari kata 'cermat'?"
+imageUrl:   (kosong)
+parts:      1
+inputMode:  CHOICE
+optionA:    "ceroboh"
+optionB:    "teliti"
+optionC:    "cepat"
+optionD:    "lambat"
+correctAnswer: "B"
+scoringTag: (kosong)`}
+        </pre>
+        <p className="text-sm font-semibold mt-3 mb-2">
+          Subtes <Code>BAKAT_2_NUMERIK</Code> (TEXT — isian), soal nomor 1:
         </p>
         <pre className="text-xs bg-black text-white p-3 overflow-x-auto border-4 border-black">
 {`questionNo: 1
 prompt:     "Lanjutkan deret: 2, 4, 8, 16, …"
-imageUrl:   (kosong)
 parts:      1
-optionA:    "24"
-optionB:    "30"
-optionC:    "32"
-optionD:    "64"
-correctAnswer: "C"
+inputMode:  TEXT
+correctAnswer: "32"
+scoringTag: (kosong)`}
+        </pre>
+        <p className="text-sm font-semibold mt-3 mb-2">
+          Subtes <Code>BAKAT_6_3DIMENSI</Code> (TEXT, 3 sisi I/II/III):
+        </p>
+        <pre className="text-xs bg-black text-white p-3 overflow-x-auto border-4 border-black">
+{`questionNo: 1
+prompt:     "Tentukan jawaban untuk sisi I, II, III"
+imageUrl:   "https://.../balok.png"
+parts:      3
+inputMode:  TEXT
+correctAnswer: "A;B;C"
 scoringTag: (kosong)`}
         </pre>
         <p className="text-sm font-semibold mt-3 mb-2">
@@ -249,6 +335,7 @@ scoringTag: (kosong)`}
 {`questionNo: 1
 prompt:     "Pilih satu kata yang paling Anda sukai."
 parts:      1
+inputMode:  CHOICE
 optionA:    "Memimpin diskusi kelas"
 optionB:    "Menanam bunga"
 correctAnswer: (kosong)

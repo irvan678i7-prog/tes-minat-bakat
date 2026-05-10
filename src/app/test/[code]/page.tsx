@@ -3,6 +3,7 @@ import { getStudentFromCookies } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { shuffle } from "@/lib/random";
 import SubtestRunner from "@/components/student/SubtestRunner";
+import { BAKAT_SUBTESTS, MINAT_SUBTESTS } from "@/lib/test-config";
 
 export default async function SubtestPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
@@ -24,6 +25,11 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
     .sort((a, b) => a.questionNo - b.questionNo);
   if (realQuestions.length === 0) redirect("/test");
 
+  const seedCfg = [...BAKAT_SUBTESTS, ...MINAT_SUBTESTS].find(
+    (x) => x.code === subtest.code,
+  );
+  const partLabels = seedCfg?.partLabels ?? [];
+
   const questions = shuffle(realQuestions, `${sub.randomSeed}:${subtest.code}`).map((q) => ({
     id: q.id,
     questionNo: q.questionNo,
@@ -31,6 +37,8 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
     imageUrl: q.imageUrl,
     parts: q.parts,
     options: q.options,
+    inputMode: (q.inputMode === "TEXT" ? "TEXT" : "CHOICE") as "CHOICE" | "TEXT",
+    partLabels,
   }));
 
   const examples = exampleQuestions.map((q) => ({
@@ -41,6 +49,8 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
     parts: q.parts,
     options: q.options,
     correct: q.correct,
+    inputMode: (q.inputMode === "TEXT" ? "TEXT" : "CHOICE") as "CHOICE" | "TEXT",
+    partLabels,
   }));
 
   const existing = await prisma.answer.findMany({

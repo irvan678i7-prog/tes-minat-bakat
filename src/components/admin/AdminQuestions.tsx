@@ -26,6 +26,7 @@ type Question = {
   correct: unknown;
   scoringTag: string | null;
   isExample?: boolean;
+  inputMode?: "CHOICE" | "TEXT" | string;
 };
 
 export default function AdminQuestions() {
@@ -400,12 +401,23 @@ function QuestionPreview({ q }: { q: Question }) {
         ? [String(q.correct).toUpperCase()]
         : [],
   );
+  const isText = q.inputMode === "TEXT";
+  const correctTexts: string[] = Array.isArray(q.correct)
+    ? q.correct.map((x) => String(x))
+    : q.correct != null && String(q.correct).trim() !== ""
+      ? [String(q.correct)]
+      : [];
   return (
     <div className="brut-card" style={{ background: q.isExample ? "#e0f2fe" : "#f5f5f5" }}>
       <div className="flex items-baseline gap-2 mb-2 flex-wrap">
         <span className="brut-tag" style={{ background: q.isExample ? "#000" : "#facc15", color: q.isExample ? "#fff" : "#000" }}>
           {q.isExample ? "CONTOH" : "NO"} {q.questionNo}
         </span>
+        {isText && (
+          <span className="brut-tag" style={{ background: "#a3e635" }}>
+            ISIAN
+          </span>
+        )}
         {q.parts > 1 && (
           <span className="brut-tag" style={{ background: "#22d3ee" }}>
             {q.parts} bagian
@@ -426,36 +438,59 @@ function QuestionPreview({ q }: { q: Question }) {
           className="border-2 border-black mb-2 max-h-60"
         />
       )}
-      <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        {opts.map((o) => {
-          const isCorrect = correctSet.has(String(o.key).toUpperCase());
-          return (
-            <li
-              key={o.key}
-              className="border-2 border-black p-2 flex gap-2 items-start"
-              style={{ background: isCorrect ? "#a3e635" : "#fff" }}
-            >
-              <span className="font-black">{o.key}.</span>
-              <div className="flex-1">
-                {o.imageUrl && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={o.imageUrl}
-                    alt={`Opsi ${o.key}`}
-                    className="border-2 border-black max-h-32 mb-1"
-                  />
-                )}
-                <p className="text-sm font-semibold whitespace-pre-wrap">{o.label || (o.imageUrl ? "(gambar)" : "—")}</p>
-                {isCorrect && (
-                  <span className="brut-tag mt-1 inline-block" style={{ background: "#000", color: "#fff" }}>
-                    KUNCI
-                  </span>
-                )}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+      {isText ? (
+        <div className="border-2 border-black p-2" style={{ background: "#fff7ed" }}>
+          <div className="text-xs font-black uppercase mb-1">Kunci Jawaban</div>
+          {q.parts > 1 ? (
+            <div className="flex flex-wrap gap-2">
+              {Array.from({ length: q.parts }).map((_, i) => (
+                <span
+                  key={i}
+                  className="brut-tag"
+                  style={{ background: "#a3e635" }}
+                >
+                  Bagian {i + 1} = {correctTexts[i] || "—"}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <span className="brut-tag" style={{ background: "#a3e635" }}>
+              {correctTexts[0] || "—"}
+            </span>
+          )}
+        </div>
+      ) : (
+        <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {opts.map((o) => {
+            const isCorrect = correctSet.has(String(o.key).toUpperCase());
+            return (
+              <li
+                key={o.key}
+                className="border-2 border-black p-2 flex gap-2 items-start"
+                style={{ background: isCorrect ? "#a3e635" : "#fff" }}
+              >
+                <span className="font-black">{o.key}.</span>
+                <div className="flex-1">
+                  {o.imageUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={o.imageUrl}
+                      alt={`Opsi ${o.key}`}
+                      className="border-2 border-black max-h-32 mb-1"
+                    />
+                  )}
+                  <p className="text-sm font-semibold whitespace-pre-wrap">{o.label || (o.imageUrl ? "(gambar)" : "—")}</p>
+                  {isCorrect && (
+                    <span className="brut-tag mt-1 inline-block" style={{ background: "#000", color: "#fff" }}>
+                      KUNCI
+                    </span>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }
