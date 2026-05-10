@@ -43,8 +43,16 @@ type AnswerRow = {
     parts: number;
     correct: unknown;
     scoringTag: string | null;
+    inputMode?: string;
   };
 };
+
+function normalizeText(v: unknown): string {
+  return String(v ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toUpperCase();
+}
 
 type SubWithAnswers = {
   testKind: "BAKAT" | "MINAT";
@@ -62,21 +70,23 @@ function gradeAnswerRows(answers: AnswerRow[]): { isCorrect: boolean; partialSco
     const parts = ans.question.parts || 1;
     let isCorrect = false;
     let partialScore = 0;
+    // TEXT and CHOICE both compare normalized strings (uppercase, trimmed,
+    // collapsed whitespace). Empty correct => MINAT-style "every answered counts".
     if (parts > 1 && Array.isArray(correct) && Array.isArray(selected)) {
       let okCount = 0;
       for (let i = 0; i < correct.length; i++) {
-        const c = String(correct[i] ?? "").trim().toUpperCase();
-        const s = String(selected[i] ?? "").trim().toUpperCase();
+        const c = normalizeText(correct[i]);
+        const s = normalizeText(selected[i]);
         if (c && c === s) okCount += 1;
       }
       partialScore = okCount;
       isCorrect = okCount === correct.length;
     } else if (typeof correct === "string" || typeof correct === "number") {
-      const c = String(correct).trim().toUpperCase();
-      const s = String(Array.isArray(selected) ? selected[0] : selected ?? "").trim().toUpperCase();
+      const c = normalizeText(correct);
+      const s = normalizeText(Array.isArray(selected) ? selected[0] : selected);
       isCorrect = c.length > 0 && c === s;
       partialScore = isCorrect ? 1 : 0;
-    } else if (correct == null) {
+    } else if (correct == null || (Array.isArray(correct) && correct.length === 0)) {
       const s = String(Array.isArray(selected) ? selected[0] : selected ?? "").trim();
       isCorrect = s.length > 0;
       partialScore = isCorrect ? 1 : 0;

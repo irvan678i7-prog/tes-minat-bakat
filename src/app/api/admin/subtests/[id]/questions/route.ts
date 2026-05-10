@@ -22,6 +22,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       correct: true,
       scoringTag: true,
       isExample: true,
+      inputMode: true,
     },
   });
   return NextResponse.json({

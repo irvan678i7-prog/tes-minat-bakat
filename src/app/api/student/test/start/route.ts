@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getStudentFromRequest } from "@/lib/auth";
 import { shuffle } from "@/lib/random";
+import { BAKAT_SUBTESTS, MINAT_SUBTESTS } from "@/lib/test-config";
 
 export async function GET(req: NextRequest) {
   const student = getStudentFromRequest(req);
@@ -82,6 +83,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Subtest tidak valid" }, { status: 400 });
   }
 
+  const seedCfg = [...BAKAT_SUBTESTS, ...MINAT_SUBTESTS].find(
+    (x) => x.code === subtest.code,
+  );
+  const partLabels = seedCfg?.partLabels ?? [];
+
   const seed = `${sub.randomSeed}:${subtest.code}`;
   const realQuestions = subtest.questions.filter((q) => !q.isExample);
   const exampleQuestions = subtest.questions
@@ -99,6 +105,8 @@ export async function POST(req: NextRequest) {
       imageUrl: q.imageUrl,
       parts: q.parts,
       options: q.options,
+      inputMode: q.inputMode,
+      partLabels,
     };
   });
 
@@ -110,6 +118,8 @@ export async function POST(req: NextRequest) {
     parts: q.parts,
     options: q.options,
     correct: q.correct,
+    inputMode: q.inputMode,
+    partLabels,
   }));
 
   // Existing saved answers (for resume) — only for real questions.

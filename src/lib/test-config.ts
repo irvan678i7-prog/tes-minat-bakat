@@ -1,6 +1,8 @@
 // Test configuration based on the SMK Bakat & Minat book.
 // All durations are admin-configurable in DB (Subtest.durationSec); these are seed defaults.
 
+export type InputMode = "CHOICE" | "TEXT";
+
 export type SubtestSeed = {
   code: string;
   testKind: "BAKAT" | "MINAT";
@@ -11,6 +13,8 @@ export type SubtestSeed = {
   expectedQuestions: number;
   parts: 1 | 2 | 3;
   optionLabels: string[]; // labels used for options (multi-choice keys)
+  defaultInputMode?: InputMode; // CHOICE (default) or TEXT (typed answer)
+  partLabels?: string[]; // labels for multi-part TEXT inputs (e.g. ["I","II","III"])
 };
 
 export const BAKAT_SUBTESTS: SubtestSeed[] = [
@@ -36,6 +40,7 @@ export const BAKAT_SUBTESTS: SubtestSeed[] = [
     expectedQuestions: 20,
     parts: 1,
     optionLabels: [],
+    defaultInputMode: "TEXT",
   },
   {
     code: "BAKAT_3_VERBAL",
@@ -52,12 +57,14 @@ export const BAKAT_SUBTESTS: SubtestSeed[] = [
     code: "BAKAT_4_URUTAN",
     testKind: "BAKAT",
     name: "Penalaran Urutan",
-    description: "Mengisi 2 bentuk yang hilang dari deret gambar.",
+    description: "Mengisi 2 bentuk yang hilang dari deret. Ketik isian untuk bagian 1 dan 2.",
     durationSec: 7 * 60,
     orderIndex: 4,
     expectedQuestions: 20,
     parts: 2,
-    optionLabels: ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K"],
+    optionLabels: [],
+    defaultInputMode: "TEXT",
+    partLabels: ["1", "2"],
   },
   {
     code: "BAKAT_5_SPASIAL",
@@ -75,23 +82,26 @@ export const BAKAT_SUBTESTS: SubtestSeed[] = [
     testKind: "BAKAT",
     name: "Tiga Dimensi",
     description:
-      "Membayangkan sisi tersembunyi dari tumpukan balok — 3 sisi (I, II, III) per soal.",
+      "Membayangkan sisi tersembunyi dari tumpukan balok — 3 sisi (I, II, III) per soal. Ketik isian per sisi.",
     durationSec: 8 * 60,
     orderIndex: 6,
     expectedQuestions: 10,
     parts: 3,
-    optionLabels: ["A", "B", "C", "D", "E"],
+    optionLabels: [],
+    defaultInputMode: "TEXT",
+    partLabels: ["I", "II", "III"],
   },
   {
     code: "BAKAT_7_SISTEMATISASI",
     testKind: "BAKAT",
     name: "Sistematisasi",
-    description: "Tes klerikal cepat; pasangkan simbol dengan huruf.",
+    description: "Tes klerikal cepat; pasangkan simbol dengan huruf — ketik huruf jawaban.",
     durationSec: 4 * 60,
     orderIndex: 7,
     expectedQuestions: 150,
     parts: 1,
-    optionLabels: ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X"],
+    optionLabels: [],
+    defaultInputMode: "TEXT",
   },
   {
     code: "BAKAT_8_KOSAKATA",
@@ -108,12 +118,13 @@ export const BAKAT_SUBTESTS: SubtestSeed[] = [
     code: "BAKAT_9_FIGURAL",
     testKind: "BAKAT",
     name: "Figural Angka",
-    description: "Aritmatika cepat: desimal, persen, pembagian. Tanpa kalkulator.",
+    description: "Aritmatika cepat: desimal, persen, pembagian — ketik angka jawaban.",
     durationSec: 7 * 60,
     orderIndex: 9,
     expectedQuestions: 25,
     parts: 1,
     optionLabels: [],
+    defaultInputMode: "TEXT",
   },
 ];
 
