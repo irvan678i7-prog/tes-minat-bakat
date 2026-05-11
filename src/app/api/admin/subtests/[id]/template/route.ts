@@ -34,6 +34,26 @@ function textCorrectExample(s: SubtestSeed): string {
   return "JAWABAN";
 }
 
+// MINAT pair generator. Each soal pairs 2 letters cycling through the bidang
+// alphabet (A,B → B,C → C,D → …). Used both for default scoringTag and example
+// labels in the template.
+const MINAT_LETTERS_8 = ["A", "B", "C", "D", "E", "F", "G", "H"];
+function minatPairForSoal(no: number): [string, string] {
+  const i = (no - 1) % MINAT_LETTERS_8.length;
+  const j = no % MINAT_LETTERS_8.length;
+  return [MINAT_LETTERS_8[i], MINAT_LETTERS_8[j]];
+}
+const MINAT_LABEL_BIDANG: Record<string, string> = {
+  A: "Komunikasi",
+  B: "Seni",
+  C: "Kesehatan",
+  D: "Pariwisata",
+  E: "Administrasi",
+  F: "Teknologi",
+  G: "Agrobisnis",
+  H: "Industri",
+};
+
 function exampleSoalRow(s: SubtestSeed, no: number): Record<string, string | number> {
   const row: Record<string, string | number> = {
     questionNo: no,
@@ -50,13 +70,22 @@ function exampleSoalRow(s: SubtestSeed, no: number): Record<string, string | num
     row.scoringTag = "";
     return row;
   }
+  if (s.testKind === "MINAT") {
+    const [L1, L2] = minatPairForSoal(no);
+    row.optionA = MINAT_LABEL_BIDANG[L1] ?? `Pilihan ${L1}`;
+    row.optionAImage = "";
+    row.optionB = MINAT_LABEL_BIDANG[L2] ?? `Pilihan ${L2}`;
+    row.optionBImage = "";
+    row.correctAnswer = "";
+    row.scoringTag = `${L1},${L2}`;
+    return row;
+  }
   const labels = s.optionLabels.length > 0 ? s.optionLabels : ["A", "B", "C", "D", "E"];
   for (let i = 0; i < labels.length; i++) {
     row[`option${labels[i]}`] = `Pilihan ${labels[i]}`;
     row[`option${labels[i]}Image`] = "";
   }
-  row.correctAnswer =
-    s.testKind === "MINAT" ? "" : s.parts > 1 ? labels.slice(0, s.parts).join(";") : labels[0];
+  row.correctAnswer = s.parts > 1 ? labels.slice(0, s.parts).join(";") : labels[0];
   row.scoringTag = "";
   return row;
 }
@@ -67,7 +96,7 @@ function blankSoalRow(s: SubtestSeed, no: number): Record<string, string | numbe
     prompt:
       s.testKind === "BAKAT"
         ? `Soal nomor ${no} (${s.name}). Ganti dengan soal Anda.`
-        : `Soal nomor ${no} untuk subtes ${s.name}.`,
+        : `Soal nomor ${no} — pasangan kata ${s.name}.`,
     imageUrl: "",
     parts: s.parts,
     inputMode: s.defaultInputMode ?? "CHOICE",
@@ -77,13 +106,22 @@ function blankSoalRow(s: SubtestSeed, no: number): Record<string, string | numbe
     row.scoringTag = "";
     return row;
   }
+  if (s.testKind === "MINAT") {
+    const [L1, L2] = minatPairForSoal(no);
+    row.optionA = MINAT_LABEL_BIDANG[L1] ?? `Kata ${L1}`;
+    row.optionAImage = "";
+    row.optionB = MINAT_LABEL_BIDANG[L2] ?? `Kata ${L2}`;
+    row.optionBImage = "";
+    row.correctAnswer = "";
+    row.scoringTag = `${L1},${L2}`;
+    return row;
+  }
   const labels = s.optionLabels.length > 0 ? s.optionLabels : ["A", "B", "C", "D", "E"];
   for (let i = 0; i < labels.length; i++) {
     row[`option${labels[i]}`] = `Pilihan ${labels[i]}`;
     row[`option${labels[i]}Image`] = "";
   }
-  row.correctAnswer =
-    s.testKind === "MINAT" ? "" : s.parts > 1 ? labels.slice(0, s.parts).join(";") : labels[0];
+  row.correctAnswer = s.parts > 1 ? labels.slice(0, s.parts).join(";") : labels[0];
   row.scoringTag = "";
   return row;
 }
@@ -132,8 +170,18 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       ? ["6. Tulis kunci jawaban tepat seperti yang diharapkan (huruf/angka). Pencocokan abaikan huruf besar/kecil & spasi."]
       : ["6. Tulis kunci 1 huruf (mis. A) di kolom 'correctAnswer'."],
     seed.testKind === "MINAT"
-      ? ["7. Untuk subtes MINAT, kolom 'correctAnswer' DIKOSONGKAN (tidak ada benar/salah)."]
+      ? ["7. Subtes MINAT: tiap soal HANYA 2 opsi (optionA & optionB). 'correctAnswer' DIKOSONGKAN — tidak ada benar/salah."]
       : ["7. Untuk subtes BAKAT, kolom 'correctAnswer' WAJIB diisi sesuai kunci."],
+    seed.testKind === "MINAT"
+      ? ["   'scoringTag' WAJIB — isi 2 huruf bidang dipisah koma. Mis. 'A,B' artinya optionA = bidang A, optionB = bidang B."]
+      : ["   'scoringTag' opsional (kosongkan saja)."],
+    seed.code === "MINAT_BIDANG"
+      ? ["   Pasangan bidang lengkap: A=Komunikasi, B=Seni, C=Kesehatan, D=Pariwisata, E=Administrasi, F=Teknologi, G=Agrobisnis, H=Industri."]
+      : seed.code.startsWith("MINAT_PROG_")
+      ? ["   Untuk Program (A-H), 'scoringTag' = pasangan huruf program/karier yang dipasangkan (lihat Tabel Program di Panduan Admin)."]
+      : seed.code === "BAKAT_7_SISTEMATISASI"
+      ? ["   FORMAT TES: ada KUNCI SIMBOL→HURUF (mis. ✈=A, ⚀=B, ⚘=C, ★=D, ...). Setiap soal menampilkan 1 simbol; siswa MENGETIK huruf yang sesuai."]
+      : [""],
     ["8. Save sebagai .xlsx, lalu upload via tombol UPLOAD pada baris subtes ini di tab Bank Soal."],
     [""],
     ["INFORMASI SUBTES"],

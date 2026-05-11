@@ -112,10 +112,12 @@ export default function AdminPanduan() {
             </tr>
             <tr>
               <td><Code>scoringTag</Code></td>
-              <td>Opsional</td>
+              <td>MINAT: <strong>WAJIB</strong></td>
               <td>
-                Khusus subtes <Code>MINAT_BIDANG</Code>. Pasangan kategori, contoh{" "}
-                <Code>A,F</Code> = pilihan A masuk bidang A, pilihan B masuk bidang F.
+                Khusus subtes <Code>MINAT</Code> (Bidang &amp; Program A–H). Pasangan
+                bidang/program yang dipasangkan di soal itu, dipisah koma.
+                Contoh <Code>A,B</Code> = <Code>optionA</Code> mewakili bidang A,{" "}
+                <Code>optionB</Code> mewakili bidang B. Untuk Bakat: kosongkan saja.
               </td>
             </tr>
           </tbody>
@@ -173,38 +175,45 @@ export default function AdminPanduan() {
         <div className="brut-card mb-3" style={{ background: "#fef3c7" }}>
           <h4 className="text-lg font-black uppercase mb-1">A. Subtes Bidang Minat</h4>
           <p className="text-sm font-semibold mb-2">
-            Subtes <Code>MINAT_BIDANG</Code> berisi 28 soal pasangan kata. Setiap soal
-            menyajikan 2 pilihan, masing-masing terhubung ke salah satu dari 8 bidang minat (A–H).
+            Subtes <Code>MINAT_BIDANG</Code> berisi 28 soal pasangan kata. Setiap soal{" "}
+            <strong>HANYA 2 pilihan</strong> (<Code>optionA</Code> &amp; <Code>optionB</Code>).
+            Masing-masing pilihan mewakili 1 dari 8 bidang minat (A–H).
           </p>
           <ul className="list-disc pl-5 text-sm font-semibold space-y-1">
             <li>
-              Kolom <Code>scoringTag</Code> diisi misalnya <Code>A,F</Code> →{" "}
-              <Code>option A → bidang A</Code>, <Code>option B → bidang F</Code>.
+              Kolom <Code>scoringTag</Code> WAJIB. Contoh <Code>A,B</Code> →{" "}
+              <Code>optionA → bidang A</Code>, <Code>optionB → bidang B</Code>. Soal lain
+              boleh <Code>B,C</Code> atau <Code>C,D</Code> dst — bebas memasangkan 2 bidang.
             </li>
             <li>
-              Skor tiap bidang = jumlah pilihan yang masuk bidang itu, dikonversi ke{" "}
+              Skor tiap bidang = jumlah pilihan siswa yang masuk bidang itu, dikonversi ke{" "}
               <strong>persentase</strong>.
             </li>
             <li>
               <strong>3 bidang teratas</strong> menjadi rekomendasi minat utama siswa.
             </li>
           </ul>
+          <p className="text-xs font-semibold mt-2 opacity-80">
+            Pemetaan huruf bidang: A=Komunikasi, B=Seni, C=Kesehatan, D=Pariwisata,
+            E=Administrasi, F=Teknologi, G=Agrobisnis, H=Industri.
+          </p>
         </div>
         <div className="brut-card mb-3" style={{ background: "#fef3c7" }}>
           <h4 className="text-lg font-black uppercase mb-1">B. Subtes Program A–H</h4>
           <p className="text-sm font-semibold mb-2">
-            Setiap program (A–H) memiliki 28 soal. Skor program = jumlah jawaban yang siswa
-            pilih (semua dianggap valid, tidak ada salah).
+            Subtes <Code>MINAT_PROG_A</Code> s/d <Code>MINAT_PROG_H</Code>: tiap soal juga{" "}
+            <strong>HANYA 2 pilihan</strong> (pasangan karier/program). <Code>scoringTag</Code>{" "}
+            mengaitkan optionA &amp; optionB ke huruf program (A–H atau A–J).
           </p>
           <ul className="list-disc pl-5 text-sm font-semibold space-y-1">
-            <li>Skor program juga diubah ke persentase.</li>
+            <li>Skor tiap huruf program = banyaknya pilihan yang masuk huruf itu.</li>
             <li>
-              Program tertinggi diasosiasikan ke <strong>jurusan SMK</strong> sesuai pemetaan
-              di buku (mis. Program A → TKI/Telekomunikasi, Program B → Seni Rupa/Kriya, dst).
+              Sistem mengambil 3 bidang teratas, lalu untuk tiap bidang B mencari subtes{" "}
+              <Code>MINAT_PROG_B</Code> dan rekomendasikan top 3 huruf program-nya{" "}
+              (sesuai Tabel 4.3 buku panduan).
             </li>
             <li>
-              Hasil akhir Tes Minat: peringkat 8 bidang + peringkat 8 program + jurusan yang
-              direkomendasikan.
+              Hasil akhir Tes Minat: peringkat bidang + program keahlian SMK yang sesuai.
             </li>
           </ul>
         </div>
@@ -272,7 +281,12 @@ export default function AdminPanduan() {
             </tr>
             <tr>
               <td><Code>BAKAT_7_SISTEMATISASI</Code> — Sistematisasi</td>
-              <td>Ketik huruf jawaban.</td>
+              <td>
+                Ada KUNCI SIMBOL→HURUF (mis. ✈=A, ⚀=B, ⚘=C, ★=D, …). Setiap soal
+                menampilkan 1 simbol; siswa <strong>mengetik</strong> huruf yang sesuai
+                kunci. Letakkan gambar kunci di kolom <Code>imageUrl</Code> contoh soal
+                pertama (atau di Instruksi subtes) supaya tampil sebelum timer mulai.
+              </td>
               <td><Code>B</Code></td>
             </tr>
             <tr>
