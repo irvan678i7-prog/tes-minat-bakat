@@ -11,16 +11,25 @@ function isTextMode(s: SubtestSeed): boolean {
   return s.defaultInputMode === "TEXT";
 }
 
+// Subtes yang biasanya butuh 2 gambar dalam 1 soal (mis. Penalaran Urutan,
+// Pengenalan Spasial — buku menampilkan 2 panel gambar dalam 1 soal).
+function needsTwoImages(s: SubtestSeed): boolean {
+  return s.code === "BAKAT_4_URUTAN" || s.code === "BAKAT_5_SPASIAL";
+}
+
 function buildHeaders(s: SubtestSeed): string[] {
+  const imageCols = needsTwoImages(s)
+    ? ["imageUrl", "imageUrl2"]
+    : ["imageUrl"];
   if (isTextMode(s)) {
-    return ["questionNo", "prompt", "imageUrl", "parts", "inputMode", "correctAnswer", "scoringTag"];
+    return ["questionNo", "prompt", ...imageCols, "parts", "inputMode", "correctAnswer", "scoringTag"];
   }
   const optionCols: string[] = [];
   const labels = s.optionLabels.length > 0 ? s.optionLabels : OPTION_KEYS.slice(0, 5);
   for (const k of labels) {
     optionCols.push(`option${k}`, `option${k}Image`);
   }
-  return ["questionNo", "prompt", "imageUrl", "parts", "inputMode", ...optionCols, "correctAnswer", "scoringTag"];
+  return ["questionNo", "prompt", ...imageCols, "parts", "inputMode", ...optionCols, "correctAnswer", "scoringTag"];
 }
 
 function textCorrectExample(s: SubtestSeed): string {
@@ -65,6 +74,7 @@ function exampleSoalRow(s: SubtestSeed, no: number): Record<string, string | num
     parts: s.parts,
     inputMode: s.defaultInputMode ?? "CHOICE",
   };
+  if (needsTwoImages(s)) row.imageUrl2 = "";
   if (isTextMode(s)) {
     row.correctAnswer = textCorrectExample(s);
     row.scoringTag = "";
@@ -101,6 +111,7 @@ function blankSoalRow(s: SubtestSeed, no: number): Record<string, string | numbe
     parts: s.parts,
     inputMode: s.defaultInputMode ?? "CHOICE",
   };
+  if (needsTwoImages(s)) row.imageUrl2 = "";
   if (isTextMode(s)) {
     row.correctAnswer = textCorrectExample(s);
     row.scoringTag = "";
@@ -158,7 +169,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     ["1. Buka sheet 'CONTOH SOAL' untuk soal contoh (akan tampil ke siswa SEBELUM timer mulai sebagai latihan)."],
     ["2. Buka sheet 'SOAL' untuk soal asli (yang dinilai dan masuk timer)."],
     ["3. Setiap baris = 1 soal. Hapus baris contoh, ganti dengan soal Anda."],
-    ["4. Kolom 'imageUrl' (opsional) untuk gambar soal. Upload gambar lewat tab Bank Soal admin."],
+    needsTwoImages(seed)
+      ? ["4. Kolom 'imageUrl' = gambar pertama soal, 'imageUrl2' = gambar kedua. Subtes ini umumnya pakai 2 gambar dalam 1 soal (stem + pelengkap). Upload gambar lewat tab Bank Soal admin."]
+      : ["4. Kolom 'imageUrl' (opsional) untuk gambar soal. Upload gambar lewat tab Bank Soal admin."],
     isText
       ? ["5. Kolom 'inputMode' = TEXT untuk subtes ini (jawaban diketik siswa, BUKAN pilihan ganda)."]
       : ["5. Kolom 'inputMode' = CHOICE (pilihan ganda). Kolom 'option*' & 'option*Image' untuk pilihan jawaban."],
@@ -205,7 +218,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const wsContoh = XLSX.utils.json_to_sheet([exampleSoalRow(seed, 1)], { header: headers });
   wsContoh["!cols"] = headers.map((h) => {
     if (h === "prompt") return { wch: 50 };
-    if (h === "imageUrl" || h.endsWith("Image")) return { wch: 24 };
+    if (h === "imageUrl" || h === "imageUrl2" || h.endsWith("Image")) return { wch: 24 };
     if (h.startsWith("option") && !h.endsWith("Image")) return { wch: 24 };
     return { wch: 14 };
   });

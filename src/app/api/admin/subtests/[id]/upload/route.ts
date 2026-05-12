@@ -8,6 +8,7 @@ type Row = Record<string, unknown> & {
   questionNo?: number | string;
   prompt?: string;
   imageUrl?: string;
+  imageUrl2?: string;
   parts?: number | string;
   inputMode?: string;
   correctAnswer?: string;
@@ -69,6 +70,7 @@ function rowsToData(
   questionNo: number;
   prompt: string;
   imageUrl: string | null;
+  imageUrl2: string | null;
   parts: number;
   options: object;
   correct: object;
@@ -101,6 +103,7 @@ function rowsToData(
       questionNo: Number(r.questionNo ?? i + 1) || i + 1,
       prompt: String(r.prompt ?? ""),
       imageUrl: r.imageUrl ? String(r.imageUrl).trim() || null : null,
+      imageUrl2: r.imageUrl2 ? String(r.imageUrl2).trim() || null : null,
       parts,
       options: opts as unknown as object,
       correct: correct as unknown as object,

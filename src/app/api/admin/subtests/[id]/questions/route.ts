@@ -17,6 +17,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       questionNo: true,
       prompt: true,
       imageUrl: true,
+      imageUrl2: true,
       parts: true,
       options: true,
       correct: true,
