@@ -13,6 +13,7 @@ type Question = {
   questionNo: number;
   prompt: string;
   imageUrl: string | null;
+  imageUrl2?: string | null;
   parts: number;
   options: unknown;
   inputMode?: "CHOICE" | "TEXT";
@@ -490,16 +491,32 @@ export default function SubtestRunner({
         <div className="brut-card mb-6" style={{ background: "#fff" }}>
           <div className="text-sm font-bold uppercase mb-2">{subtest.description}</div>
           <div className="text-xl font-bold whitespace-pre-wrap">{q.prompt}</div>
-          {q.imageUrl && (
-            <div className="my-4 inline-block border-4 border-black p-1 bg-white">
-              <Image
-                src={q.imageUrl}
-                alt={`Soal ${q.questionNo}`}
-                width={600}
-                height={400}
-                className="max-w-full h-auto"
-                unoptimized
-              />
+          {(q.imageUrl || q.imageUrl2) && (
+            <div className="my-4 flex flex-wrap items-start gap-3">
+              {q.imageUrl && (
+                <div className="border-4 border-black p-1 bg-white">
+                  <Image
+                    src={q.imageUrl}
+                    alt={`Soal ${q.questionNo}`}
+                    width={600}
+                    height={400}
+                    className="max-w-full h-auto"
+                    unoptimized
+                  />
+                </div>
+              )}
+              {q.imageUrl2 && (
+                <div className="border-4 border-black p-1 bg-white">
+                  <Image
+                    src={q.imageUrl2}
+                    alt={`Soal ${q.questionNo} (gambar 2)`}
+                    width={600}
+                    height={400}
+                    className="max-w-full h-auto"
+                    unoptimized
+                  />
+                </div>
+              )}
             </div>
           )}
 

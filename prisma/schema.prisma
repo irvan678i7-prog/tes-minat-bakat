@@ -72,6 +72,7 @@ model Question {
   questionNo    Int
   prompt        String
   imageUrl      String?
+  imageUrl2     String?
   parts         Int             @default(1)
   options       Json
   correct       Json

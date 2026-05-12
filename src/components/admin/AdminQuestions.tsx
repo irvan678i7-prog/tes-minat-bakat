@@ -21,6 +21,7 @@ type Question = {
   questionNo: number;
   prompt: string;
   imageUrl: string | null;
+  imageUrl2?: string | null;
   parts: number;
   options: OptionItem[] | unknown;
   correct: unknown;
@@ -430,13 +431,25 @@ function QuestionPreview({ q }: { q: Question }) {
         )}
       </div>
       <p className="font-bold whitespace-pre-wrap mb-2">{q.prompt || "—"}</p>
-      {q.imageUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={q.imageUrl}
-          alt={`Soal ${q.questionNo}`}
-          className="border-2 border-black mb-2 max-h-60"
-        />
+      {(q.imageUrl || q.imageUrl2) && (
+        <div className="flex flex-wrap items-start gap-2 mb-2">
+          {q.imageUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={q.imageUrl}
+              alt={`Soal ${q.questionNo}`}
+              className="border-2 border-black max-h-60"
+            />
+          )}
+          {q.imageUrl2 && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={q.imageUrl2}
+              alt={`Soal ${q.questionNo} (gambar 2)`}
+              className="border-2 border-black max-h-60"
+            />
+          )}
+        </div>
       )}
       {isText ? (
         <div className="border-2 border-black p-2" style={{ background: "#fff7ed" }}>
