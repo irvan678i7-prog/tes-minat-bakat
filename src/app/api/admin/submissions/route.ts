@@ -22,6 +22,9 @@ export async function GET(req: NextRequest) {
       finishedAt: s.finishedAt,
       iqEstimate: s.result?.iqEstimate,
       hasResult: !!s.result,
+      violationCount: s.violationCount,
+      flaggedCheating: s.flaggedCheating,
+      violationLog: s.violationLog,
     })),
   });
 }

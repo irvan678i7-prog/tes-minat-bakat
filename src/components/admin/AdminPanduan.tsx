@@ -302,7 +302,124 @@ export default function AdminPanduan() {
         </p>
       </Section>
 
-      <Section title="7. Contoh Pengisian Singkat" color="#a3e635">
+      <Section title="7. Keamanan Tes (Anti-Curang & Pemulihan Koneksi)" color="#fca5a5">
+        <p className="text-sm font-semibold mb-2">
+          Aplikasi otomatis memantau perilaku siswa selama mengerjakan tes. Tidak ada data
+          siswa yang dihapus otomatis — yang terjadi hanya{" "}
+          <strong>pencatatan (log)</strong> dan <strong>flag</strong> agar admin bisa
+          memutuskan sendiri apakah hasilnya valid.
+        </p>
+        <div className="brut-card mb-3" style={{ background: "#fef3c7" }}>
+          <h4 className="text-lg font-black uppercase mb-1">A. Apa yang Dipantau?</h4>
+          <ul className="list-disc pl-5 text-sm font-semibold space-y-1">
+            <li>
+              <strong>Pindah tab / buka aplikasi lain</strong> (<Code>TAB_SWITCH</Code>) —
+              dideteksi lewat Visibility API.
+            </li>
+            <li>
+              <strong>Window kehilangan fokus</strong> (<Code>BLUR</Code>) — mis. klik di luar
+              browser.
+            </li>
+            <li>
+              <strong>Keluar dari mode full-screen</strong> (<Code>EXIT_FULLSCREEN</Code>).
+            </li>
+            <li>
+              <strong>Copy / paste / cut</strong> (<Code>COPY</Code>, <Code>PASTE</Code>,{" "}
+              <Code>CUT</Code>) — tindakan diblokir <em>dan</em> dicatat.
+            </li>
+            <li>
+              <strong>Klik kanan</strong> (<Code>CONTEXT_MENU</Code>) — diblokir &amp; dicatat.
+            </li>
+            <li>
+              <strong>Shortcut mencurigakan</strong> (<Code>SHORTCUT</Code>): F12, Ctrl+Shift+I,
+              Ctrl+C/V/X/A/S/P/U, dll.
+            </li>
+          </ul>
+          <p className="text-xs font-semibold mt-2 opacity-80">
+            Event yang sama dalam 800 ms dihitung satu kali (anti spam). Maksimum 200 entri log
+            per siswa.
+          </p>
+        </div>
+        <div className="brut-card mb-3" style={{ background: "#fef3c7" }}>
+          <h4 className="text-lg font-black uppercase mb-1">B. Ambang Batas &amp; Aksi Otomatis</h4>
+          <ul className="list-disc pl-5 text-sm font-semibold space-y-1">
+            <li>
+              Setelah <strong>5 pelanggaran</strong>, siswa otomatis ditandai{" "}
+              <Code>flaggedCheating = true</Code> dan tesnya{" "}
+              <strong>diselesaikan paksa</strong> dengan notifikasi.
+            </li>
+            <li>
+              Saat siswa <strong>Mulai</strong> subtes, browser diminta masuk mode full-screen.
+              Kalau siswa keluar, akan muncul banner peringatan + tombol{" "}
+              <Code>KEMBALI FULL-SCREEN</Code>.
+            </li>
+            <li>
+              Selama intro / pengisian biodata, anti-curang <strong>tidak aktif</strong> agar
+              siswa bisa baca instruksi tanpa kena warning.
+            </li>
+          </ul>
+        </div>
+        <div className="brut-card mb-3" style={{ background: "#fef3c7" }}>
+          <h4 className="text-lg font-black uppercase mb-1">C. Cara Admin Memeriksa</h4>
+          <ul className="list-disc pl-5 text-sm font-semibold space-y-1">
+            <li>
+              Buka tab <Code>Token</Code> — kolom <strong>Pelanggaran</strong> di tabel{" "}
+              <em>Daftar Token</em> &amp; <em>Status Pengerjaan</em>:{" "}
+              <span style={{ background: "#a3e635", padding: "0 6px", border: "2px solid #000" }}>
+                0
+              </span>{" "}
+              hijau,{" "}
+              <span style={{ background: "#fb923c", padding: "0 6px", border: "2px solid #000" }}>
+                1–4
+              </span>{" "}
+              oranye,{" "}
+              <span
+                style={{
+                  background: "#ef4444",
+                  color: "#fff",
+                  padding: "0 6px",
+                  border: "2px solid #000",
+                }}
+              >
+                ⚠ 5+
+              </span>{" "}
+              merah (terdeteksi curang).
+            </li>
+            <li>
+              Buka tab <Code>Hasil</Code> — kolom <strong>Pelanggaran</strong> juga muncul, dan
+              ada filter <Code>Hanya tampilkan yang dicurigai</Code>. Klik angka untuk melihat{" "}
+              <strong>detail log</strong> (waktu, subtes, jenis pelanggaran).
+            </li>
+            <li>
+              Keputusan akhir ada di tangan admin: bisa terima hasil apa adanya, minta siswa
+              tes ulang, atau hapus data peserta (tombol <Code>HAPUS</Code>).
+            </li>
+          </ul>
+        </div>
+        <div className="brut-card" style={{ background: "#fef3c7" }}>
+          <h4 className="text-lg font-black uppercase mb-1">D. Pemulihan Koneksi Putus</h4>
+          <ul className="list-disc pl-5 text-sm font-semibold space-y-1">
+            <li>
+              Setiap jawaban langsung disimpan ke <strong>localStorage</strong> browser siswa
+              dan dikirim ke server.
+            </li>
+            <li>
+              Kalau internet putus, jawaban masuk antrian dan otomatis di-retry dengan jeda
+              4s → 8s → 16s → 30s sampai berhasil. Indikator di pojok layar siswa:
+              {" "}<Code>TERSIMPAN</Code>, <Code>ANTRI</Code>, <Code>OFFLINE</Code>,{" "}
+              <Code>GAGAL SYNC</Code>.
+            </li>
+            <li>
+              Saat tombol <Code>SELESAIKAN TES</Code> gagal (mis. timeout), muncul tombol{" "}
+              <Code>COBA SUBMIT ULANG</Code>. Siswa boleh menutup browser; selama token belum
+              expire, login ulang dengan kode yang sama akan melanjutkan tes dari titik
+              terakhir.
+            </li>
+          </ul>
+        </div>
+      </Section>
+
+      <Section title="8. Contoh Pengisian Singkat" color="#a3e635">
         <p className="text-sm font-semibold mb-2">
           Subtes <Code>BAKAT_8_KOSAKATA</Code> (CHOICE), soal nomor 1:
         </p>

@@ -15,6 +15,30 @@ type Sub = {
   answered: number;
 };
 
+// Try the finish call up to a few times with exponential backoff so a flaky
+// connection on the last screen doesn't lose the student's submission.
+async function attemptFinish(maxAttempts = 4): Promise<{ ok: boolean; error?: string }> {
+  let delay = 800;
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const res = await fetch("/api/student/test/finish", { method: "POST" });
+      if (res.ok) return { ok: true };
+      // 4xx is a real error from the server — don't retry.
+      if (res.status >= 400 && res.status < 500) {
+        const d = await res.json().catch(() => ({}));
+        return { ok: false, error: d.error || `Gagal (${res.status})` };
+      }
+    } catch {
+      // network error — fall through to retry
+    }
+    if (i < maxAttempts - 1) {
+      await new Promise((r) => setTimeout(r, delay));
+      delay = Math.min(delay * 2, 6000);
+    }
+  }
+  return { ok: false, error: "Koneksi gagal. Coba lagi." };
+}
+
 export default function TestHub({
   testKind,
   studentName,
@@ -26,6 +50,7 @@ export default function TestHub({
 }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const allDone =
     subtests.length > 0 &&
     subtests.every((s) => s.total === 0 || s.answered >= s.total);
@@ -33,11 +58,26 @@ export default function TestHub({
   const finish = async () => {
     if (!confirm("Selesaikan tes? Anda tidak dapat mengubah jawaban setelah dikirim.")) return;
     setSubmitting(true);
-    const res = await fetch("/api/student/test/finish", { method: "POST" });
+    setSubmitError(null);
+    const r = await attemptFinish();
     setSubmitting(false);
-    if (!res.ok) {
-      const d = await res.json().catch(() => ({}));
-      return toast.error(d.error || "Gagal menyelesaikan tes");
+    if (!r.ok) {
+      setSubmitError(r.error || "Gagal menyelesaikan tes");
+      toast.error(r.error || "Gagal menyelesaikan tes");
+      return;
+    }
+    router.push("/test/done");
+  };
+
+  const retryFinish = async () => {
+    setSubmitting(true);
+    setSubmitError(null);
+    const r = await attemptFinish(6);
+    setSubmitting(false);
+    if (!r.ok) {
+      setSubmitError(r.error || "Masih gagal. Periksa koneksi internet lalu coba lagi.");
+      toast.error(r.error || "Gagal menyelesaikan tes");
+      return;
     }
     router.push("/test/done");
   };
@@ -111,6 +151,26 @@ export default function TestHub({
             <p className="text-xs font-bold text-center mt-2 opacity-70">
               Tombol aktif setelah semua subtes selesai dikerjakan.
             </p>
+          )}
+          {submitError && (
+            <div
+              className="brut-card mt-3"
+              style={{ background: "#ff4d8d", color: "#fff" }}
+            >
+              <p className="font-black uppercase mb-1">Gagal mengirim hasil</p>
+              <p className="text-sm font-semibold mb-3">{submitError}</p>
+              <p className="text-xs font-bold mb-2 opacity-90">
+                Jawaban Anda masih tersimpan di server. Tunggu sebentar lalu klik
+                tombol di bawah, atau hubungi pengawas jika masih gagal.
+              </p>
+              <button
+                onClick={retryFinish}
+                disabled={submitting}
+                className="brut-btn brut-btn-white w-full"
+              >
+                {submitting ? "MENCOBA…" : "COBA SUBMIT ULANG"}
+              </button>
+            </div>
           )}
         </div>
       </main>

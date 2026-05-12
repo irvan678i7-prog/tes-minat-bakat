@@ -26,6 +26,8 @@ type Submission = {
   school: string | null;
   startedAt: string;
   finishedAt: string | null;
+  violationCount: number;
+  flaggedCheating: boolean;
   progress: Progress | null;
 };
 
@@ -77,6 +79,40 @@ function timeAgo(dt: string | null): string {
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}j lalu`;
   return new Date(dt).toLocaleString("id-ID");
+}
+
+function ViolationBadge({ count, flagged }: { count: number; flagged: boolean }) {
+  if (flagged || count >= 5) {
+    return (
+      <span
+        className="brut-tag"
+        style={{ background: "#ef4444", color: "#fff" }}
+        title="Siswa terdeteksi melanggar berkali-kali — perlu review manual"
+      >
+        ⚠ {count}
+      </span>
+    );
+  }
+  if (count > 0) {
+    return (
+      <span
+        className="brut-tag"
+        style={{ background: "#fb923c" }}
+        title={`${count} pelanggaran terdeteksi (pindah tab/blur/copy-paste). Belum mencapai ambang batas.`}
+      >
+        {count}
+      </span>
+    );
+  }
+  return (
+    <span
+      className="brut-tag"
+      style={{ background: "#a3e635" }}
+      title="Tidak ada pelanggaran terdeteksi"
+    >
+      0
+    </span>
+  );
 }
 
 export default function AdminTokens() {
@@ -232,12 +268,13 @@ export default function AdminTokens() {
               <th>Dibuat</th>
               <th>Status</th>
               <th>Peserta</th>
+              <th>Pelanggaran</th>
             </tr>
           </thead>
           <tbody>
             {tokens.length === 0 && (
               <tr>
-                <td colSpan={6} className="text-center font-bold py-6">
+                <td colSpan={7} className="text-center font-bold py-6">
                   Belum ada token aktif.
                 </td>
               </tr>
@@ -283,6 +320,7 @@ export default function AdminTokens() {
                       <span className="opacity-50">—</span>
                     )}
                   </td>
+                  <td>{sub ? <ViolationBadge count={sub.violationCount} flagged={sub.flaggedCheating} /> : <span className="opacity-50">—</span>}</td>
                 </tr>
               );
             })}
@@ -308,13 +346,14 @@ export default function AdminTokens() {
               <th>Aktif Terakhir</th>
               <th>Mulai</th>
               <th>Selesai</th>
+              <th>Pelanggaran</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {statusRows.length === 0 && (
               <tr>
-                <td colSpan={10} className="text-center font-bold py-6">
+                <td colSpan={11} className="text-center font-bold py-6">
                   Belum ada siswa yang mengerjakan.
                 </td>
               </tr>
@@ -375,6 +414,7 @@ export default function AdminTokens() {
                     <td className="text-xs">{timeAgo(prog?.lastActivityAt ?? null)}</td>
                     <td className="text-xs">{fmtShort(sub.startedAt)}</td>
                     <td className="text-xs">{fmtShort(sub.finishedAt)}</td>
+                    <td><ViolationBadge count={sub.violationCount} flagged={sub.flaggedCheating} /></td>
                     <td>
                       <button
                         className="brut-btn"
@@ -387,7 +427,7 @@ export default function AdminTokens() {
                   </tr>
                   {isOpen && prog && (
                     <tr>
-                      <td colSpan={10} style={{ background: "#f5f5f5" }}>
+                      <td colSpan={11} style={{ background: "#f5f5f5" }}>
                         <div className="p-3">
                           <p className="text-xs font-black uppercase mb-2">Per Subtes</p>
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
