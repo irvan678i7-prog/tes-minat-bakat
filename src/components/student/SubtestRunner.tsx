@@ -4,6 +4,8 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import toast from "react-hot-toast";
+import { useAntiCheat } from "./useAntiCheat";
+import { useAnswerSync } from "./useAnswerSync";
 
 type OptionItem = { key: string; label: string; imageUrl?: string };
 type Question = {
@@ -47,6 +49,76 @@ function correctTextFor(q: ExampleQuestion): string[] {
 
 function partLabel(q: { parts: number; partLabels?: string[] }, partIdx: number): string {
   return q.partLabels?.[partIdx] ?? String(partIdx + 1);
+}
+
+function violationLabel(t: string | null): string {
+  switch (t) {
+    case "tab_hidden":
+      return "Pindah tab / ganti aplikasi";
+    case "blur":
+      return "Klik di luar halaman tes";
+    case "fullscreen_exit":
+      return "Keluar dari mode full-screen";
+    case "copy":
+      return "Menyalin teks (copy)";
+    case "paste":
+      return "Menempel teks (paste)";
+    case "cut":
+      return "Memotong teks (cut)";
+    case "context_menu":
+      return "Klik kanan";
+    case "shortcut":
+      return "Pintasan keyboard terlarang";
+    default:
+      return "Aktivitas mencurigakan";
+  }
+}
+
+function SyncBadge({
+  status,
+  pendingCount,
+}: {
+  status: "idle" | "syncing" | "queued" | "offline" | "error";
+  pendingCount: number;
+}) {
+  if (status === "idle" && pendingCount === 0) {
+    return (
+      <span
+        className="brut-tag font-mono text-xs"
+        style={{ background: "#a3e635" }}
+        title="Semua jawaban tersimpan di server."
+      >
+        ✓ TERSIMPAN
+      </span>
+    );
+  }
+  let bg = "#fff";
+  let fg = "#000";
+  let label = "MENYIMPAN…";
+  if (status === "syncing") {
+    bg = "#facc15";
+    label = pendingCount > 0 ? `MENYIMPAN… ${pendingCount}` : "MENYIMPAN…";
+  } else if (status === "queued") {
+    bg = "#fb923c";
+    label = `ANTRI ${pendingCount}`;
+  } else if (status === "offline") {
+    bg = "#ff4d8d";
+    fg = "#fff";
+    label = "OFFLINE — JAWABAN AMAN";
+  } else if (status === "error") {
+    bg = "#ff4d8d";
+    fg = "#fff";
+    label = "GAGAL SYNC";
+  }
+  return (
+    <span
+      className="brut-tag font-mono text-xs"
+      style={{ background: bg, color: fg }}
+      title="Status pengiriman jawaban ke server."
+    >
+      {label}
+    </span>
+  );
 }
 
 export default function SubtestRunner({
@@ -123,18 +195,53 @@ export default function SubtestRunner({
     return [];
   }, [q]);
 
-  const save = async (qid: string, sel: string | string[]) => {
+  const sync = useAnswerSync();
+
+  // Anti-cheat: only active once the student has clicked "Mulai" so the
+  // intro/example page doesn't trigger violations (e.g. switching tabs to
+  // confirm what time it is is fine before starting).
+  const ac = useAntiCheat({ active: started, subtestCode: subtest.code });
+
+  // Banner toggle: dismissable warning shown after every violation.
+  const [ackedAt, setAckedAt] = useState(0);
+  useEffect(() => {
+    if (ac.state.lastAt > ackedAt) setAckedAt(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ac.state.lastAt]);
+
+  // Persist answers locally + push to server via the resilient queue.
+  const save = (qid: string, sel: string | string[]) => {
     setAnswers((s) => ({ ...s, [qid]: sel }));
-    try {
-      await fetch("/api/student/test/answer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ questionId: qid, selected: sel }),
-      });
-    } catch {
-      // ignore network blip; will retry on next answer
-    }
+    sync.queueAnswer(qid, sel);
   };
+
+  // Auto-finish the whole test once the student crosses the cheat threshold.
+  const [forceFinishing, setForceFinishing] = useState(false);
+  useEffect(() => {
+    if (!ac.state.flagged || forceFinishing) return;
+    setForceFinishing(true);
+    toast.error("Anda terdeteksi keluar/curang berkali-kali. Tes diselesaikan otomatis.");
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(STORAGE_KEY(subtest.code));
+      window.localStorage.removeItem(STARTED_KEY(subtest.code));
+    }
+    (async () => {
+      try {
+        // Flush any pending answers first.
+        await sync.flush();
+      } catch {
+        // ignore; finish still runs.
+      }
+      try {
+        await fetch("/api/student/test/finish", { method: "POST" });
+      } catch {
+        // best-effort
+      }
+      sync.clearAll();
+      router.push("/test/done?forced=1");
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ac.state.flagged]);
 
   const handleSelectSingle = (key: string) => {
     if (!q) return;
@@ -196,9 +303,15 @@ export default function SubtestRunner({
   const goNext = () => setIdx((i) => Math.min(i + 1, questions.length - 1));
   const goPrev = () => setIdx((i) => Math.max(i - 1, 0));
   const finishSub = async () => {
+    // Make sure typing buffer + queued answers are flushed before leaving.
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(STORAGE_KEY(subtest.code));
       window.localStorage.removeItem(STARTED_KEY(subtest.code));
+    }
+    try {
+      await sync.flush();
+    } catch {
+      // ignore — retries will continue in background on next page
     }
     toast.success("Subtes selesai. Kembali ke daftar.");
     router.push("/test");
@@ -217,6 +330,8 @@ export default function SubtestRunner({
       window.localStorage.setItem(STARTED_KEY(subtest.code), "1");
     }
     setStartedManual(true);
+    // Enter fullscreen immediately while we still have the user gesture.
+    ac.requestFullscreen();
   };
 
   if (!q) return null;
@@ -311,7 +426,17 @@ export default function SubtestRunner({
             <div className="text-xs font-black uppercase opacity-70">SUBTES</div>
             <div className="text-xl font-black uppercase">{subtest.name}</div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <SyncBadge status={sync.status} pendingCount={sync.pendingCount} />
+            {ac.state.count > 0 && (
+              <span
+                className="brut-tag font-mono text-xs"
+                title="Jumlah deteksi keluar tes / full-screen / copy / paste."
+                style={{ background: "#ff4d8d", color: "#fff" }}
+              >
+                CURANG {ac.state.count}/{ac.state.threshold}
+              </span>
+            )}
             <span className="brut-tag font-mono text-lg" style={{ background: "#fff" }}>
               SOAL {idx + 1}/{questions.length}
             </span>
@@ -323,6 +448,42 @@ export default function SubtestRunner({
             </span>
           </div>
         </div>
+        {ac.state.lastAt > 0 && ac.state.lastAt > ackedAt && (
+          <div
+            className="border-t-4 border-black"
+            style={{ background: "#ff4d8d", color: "#fff" }}
+          >
+            <div className="max-w-4xl mx-auto px-6 py-2 flex items-center justify-between gap-3 flex-wrap">
+              <div className="font-black uppercase text-sm">
+                ⚠ Terdeteksi pelanggaran: {violationLabel(ac.state.lastType)}.
+                Pelanggaran {ac.state.count}/{ac.state.threshold}.
+                {ac.state.count >= ac.state.threshold
+                  ? " Tes akan diselesaikan otomatis."
+                  : " Jangan keluar dari halaman tes."}
+              </div>
+              <div className="flex gap-2">
+                {!ac.fullscreenActive && (
+                  <button
+                    type="button"
+                    onClick={ac.requestFullscreen}
+                    className="brut-btn brut-btn-white"
+                    style={{ padding: "4px 10px", fontSize: 12 }}
+                  >
+                    KEMBALI FULL-SCREEN
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setAckedAt(ac.state.lastAt)}
+                  className="brut-btn"
+                  style={{ padding: "4px 10px", fontSize: 12 }}
+                >
+                  OK
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </header>
 
       <main className="flex-1 max-w-4xl mx-auto px-6 py-8 w-full">

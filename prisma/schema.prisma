@@ -105,6 +105,9 @@ model Submission {
   startedAt     DateTime     @default(now())
   finishedAt    DateTime?
   randomSeed    String
+  violationCount   Int       @default(0)
+  violationLog     Json      @default("[]")
+  flaggedCheating  Boolean   @default(false)
   answers       Answer[]
   result        Result?
 }

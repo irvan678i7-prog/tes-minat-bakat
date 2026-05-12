@@ -52,6 +52,8 @@ export async function GET(req: NextRequest) {
           school: true,
           startedAt: true,
           finishedAt: true,
+          violationCount: true,
+          flaggedCheating: true,
         },
       },
     },

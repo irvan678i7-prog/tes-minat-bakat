@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import toast from "react-hot-toast";
+
+type ViolationEntry = { type: string; subtestCode?: string | null; at: string };
 
 type Sub = {
   id: string;
@@ -14,6 +16,9 @@ type Sub = {
   finishedAt: string | null;
   iqEstimate: number | null;
   hasResult: boolean;
+  violationCount: number;
+  flaggedCheating: boolean;
+  violationLog?: ViolationEntry[];
 };
 
 type ClassRow = { school: string; grade: string; testKind: "MINAT" | "BAKAT"; count: number };
@@ -30,6 +35,8 @@ export default function AdminSubmissions() {
   const [filterGrade, setFilterGrade] = useState("");
   const [filterKind, setFilterKind] = useState<"" | "MINAT" | "BAKAT">("");
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [onlyFlagged, setOnlyFlagged] = useState(false);
+  const [openLogId, setOpenLogId] = useState<string | null>(null);
 
   const refresh = () => {
     fetch("/api/admin/submissions")
@@ -66,8 +73,10 @@ export default function AdminSubmissions() {
     (s) =>
       (!filterSchool || s.school === filterSchool) &&
       (!filterGrade || s.grade === filterGrade) &&
-      (!filterKind || s.testKind === filterKind),
+      (!filterKind || s.testKind === filterKind) &&
+      (!onlyFlagged || s.flaggedCheating || s.violationCount >= 5),
   );
+  const flaggedCount = items.filter((s) => s.flaggedCheating || s.violationCount >= 5).length;
 
   const schools = Array.from(new Set(classes.map((c) => c.school).filter(Boolean)));
   const grades = Array.from(
@@ -119,7 +128,19 @@ export default function AdminSubmissions() {
         </div>
       </div>
 
-      <h3 className="text-2xl font-black uppercase">Daftar Peserta</h3>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h3 className="text-2xl font-black uppercase">Daftar Peserta</h3>
+        <label className="brut-checkbox" title="Tampilkan hanya peserta dengan minimal 5 pelanggaran (terdeteksi curang)">
+          <input
+            type="checkbox"
+            checked={onlyFlagged}
+            onChange={(e) => setOnlyFlagged(e.target.checked)}
+          />
+          <span>
+            Hanya tampilkan yang dicurigai ({flaggedCount})
+          </span>
+        </label>
+      </div>
       <div className="overflow-x-auto">
         <table className="brut-table">
           <thead>
@@ -132,55 +153,125 @@ export default function AdminSubmissions() {
               <th>Mulai</th>
               <th>Selesai</th>
               <th>IQ</th>
+              <th>Pelanggaran</th>
               <th>Aksi</th>
             </tr>
           </thead>
           <tbody>
             {filteredItems.length === 0 && (
               <tr>
-                <td colSpan={9} className="text-center font-bold py-6">Tidak ada peserta sesuai filter.</td>
+                <td colSpan={10} className="text-center font-bold py-6">Tidak ada peserta sesuai filter.</td>
               </tr>
             )}
-            {filteredItems.map((s) => (
-              <tr key={s.id}>
-                <td className="font-mono font-bold">{s.tokenCode}</td>
-                <td>{s.testKind}</td>
-                <td>{s.fullName || "—"}</td>
-                <td>{s.school || "—"}</td>
-                <td>{s.grade || "—"}</td>
-                <td>{fmt(s.startedAt)}</td>
-                <td>{fmt(s.finishedAt)}</td>
-                <td className="font-mono font-black text-center">
-                  {s.iqEstimate ?? "—"}
-                </td>
-                <td>
-                  <div className="flex items-center gap-2">
-                    {s.finishedAt ? (
-                      <a
-                        href={`/api/admin/submissions/${s.id}/pdf`}
-                        className="brut-btn brut-btn-pink text-xs"
-                        target="_blank"
-                        rel="noreferrer"
+            {filteredItems.map((s) => {
+              const isFlagged = s.flaggedCheating || s.violationCount >= 5;
+              const isOpen = openLogId === s.id;
+              const log = Array.isArray(s.violationLog) ? s.violationLog : [];
+              return (
+                <Fragment key={s.id}>
+                  <tr style={isFlagged ? { background: "#fee2e2" } : undefined}>
+                    <td className="font-mono font-bold">{s.tokenCode}</td>
+                    <td>{s.testKind}</td>
+                    <td>{s.fullName || "—"}</td>
+                    <td>{s.school || "—"}</td>
+                    <td>{s.grade || "—"}</td>
+                    <td>{fmt(s.startedAt)}</td>
+                    <td>{fmt(s.finishedAt)}</td>
+                    <td className="font-mono font-black text-center">
+                      {s.iqEstimate ?? "—"}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        onClick={() => setOpenLogId(isOpen ? null : s.id)}
+                        title={
+                          s.violationCount > 0
+                            ? "Klik untuk lihat detail log pelanggaran"
+                            : "Tidak ada pelanggaran terdeteksi"
+                        }
+                        className="brut-tag"
+                        style={{
+                          background: isFlagged
+                            ? "#ef4444"
+                            : s.violationCount > 0
+                              ? "#fb923c"
+                              : "#a3e635",
+                          color: isFlagged ? "#fff" : "#000",
+                          cursor: s.violationCount > 0 ? "pointer" : "default",
+                          fontWeight: 900,
+                        }}
                       >
-                        PDF
-                      </a>
-                    ) : (
-                      <span className="brut-tag" style={{ background: "#facc15" }}>BERLANGSUNG</span>
-                    )}
-                    <button
-                      type="button"
-                      className="brut-btn brut-btn-black text-xs"
-                      style={{ background: "#ff4d8d" }}
-                      onClick={() => onDelete(s)}
-                      disabled={deleting === s.id}
-                      title="Hapus data peserta ini"
-                    >
-                      {deleting === s.id ? "..." : "HAPUS"}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+                        {isFlagged ? "⚠ " : ""}{s.violationCount}
+                      </button>
+                    </td>
+                    <td>
+                      <div className="flex items-center gap-2">
+                        {s.finishedAt ? (
+                          <a
+                            href={`/api/admin/submissions/${s.id}/pdf`}
+                            className="brut-btn brut-btn-pink text-xs"
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            PDF
+                          </a>
+                        ) : (
+                          <span className="brut-tag" style={{ background: "#facc15" }}>BERLANGSUNG</span>
+                        )}
+                        <button
+                          type="button"
+                          className="brut-btn brut-btn-black text-xs"
+                          style={{ background: "#ff4d8d" }}
+                          onClick={() => onDelete(s)}
+                          disabled={deleting === s.id}
+                          title="Hapus data peserta ini"
+                        >
+                          {deleting === s.id ? "..." : "HAPUS"}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  {isOpen && log.length > 0 && (
+                    <tr>
+                      <td colSpan={10} style={{ background: "#fff7ed" }}>
+                        <div className="p-3">
+                          <p className="text-xs font-black uppercase mb-2">
+                            Detail Pelanggaran ({log.length})
+                          </p>
+                          <div style={{ maxHeight: 220, overflowY: "auto" }}>
+                            <table className="brut-table" style={{ fontSize: 12 }}>
+                              <thead>
+                                <tr>
+                                  <th>Waktu</th>
+                                  <th>Subtes</th>
+                                  <th>Jenis</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {[...log]
+                                  .slice(-50)
+                                  .reverse()
+                                  .map((v, i) => (
+                                    <tr key={i}>
+                                      <td className="font-mono">{fmt(v.at)}</td>
+                                      <td className="font-mono">{v.subtestCode || "—"}</td>
+                                      <td className="font-bold">{v.type}</td>
+                                    </tr>
+                                  ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          <p className="text-xs font-semibold opacity-70 mt-2">
+                            Menampilkan 50 entri terakhir. Total: {log.length}.
+                            {isFlagged && " Siswa otomatis ditandai karena ≥ 5 pelanggaran."}
+                          </p>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
