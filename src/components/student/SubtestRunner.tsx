@@ -195,6 +195,19 @@ export default function SubtestRunner({
     if (Array.isArray(raw)) return raw as OptionItem[];
     return [];
   }, [q]);
+  // 3D: gambar per Sisi disimpan di options.partImages (array of url).
+  const partImages: string[] = useMemo(() => {
+    const raw = q?.options as unknown;
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      const obj = raw as { partImages?: unknown };
+      if (Array.isArray(obj.partImages)) {
+        return obj.partImages.map((v) => (v ? String(v) : ""));
+      }
+    }
+    return [];
+  }, [q]);
+  // SISTEMATIS: 1 soal = 12 isian TEXT (parts=12). Tampilkan dalam grid.
+  const isSistematisGrid = subtest.code === "BAKAT_7_SISTEMATISASI";
 
   const sync = useAnswerSync();
 
@@ -538,6 +551,81 @@ export default function SubtestRunner({
                   className="w-full border-4 border-black px-4 py-3 text-xl font-bold bg-white"
                 />
               </div>
+            ) : isSistematisGrid ? (
+              <div className="mt-4">
+                <div className="text-sm font-black uppercase mb-2">
+                  Isi 12 Jawaban (sesuai posisi 1-12 pada gambar)
+                </div>
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                  {Array.from({ length: q.parts }).map((_, partIdx) => {
+                    const buf = typingBuf[q.id] as string[] | undefined;
+                    const arr = (answers[q.id] as string[]) || [];
+                    const value = (buf?.[partIdx] ?? arr[partIdx] ?? "");
+                    return (
+                      <div
+                        key={partIdx}
+                        className="border-4 border-black bg-white p-2"
+                      >
+                        <div className="text-xs font-black uppercase mb-1 text-center">
+                          {partLabel(q, partIdx)}
+                        </div>
+                        <input
+                          type="text"
+                          inputMode="text"
+                          autoComplete="off"
+                          value={value}
+                          onChange={(e) => handleTypePart(partIdx, e.target.value)}
+                          onBlur={commitText}
+                          placeholder="—"
+                          className="w-full border-2 border-black px-2 py-1 text-center text-lg font-bold bg-yellow-100"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : partImages.length > 0 ? (
+              <div className="space-y-3 mt-4">
+                {Array.from({ length: q.parts }).map((_, partIdx) => {
+                  const buf = typingBuf[q.id] as string[] | undefined;
+                  const arr = (answers[q.id] as string[]) || [];
+                  const value = (buf?.[partIdx] ?? arr[partIdx] ?? "");
+                  const img = partImages[partIdx] || "";
+                  return (
+                    <div
+                      key={partIdx}
+                      className="brut-card"
+                      style={{ background: "#facc15" }}
+                    >
+                      <label className="text-sm font-black uppercase mb-2 block">
+                        Sisi {partLabel(q, partIdx)}
+                      </label>
+                      {img && (
+                        <div className="mb-2 border-2 border-black p-1 bg-white inline-block">
+                          <Image
+                            src={img}
+                            alt={`Pilihan Sisi ${partLabel(q, partIdx)}`}
+                            width={600}
+                            height={140}
+                            className="max-w-full h-auto"
+                            unoptimized
+                          />
+                        </div>
+                      )}
+                      <input
+                        type="text"
+                        inputMode="text"
+                        autoComplete="off"
+                        value={value}
+                        onChange={(e) => handleTypePart(partIdx, e.target.value)}
+                        onBlur={commitText}
+                        placeholder={`Huruf jawaban Sisi ${partLabel(q, partIdx)} (A-E)`}
+                        className="w-full border-4 border-black px-3 py-2 text-lg font-bold bg-white uppercase"
+                      />
+                    </div>
+                  );
+                })}
+              </div>
             ) : (
               <div className="space-y-3 mt-4">
                 {Array.from({ length: q.parts }).map((_, partIdx) => {
@@ -669,6 +757,16 @@ function ExamplePreview({ q }: { q: ExampleQuestion }) {
   const opts = (Array.isArray(q.options) ? (q.options as OptionItem[]) : []).filter(
     (o) => o && typeof o === "object",
   );
+  const partImages: string[] = (() => {
+    const raw = q.options as unknown;
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      const obj = raw as { partImages?: unknown };
+      if (Array.isArray(obj.partImages)) {
+        return obj.partImages.map((v) => (v ? String(v) : ""));
+      }
+    }
+    return [];
+  })();
   const correctSet = correctSetFor(q);
   const correctTexts = correctTextFor(q);
   const isText = q.inputMode === "TEXT";
@@ -701,6 +799,27 @@ function ExamplePreview({ q }: { q: ExampleQuestion }) {
             className="max-w-full h-auto"
             unoptimized
           />
+        </div>
+      )}
+      {partImages.length > 0 && (
+        <div className="my-2 space-y-2">
+          {partImages.map((img, i) =>
+            img ? (
+              <div key={i} className="border-2 border-black p-2 bg-white">
+                <div className="text-xs font-black uppercase mb-1">
+                  Sisi {q.partLabels?.[i] ?? String(i + 1)}
+                </div>
+                <Image
+                  src={img}
+                  alt={`Pilihan Sisi ${i + 1}`}
+                  width={500}
+                  height={120}
+                  className="max-w-full h-auto"
+                  unoptimized
+                />
+              </div>
+            ) : null,
+          )}
         </div>
       )}
       {isText && (
