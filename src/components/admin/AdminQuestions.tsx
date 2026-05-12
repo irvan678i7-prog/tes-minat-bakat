@@ -395,6 +395,16 @@ function QuestionPreview({ q }: { q: Question }) {
   const opts = (Array.isArray(q.options) ? (q.options as OptionItem[]) : []).filter(
     (o) => o && typeof o === "object",
   );
+  const partImages: string[] = (() => {
+    const raw = q.options as unknown;
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      const obj = raw as { partImages?: unknown };
+      if (Array.isArray(obj.partImages)) {
+        return obj.partImages.map((v) => (v ? String(v) : ""));
+      }
+    }
+    return [];
+  })();
   const correctSet = new Set<string>(
     Array.isArray(q.correct)
       ? q.correct.map((x) => String(x).toUpperCase())
@@ -448,6 +458,23 @@ function QuestionPreview({ q }: { q: Question }) {
               alt={`Soal ${q.questionNo} (gambar 2)`}
               className="border-2 border-black max-h-60"
             />
+          )}
+        </div>
+      )}
+      {partImages.length > 0 && (
+        <div className="space-y-2 mb-2">
+          {partImages.map((img, i) =>
+            img ? (
+              <div key={i} className="border-2 border-black p-2 bg-white">
+                <div className="text-xs font-black uppercase mb-1">Sisi {i + 1}</div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={img}
+                  alt={`Pilihan Sisi ${i + 1}`}
+                  className="border-2 border-black max-h-40"
+                />
+              </div>
+            ) : null,
           )}
         </div>
       )}

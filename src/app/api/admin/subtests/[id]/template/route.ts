@@ -17,10 +17,57 @@ function needsTwoImages(s: SubtestSeed): boolean {
   return s.code === "BAKAT_4_URUTAN" || s.code === "BAKAT_5_SPASIAL";
 }
 
+// SISTEMATIS: 1 soal = 1 gambar + 12 kolom jawaban (TEXT). Template pakai
+// kolom kunci_1..kunci_12 supaya admin tidak perlu pisahkan kunci dengan ; di
+// 1 sel correctAnswer.
+function isSistematis(s: SubtestSeed): boolean {
+  return s.code === "BAKAT_7_SISTEMATISASI";
+}
+
+// 3D: tiap Sisi (I, II, III) punya 5 gambar pilihan visual (A-E). Jawaban
+// tetap TEXT (siswa ketik huruf per Sisi), tapi pilihan gambar ditampilkan
+// untuk referensi visual.
+function usesPerPartOptionImages(s: SubtestSeed): boolean {
+  return s.code === "BAKAT_6_3DIMENSI";
+}
+
+const SISTEMATIS_KUNCI_COLS = Array.from({ length: 12 }, (_, i) => `kunci_${i + 1}`);
+
+function partOptionImageCols(s: SubtestSeed): string[] {
+  if (!usesPerPartOptionImages(s)) return [];
+  // 1 kolom gambar per Sisi. Admin upload 1 gambar (mis. screenshot 5 pilihan
+  // A-E) per Sisi, lalu siswa mengetik huruf jawaban (A-E) untuk tiap Sisi.
+  const partLabels = s.partLabels && s.partLabels.length > 0 ? s.partLabels : ["I", "II", "III"];
+  return partLabels.map((p, i) => `sisi${i + 1}_image`);
+}
+
 function buildHeaders(s: SubtestSeed): string[] {
   const imageCols = needsTwoImages(s)
     ? ["imageUrl", "imageUrl2"]
     : ["imageUrl"];
+  if (isSistematis(s)) {
+    return [
+      "questionNo",
+      "prompt",
+      "imageUrl",
+      "parts",
+      "inputMode",
+      ...SISTEMATIS_KUNCI_COLS,
+      "scoringTag",
+    ];
+  }
+  if (usesPerPartOptionImages(s)) {
+    return [
+      "questionNo",
+      "prompt",
+      "imageUrl",
+      "parts",
+      "inputMode",
+      ...partOptionImageCols(s),
+      "correctAnswer",
+      "scoringTag",
+    ];
+  }
   if (isTextMode(s)) {
     return ["questionNo", "prompt", ...imageCols, "parts", "inputMode", "correctAnswer", "scoringTag"];
   }
@@ -75,6 +122,19 @@ function exampleSoalRow(s: SubtestSeed, no: number): Record<string, string | num
     inputMode: s.defaultInputMode ?? "CHOICE",
   };
   if (needsTwoImages(s)) row.imageUrl2 = "";
+  if (isSistematis(s)) {
+    for (let i = 0; i < 12; i++) {
+      row[`kunci_${i + 1}`] = ["B", "A", "D", "C", "E", "B", "A", "C", "D", "E", "A", "B"][i] ?? "";
+    }
+    row.scoringTag = "";
+    return row;
+  }
+  if (usesPerPartOptionImages(s)) {
+    for (const col of partOptionImageCols(s)) row[col] = "";
+    row.correctAnswer = textCorrectExample(s);
+    row.scoringTag = "";
+    return row;
+  }
   if (isTextMode(s)) {
     row.correctAnswer = textCorrectExample(s);
     row.scoringTag = "";
@@ -112,6 +172,17 @@ function blankSoalRow(s: SubtestSeed, no: number): Record<string, string | numbe
     inputMode: s.defaultInputMode ?? "CHOICE",
   };
   if (needsTwoImages(s)) row.imageUrl2 = "";
+  if (isSistematis(s)) {
+    for (let i = 0; i < 12; i++) row[`kunci_${i + 1}`] = "";
+    row.scoringTag = "";
+    return row;
+  }
+  if (usesPerPartOptionImages(s)) {
+    for (const col of partOptionImageCols(s)) row[col] = "";
+    row.correctAnswer = textCorrectExample(s);
+    row.scoringTag = "";
+    return row;
+  }
   if (isTextMode(s)) {
     row.correctAnswer = textCorrectExample(s);
     row.scoringTag = "";
@@ -175,7 +246,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     isText
       ? ["5. Kolom 'inputMode' = TEXT untuk subtes ini (jawaban diketik siswa, BUKAN pilihan ganda)."]
       : ["5. Kolom 'inputMode' = CHOICE (pilihan ganda). Kolom 'option*' & 'option*Image' untuk pilihan jawaban."],
-    isText && seed.parts > 1
+    isSistematis(seed)
+      ? ["6. SISTEMATIS: 1 soal = 1 gambar stem (12 simbol/posisi di dalamnya) + 12 kolom jawaban 'kunci_1'..'kunci_12'. Isi tiap kolom dengan kunci jawaban TEXT (huruf/angka) untuk posisi 1-12. Pencocokan abaikan huruf besar/kecil & spasi."]
+      : usesPerPartOptionImages(seed)
+      ? [`6. 3D: Tiap soal punya 1 gambar stem (balok 3D) + 3 gambar pilihan per Sisi (Sisi ${partLabelStr}). Upload 1 gambar per Sisi di kolom 'sisi1_image', 'sisi2_image', 'sisi3_image' (gambar berisi 5 pilihan A-E). Kunci diketik siswa di kolom 'correctAnswer' (3 huruf dipisah ;) — mis. ${textCorrectExample(seed)}.`]
+      : isText && seed.parts > 1
       ? [`6. Soal punya ${seed.parts} bagian (${partLabelStr}). Kunci pakai ; atau , — mis. ${textCorrectExample(seed)}.`]
       : seed.parts > 1
       ? ["6. Untuk soal multi-bagian (parts > 1), tulis kunci pakai ; atau , (mis. A;B atau A,B,C)."]
@@ -184,6 +259,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       : ["6. Tulis kunci 1 huruf (mis. A) di kolom 'correctAnswer'."],
     seed.testKind === "MINAT"
       ? ["7. Subtes MINAT: tiap soal HANYA 2 opsi (optionA & optionB). 'correctAnswer' DIKOSONGKAN — tidak ada benar/salah."]
+      : isSistematis(seed)
+      ? ["7. Kolom 'correctAnswer' TIDAK ADA — pakai kunci_1..kunci_12 saja. Skor: 1 poin per kunci yang benar (maks 12 poin per soal)."]
       : ["7. Untuk subtes BAKAT, kolom 'correctAnswer' WAJIB diisi sesuai kunci."],
     seed.testKind === "MINAT"
       ? ["   'scoringTag' WAJIB — isi 2 huruf bidang dipisah koma. Mis. 'A,B' artinya optionA = bidang A, optionB = bidang B."]
@@ -192,8 +269,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       ? ["   Pasangan bidang lengkap: A=Komunikasi, B=Seni, C=Kesehatan, D=Pariwisata, E=Administrasi, F=Teknologi, G=Agrobisnis, H=Industri."]
       : seed.code.startsWith("MINAT_PROG_")
       ? ["   Untuk Program (A-H), 'scoringTag' = pasangan huruf program/karier yang dipasangkan (lihat Tabel Program di Panduan Admin)."]
-      : seed.code === "BAKAT_7_SISTEMATISASI"
-      ? ["   FORMAT TES: ada KUNCI SIMBOL→HURUF (mis. ✈=A, ⚀=B, ⚘=C, ★=D, ...). Setiap soal menampilkan 1 simbol; siswa MENGETIK huruf yang sesuai."]
+      : isSistematis(seed)
+      ? ["   FORMAT TES: gambar stem berisi 12 simbol/posisi (mis. 1-12). Siswa mengetik jawaban (huruf/angka) untuk setiap posisi di 12 kotak isian."]
+      : usesPerPartOptionImages(seed)
+      ? ["   FORMAT TES: gambar stem balok 3D dengan panah ke Sisi I, II, III. Untuk tiap Sisi, siswa melihat 1 gambar pilihan (berisi 5 opsi A-E) lalu mengetik huruf yang cocok di kotak isian Sisi tsb."]
       : [""],
     ["8. Save sebagai .xlsx, lalu upload via tombol UPLOAD pada baris subtes ini di tab Bank Soal."],
     [""],
@@ -218,8 +297,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const wsContoh = XLSX.utils.json_to_sheet([exampleSoalRow(seed, 1)], { header: headers });
   wsContoh["!cols"] = headers.map((h) => {
     if (h === "prompt") return { wch: 50 };
-    if (h === "imageUrl" || h === "imageUrl2" || h.endsWith("Image")) return { wch: 24 };
+    if (h === "imageUrl" || h === "imageUrl2" || h.endsWith("Image") || h.endsWith("_image")) return { wch: 24 };
     if (h.startsWith("option") && !h.endsWith("Image")) return { wch: 24 };
+    if (h.startsWith("kunci_")) return { wch: 10 };
     return { wch: 14 };
   });
   XLSX.utils.book_append_sheet(wb, wsContoh, "CONTOH SOAL");

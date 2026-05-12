@@ -17,6 +17,11 @@ type Row = Record<string, unknown> & {
 
 const OPTION_KEYS = "ABCDEFGHIJKLMNOPQRSTUVWX".split("");
 
+// Subtes spesifik dengan kolom kunci_1..kunci_12 (SISTEMATIS).
+const SISTEMATIS_CODE = "BAKAT_7_SISTEMATISASI";
+// Subtes spesifik dengan kolom gambar per Sisi (3D).
+const PER_PART_IMAGES_CODE = "BAKAT_6_3DIMENSI";
+
 function buildOptions(r: Row): { key: string; label: string; imageUrl?: string }[] {
   const opts: { key: string; label: string; imageUrl?: string }[] = [];
   for (const k of OPTION_KEYS) {
@@ -34,6 +39,24 @@ function buildOptions(r: Row): { key: string; label: string; imageUrl?: string }
     }
   }
   return opts;
+}
+
+// 3D-style: simpan {partImages: [url1, url2, url3]} di kolom options untuk
+// referensi visual; kunci jawaban tetap di kolom correctAnswer (TEXT).
+function buildPartImages(r: Row, parts: number): string[] {
+  const out: string[] = [];
+  for (let i = 1; i <= parts; i++) {
+    const v = r[`sisi${i}_image`];
+    out.push(v ? String(v).trim() : "");
+  }
+  return out;
+}
+
+// SISTEMATIS: ambil 12 kolom kunci_1..kunci_12 sebagai array kunci jawaban.
+function buildSistematisKunci(r: Row): string[] {
+  const arr: string[] = [];
+  for (let i = 1; i <= 12; i++) arr.push(String(r[`kunci_${i}`] ?? "").trim());
+  return arr;
 }
 
 // MINAT: opsi di template selalu A,B (sepasang). scoringTag (mis. "A,B" atau
@@ -65,6 +88,8 @@ function rowsToData(
   isExample: boolean,
   fallbackMode: InputMode,
   isMinat: boolean,
+  subtestCode: string,
+  fallbackParts: number,
 ): {
   subtestId: string;
   questionNo: number;
@@ -78,25 +103,46 @@ function rowsToData(
   isExample: boolean;
   inputMode: string;
 }[] {
+  const isSistematis = subtestCode === SISTEMATIS_CODE;
+  const isPerPartImages = subtestCode === PER_PART_IMAGES_CODE;
   return list.map((r, i) => {
     const inputMode = resolveInputMode(r, fallbackMode);
-    const rawOpts = inputMode === "TEXT" ? [] : buildOptions(r);
-    const tag = r.scoringTag ? String(r.scoringTag).trim() : "";
-    const opts = isMinat && rawOpts.length > 0 && tag ? remapMinatOptions(rawOpts, tag) : rawOpts;
-    const parts = Number(r.parts ?? 1) || 1;
-    const correctStr = String(r.correctAnswer ?? "").trim();
-    let correct: string | string[];
-    if (inputMode === "TEXT") {
-      // For TEXT mode, store raw strings (case preserved). Comparison normalizes later.
-      correct =
-        parts > 1
-          ? correctStr.split(/[,;|]/).map((s) => s.trim()).filter(Boolean)
-          : correctStr;
+    let opts: unknown;
+    if (isPerPartImages) {
+      // Simpan gambar per Sisi sebagai object di kolom options.
+      const parts = Number(r.parts ?? fallbackParts) || fallbackParts;
+      opts = { partImages: buildPartImages(r, parts) };
+    } else if (inputMode === "TEXT") {
+      opts = [];
     } else {
-      correct =
-        parts > 1
-          ? correctStr.split(/[,;|]/).map((s) => s.trim().toUpperCase()).filter(Boolean)
-          : correctStr.toUpperCase();
+      const rawOpts = buildOptions(r);
+      const tagInner = r.scoringTag ? String(r.scoringTag).trim() : "";
+      opts =
+        isMinat && rawOpts.length > 0 && tagInner
+          ? remapMinatOptions(rawOpts, tagInner)
+          : rawOpts;
+    }
+    const parts = isSistematis
+      ? 12
+      : Number(r.parts ?? fallbackParts) || fallbackParts;
+    let correct: string | string[];
+    if (isSistematis) {
+      // 12 kolom kunci_1..kunci_12 → array of 12 strings (case preserved).
+      correct = buildSistematisKunci(r);
+    } else {
+      const correctStr = String(r.correctAnswer ?? "").trim();
+      if (inputMode === "TEXT") {
+        // For TEXT mode, store raw strings (case preserved). Comparison normalizes later.
+        correct =
+          parts > 1
+            ? correctStr.split(/[,;|]/).map((s) => s.trim()).filter(Boolean)
+            : correctStr;
+      } else {
+        correct =
+          parts > 1
+            ? correctStr.split(/[,;|]/).map((s) => s.trim().toUpperCase()).filter(Boolean)
+            : correctStr.toUpperCase();
+      }
     }
     return {
       subtestId,
@@ -119,7 +165,11 @@ function nonEmpty(r: Row): boolean {
   const promptStr = String(r.prompt ?? "").trim();
   const imageStr = String(r.imageUrl ?? "").trim();
   const correctStr = String(r.correctAnswer ?? "").trim();
-  return !!(promptStr || imageStr || opts.length > 0 || correctStr);
+  const sistematisAny = buildSistematisKunci(r).some((v) => v.length > 0);
+  const perPartImages = Array.from({ length: 6 }, (_, i) =>
+    String(r[`sisi${i + 1}_image`] ?? "").trim(),
+  ).some((v) => v.length > 0);
+  return !!(promptStr || imageStr || opts.length > 0 || correctStr || sistematisAny || perPartImages);
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -170,10 +220,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   const seed = [...BAKAT_SUBTESTS, ...MINAT_SUBTESTS].find((x) => x.code === sub.code);
   const fallbackMode: InputMode = seed?.defaultInputMode ?? "CHOICE";
+  const fallbackParts = seed?.parts ?? 1;
   const isMinat = sub.testKind === "MINAT";
 
-  const soalData = rowsToData(soalRows, sub.id, false, fallbackMode, isMinat);
-  const contohData = rowsToData(contohRows, sub.id, true, fallbackMode, isMinat);
+  const soalData = rowsToData(soalRows, sub.id, false, fallbackMode, isMinat, sub.code, fallbackParts);
+  const contohData = rowsToData(contohRows, sub.id, true, fallbackMode, isMinat, sub.code, fallbackParts);
 
   // Cascade-replace per (subtestId, isExample) bucket. Existing reports stay
   // intact because Result.payload is already computed and stored as JSON.

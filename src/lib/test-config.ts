@@ -11,7 +11,7 @@ export type SubtestSeed = {
   durationSec: number;
   orderIndex: number;
   expectedQuestions: number;
-  parts: 1 | 2 | 3;
+  parts: number;
   optionLabels: string[]; // labels used for options (multi-choice keys)
   defaultInputMode?: InputMode; // CHOICE (default) or TEXT (typed answer)
   partLabels?: string[]; // labels for multi-part TEXT inputs (e.g. ["I","II","III"])
@@ -95,13 +95,15 @@ export const BAKAT_SUBTESTS: SubtestSeed[] = [
     code: "BAKAT_7_SISTEMATISASI",
     testKind: "BAKAT",
     name: "Sistematisasi",
-    description: "Tes klerikal cepat; pasangkan simbol dengan huruf — ketik huruf jawaban.",
+    description:
+      "Tes klerikal cepat; tiap soal menampilkan 1 gambar dengan 12 simbol/posisi — ketik 12 jawaban (1 jawaban per kolom).",
     durationSec: 4 * 60,
     orderIndex: 7,
-    expectedQuestions: 150,
-    parts: 1,
+    expectedQuestions: 12,
+    parts: 12,
     optionLabels: [],
     defaultInputMode: "TEXT",
+    partLabels: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"],
   },
   {
     code: "BAKAT_8_KOSAKATA",
