@@ -730,7 +730,7 @@ function BulkUploadModal({
   };
 
   const setParts = (idx: number, parts: number) => {
-    const clamped = Math.max(1, Math.min(12, Math.floor(parts) || 1));
+    const clamped = Math.max(1, Math.min(SISTEMATIS_MAX_PARTS, Math.floor(parts) || 1));
     setItems((prev) =>
       prev.map((it, i) => {
         if (i !== idx) return it;
@@ -779,8 +779,8 @@ function BulkUploadModal({
       const it = items[i];
       if (!it.file) return `Kartu #${i + 1}: gambar belum dipilih.`;
       if (isSpasial && it.parts !== 5) return `Kartu #${i + 1}: SPASIAL harus 5 jawaban.`;
-      if (isSistematis && (it.parts < 1 || it.parts > 12))
-        return `Kartu #${i + 1}: SISTEMATIS parts harus 1-12.`;
+      if (isSistematis && (it.parts < 1 || it.parts > SISTEMATIS_MAX_PARTS))
+        return `Kartu #${i + 1}: SISTEMATIS parts harus 1-${SISTEMATIS_MAX_PARTS}.`;
       for (let p = 0; p < it.parts; p++) {
         const k = (it.kunci[p] ?? "").trim();
         if (!k) return `Kartu #${i + 1}: kunci posisi ${p + 1} belum diisi.`;
