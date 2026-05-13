@@ -25,6 +25,7 @@ type Question = {
   parts: number;
   options: OptionItem[] | unknown;
   correct: unknown;
+  partLabels?: string[] | null;
   scoringTag: string | null;
   isExample?: boolean;
   inputMode?: "CHOICE" | "TEXT" | string;
@@ -576,6 +577,10 @@ type BulkItem = {
   // (A-L untuk 1-12). Disimpan sebagai string lepas supaya tidak repot
   // validasinya saat ketik.
   kunci: string[];
+  // Label nomor untuk tiap sel di lembar jawaban siswa. Default "1","2",….
+  // Admin bisa edit (mis. "6","7",… untuk soal #2 supaya berkesinambungan)
+  // atau pakai tombol Auto-Nomor.
+  partLabels: string[];
   // Optional: prompt teks tambahan (jarang dipakai untuk kedua subtes ini).
   prompt: string;
   // Jadikan contoh soal (tampil sebelum timer mulai).
@@ -597,6 +602,7 @@ function newBulkItem(file: File | null, code: string): BulkItem {
     previewUrl: file ? URL.createObjectURL(file) : "",
     parts,
     kunci: Array.from({ length: parts }).map(() => ""),
+    partLabels: Array.from({ length: parts }, (_, i) => String(i + 1)),
     prompt: "",
     isExample: false,
   };
@@ -684,6 +690,18 @@ function BulkUploadModal({
     );
   };
 
+  const setPartLabel = (idx: number, partIdx: number, value: string) => {
+    setItems((prev) =>
+      prev.map((it, i) => {
+        if (i !== idx) return it;
+        const labels = it.partLabels.slice();
+        while (labels.length < it.parts) labels.push(String(labels.length + 1));
+        labels[partIdx] = value;
+        return { ...it, partLabels: labels };
+      }),
+    );
+  };
+
   const setParts = (idx: number, parts: number) => {
     const clamped = Math.max(1, Math.min(12, Math.floor(parts) || 1));
     setItems((prev) =>
@@ -691,10 +709,41 @@ function BulkUploadModal({
         if (i !== idx) return it;
         const kunci = it.kunci.slice(0, clamped);
         while (kunci.length < clamped) kunci.push("");
-        return { ...it, parts: clamped, kunci };
+        const labels = it.partLabels.slice(0, clamped);
+        while (labels.length < clamped) labels.push(String(labels.length + 1));
+        return { ...it, parts: clamped, kunci, partLabels: labels };
       }),
     );
   };
+
+  // Auto-isi label nomor sel "lembar jawaban" untuk SEMUA soal.
+  // mode="continuous": Q1 → 1..N1, Q2 → (N1+1)..(N1+N2), … (default).
+  // mode="per-question": tiap soal mulai dari 1 lagi.
+  const autoNumber = (mode: "continuous" | "per-question", startAt: number) => {
+    setItems((prev) => {
+      let next = Math.max(1, Math.floor(startAt) || 1);
+      return prev.map((it) => {
+        const labels: string[] = [];
+        if (mode === "per-question") {
+          for (let i = 0; i < it.parts; i++) labels.push(String(i + 1));
+        } else {
+          for (let i = 0; i < it.parts; i++) {
+            labels.push(String(next));
+            next++;
+          }
+        }
+        return { ...it, partLabels: labels };
+      });
+    });
+    toast.success(
+      mode === "continuous"
+        ? `Auto-nomor berkesinambungan mulai dari ${startAt}`
+        : "Auto-nomor per soal (1..N)",
+    );
+  };
+
+  // Total cell (jumlah jawaban) yang akan dinilai = sum dari it.parts.
+  const totalCells = items.reduce((acc, it) => acc + it.parts, 0);
 
   // Validasi: tiap item harus punya gambar + semua kunci terisi.
   const validate = (): string | null => {
@@ -730,6 +779,7 @@ function BulkUploadModal({
         questionNo: i + 1,
         parts: it.parts,
         kunci: it.kunci.slice(0, it.parts).map((s) => s.trim()),
+        partLabels: it.partLabels.slice(0, it.parts).map((s) => String(s).trim()),
         prompt: it.prompt || "",
         isExample: it.isExample,
       }));
@@ -817,7 +867,10 @@ function BulkUploadModal({
               }}
             />
             <span className="brut-tag" style={{ background: "#a3e635" }}>
-              {items.length} gambar
+              {items.length} soal
+            </span>
+            <span className="brut-tag" style={{ background: "#facc15" }}>
+              {totalCells} jawaban total
             </span>
           </div>
           <label className="flex items-center gap-2 text-sm font-bold">
@@ -829,6 +882,10 @@ function BulkUploadModal({
             Ganti semua soal lama (default: ya)
           </label>
         </div>
+
+        {items.length > 0 && (
+          <AutoNumberBar onApply={(mode, startAt) => autoNumber(mode, startAt)} />
+        )}
 
         {items.length === 0 && (
           <div
@@ -935,6 +992,8 @@ function BulkUploadModal({
                         key={p}
                         idx={p}
                         value={it.kunci[p] ?? ""}
+                        labelValue={it.partLabels[p] ?? String(p + 1)}
+                        onLabelChange={(v) => setPartLabel(idx, p, v)}
                         isSpasial={isSpasial}
                         onChange={(v) => setKunci(idx, p, v)}
                       />
@@ -967,23 +1026,79 @@ function BulkUploadModal({
   );
 }
 
+function AutoNumberBar({
+  onApply,
+}: {
+  onApply: (mode: "continuous" | "per-question", startAt: number) => void;
+}) {
+  const [startAt, setStartAt] = useState(1);
+  return (
+    <div className="brut-card mb-3" style={{ background: "#d1fae5" }}>
+      <div className="flex items-center flex-wrap gap-2">
+        <span className="text-xs font-black uppercase">Auto-Nomor Lembar Jawaban:</span>
+        <label className="text-xs font-black uppercase flex items-center gap-1">
+          mulai dari
+          <input
+            type="number"
+            min={1}
+            value={startAt}
+            onChange={(e) => setStartAt(parseInt(e.target.value || "1", 10) || 1)}
+            className="brut-input w-20 text-sm"
+          />
+        </label>
+        <button
+          type="button"
+          className="brut-btn brut-btn-black text-xs"
+          onClick={() => onApply("continuous", startAt)}
+          title="Lanjut nomor antar soal: Q1 → 1..N, Q2 → (N+1).., dst."
+        >
+          BERKESINAMBUNGAN
+        </button>
+        <button
+          type="button"
+          className="brut-btn text-xs"
+          onClick={() => onApply("per-question", 1)}
+          title="Setiap soal mulai dari 1 (default)"
+        >
+          PER SOAL (1..N)
+        </button>
+        <span className="text-xs font-bold opacity-70">
+          Atau ketik manual di kotak nomor di tiap sel.
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function BulkKunciInput({
   idx,
   value,
+  labelValue,
+  onLabelChange,
   isSpasial,
   onChange,
 }: {
   idx: number;
   value: string;
+  labelValue: string;
+  onLabelChange: (v: string) => void;
   isSpasial: boolean;
   onChange: (v: string) => void;
 }) {
   // Untuk SPASIAL: tombol toggle B/S supaya cepat. Untuk SISTEMATIS: input 1
-  // huruf A-L.
+  // huruf A-L. Di atas tiap sel, admin bisa edit label nomornya yang akan
+  // tampil di lembar jawaban siswa (mis. "6" alih-alih "1").
   if (isSpasial) {
     return (
       <div className="border-2 border-black bg-white p-1">
-        <div className="text-[10px] font-black text-center mb-1">{idx + 1}</div>
+        <input
+          type="text"
+          value={labelValue}
+          onChange={(e) => onLabelChange(e.target.value)}
+          className="w-full text-[10px] font-black text-center mb-1 border-b-2 border-black bg-transparent focus:outline-none focus:bg-yellow-100"
+          placeholder={String(idx + 1)}
+          title={`Label cell #${idx + 1} di lembar jawaban siswa`}
+        />
         <div className="grid grid-cols-2 gap-1">
           <button
             type="button"
@@ -1005,7 +1120,14 @@ function BulkKunciInput({
   }
   return (
     <div className="border-2 border-black bg-white p-1">
-      <div className="text-[10px] font-black text-center mb-1">{idx + 1}</div>
+      <input
+        type="text"
+        value={labelValue}
+        onChange={(e) => onLabelChange(e.target.value)}
+        className="w-full text-[10px] font-black text-center mb-1 border-b-2 border-black bg-transparent focus:outline-none focus:bg-yellow-100"
+        placeholder={String(idx + 1)}
+        title={`Label cell #${idx + 1} di lembar jawaban siswa`}
+      />
       <input
         type="text"
         maxLength={1}

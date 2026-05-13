@@ -28,7 +28,19 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
   const seedCfg = [...BAKAT_SUBTESTS, ...MINAT_SUBTESTS].find(
     (x) => x.code === subtest.code,
   );
-  const partLabels = seedCfg?.partLabels ?? [];
+  const seedPartLabels = seedCfg?.partLabels ?? [];
+
+  // Resolve label nomor di tiap sel "lembar jawaban" per soal. Kalau admin
+  // sudah set Question.partLabels (lewat upload XLSX / bulk upload / edit),
+  // pakai itu. Kalau belum, fallback ke label default dari test-config
+  // (mis. ["1", "2", …, "5"] untuk SPASIAL).
+  const resolvePartLabels = (q: { parts: number; partLabels: unknown }): string[] => {
+    if (Array.isArray(q.partLabels) && q.partLabels.length > 0) {
+      return q.partLabels.map((v) => (v == null ? "" : String(v)));
+    }
+    if (seedPartLabels.length > 0) return seedPartLabels;
+    return Array.from({ length: q.parts }, (_, i) => String(i + 1));
+  };
 
   const questions = shuffle(realQuestions, `${sub.randomSeed}:${subtest.code}`).map((q) => ({
     id: q.id,
@@ -38,7 +50,7 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
     parts: q.parts,
     options: q.options,
     inputMode: (q.inputMode === "TEXT" ? "TEXT" : "CHOICE") as "CHOICE" | "TEXT",
-    partLabels,
+    partLabels: resolvePartLabels(q),
   }));
 
   const examples = exampleQuestions.map((q) => ({
@@ -50,7 +62,7 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
     options: q.options,
     correct: q.correct,
     inputMode: (q.inputMode === "TEXT" ? "TEXT" : "CHOICE") as "CHOICE" | "TEXT",
-    partLabels,
+    partLabels: resolvePartLabels(q),
   }));
 
   const existing = await prisma.answer.findMany({

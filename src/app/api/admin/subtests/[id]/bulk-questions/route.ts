@@ -25,6 +25,9 @@ type MetaItem = {
   questionNo?: number;
   isExample?: boolean;
   imageUrl?: string; // gambar yang sudah ada (re-use, tidak upload ulang)
+  // Custom label nomor di tiap sel lembar jawaban (override default 1..N).
+  // Boleh string angka (mis. "6") atau huruf. Panjang = parts.
+  partLabels?: unknown;
 };
 
 function isMetaItem(v: unknown): v is MetaItem {
@@ -38,6 +41,24 @@ function normalizeKunci(raw: unknown, parts: number): string[] {
   }
   while (arr.length < parts) arr.push("");
   return arr.slice(0, parts);
+}
+
+// Normalisasi partLabels: array string yang panjangnya = parts. Kalau
+// admin tidak isi (atau pakai default 1..N), kita return null supaya
+// student view fallback ke label default dari test-config.
+function normalizePartLabels(raw: unknown, parts: number): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  const arr: string[] = [];
+  for (const v of raw) arr.push(v == null ? "" : String(v).trim());
+  while (arr.length < parts) arr.push("");
+  const sliced = arr.slice(0, parts);
+  // Default = ["1", "2", …]. Anggap admin pakai default kalau semua sel
+  // kosong ATAU semua sel persis cocok 1..parts. Simpan null untuk
+  // hemat storage & supaya fallback otomatis terpicu.
+  const isAllEmpty = sliced.every((s) => s === "");
+  const isDefault = sliced.every((s, i) => s === String(i + 1));
+  if (isAllEmpty || isDefault) return null;
+  return sliced;
 }
 
 export async function POST(
@@ -135,6 +156,7 @@ export async function POST(
     parts: number;
     options: object;
     correct: object;
+    partLabels: Prisma.InputJsonValue | typeof Prisma.JsonNull;
     scoringTag: string | null;
     isExample: boolean;
     inputMode: string;
@@ -153,6 +175,11 @@ export async function POST(
     const opts: object = isSpasial
       ? (SPASIAL_OPTIONS as unknown as object)
       : ([] as unknown as object);
+    const partLabelsArr = normalizePartLabels(m.partLabels, parts);
+    const partLabels: Prisma.InputJsonValue | typeof Prisma.JsonNull =
+      partLabelsArr === null
+        ? Prisma.JsonNull
+        : (partLabelsArr as unknown as Prisma.InputJsonValue);
     return {
       subtestId: sub.id,
       questionNo: Number(m.questionNo ?? i + 1) || i + 1,
@@ -162,6 +189,7 @@ export async function POST(
       parts,
       options: opts,
       correct: correctArr as unknown as object,
+      partLabels,
       scoringTag: null,
       isExample: !!m.isExample,
       // SPASIAL pakai CHOICE (tombol B/S), SISTEMATIS pakai TEXT (ketik huruf).
