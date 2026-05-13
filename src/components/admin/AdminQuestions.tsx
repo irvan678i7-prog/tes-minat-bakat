@@ -30,11 +30,17 @@ type Question = {
   inputMode?: "CHOICE" | "TEXT" | string;
 };
 
+// Subtes yang strukturnya "1 gambar = 1 soal dengan N kunci jawaban".
+// Untuk subtes ini admin bisa pakai flow upload massal supaya tidak perlu
+// upload gambar 1 per 1 + tempel URL ke Excel.
+const BULK_UPLOAD_CODES = new Set(["BAKAT_5_SPASIAL", "BAKAT_7_SISTEMATISASI"]);
+
 export default function AdminQuestions() {
   const [subs, setSubs] = useState<Subtest[]>([]);
   const [imageBusy, setImageBusy] = useState(false);
   const [previewSub, setPreviewSub] = useState<Subtest | null>(null);
   const [editInstrSub, setEditInstrSub] = useState<Subtest | null>(null);
+  const [bulkSub, setBulkSub] = useState<Subtest | null>(null);
   const imgRef = useRef<HTMLInputElement>(null);
 
   const load = () =>
@@ -163,6 +169,16 @@ export default function AdminQuestions() {
                     >
                       INSTRUKSI
                     </button>
+                    {BULK_UPLOAD_CODES.has(s.code) && (
+                      <button
+                        className="brut-btn text-xs"
+                        style={{ background: "#86efac" }}
+                        onClick={() => setBulkSub(s)}
+                        title="Upload banyak gambar sekaligus + isi kunci di form (no Excel)"
+                      >
+                        UPLOAD MASSAL
+                      </button>
+                    )}
                     <button
                       className="brut-btn brut-btn-pink text-xs"
                       disabled={s.questionCount === 0}
@@ -185,6 +201,17 @@ export default function AdminQuestions() {
           subtest={editInstrSub}
           onClose={() => setEditInstrSub(null)}
           onSave={(text) => saveInstructions(editInstrSub.id, text)}
+        />
+      )}
+      {bulkSub && (
+        <BulkUploadModal
+          subtest={bulkSub}
+          onClose={() => setBulkSub(null)}
+          onDone={() => {
+            toast.success("Soal subtes diperbarui");
+            setBulkSub(null);
+            load();
+          }}
         />
       )}
     </div>
@@ -531,6 +558,462 @@ function QuestionPreview({ q }: { q: Question }) {
           })}
         </ul>
       )}
+    </div>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Upload Massal (khusus SPASIAL & SISTEMATIS)
+// ───────────────────────────────────────────────────────────────────────────────
+
+type BulkItem = {
+  // File asli (kalau baru dipilih) untuk preview + upload.
+  file: File | null;
+  // Preview URL (object URL kalau ada File, atau URL imageUrl existing).
+  previewUrl: string;
+  parts: number;
+  // Kunci jawaban per part. Untuk SPASIAL: "B" / "S". Untuk SISTEMATIS: 1 huruf
+  // (A-L untuk 1-12). Disimpan sebagai string lepas supaya tidak repot
+  // validasinya saat ketik.
+  kunci: string[];
+  // Optional: prompt teks tambahan (jarang dipakai untuk kedua subtes ini).
+  prompt: string;
+  // Jadikan contoh soal (tampil sebelum timer mulai).
+  isExample: boolean;
+};
+
+const SPASIAL_CODE_FE = "BAKAT_5_SPASIAL";
+const SISTEMATIS_CODE_FE = "BAKAT_7_SISTEMATISASI";
+
+function defaultPartsFor(code: string): number {
+  if (code === SPASIAL_CODE_FE) return 5;
+  return 12; // SISTEMATIS default — admin bisa override per kartu (mis. 4 atau 2).
+}
+
+function newBulkItem(file: File | null, code: string): BulkItem {
+  const parts = defaultPartsFor(code);
+  return {
+    file,
+    previewUrl: file ? URL.createObjectURL(file) : "",
+    parts,
+    kunci: Array.from({ length: parts }).map(() => ""),
+    prompt: "",
+    isExample: false,
+  };
+}
+
+function BulkUploadModal({
+  subtest,
+  onClose,
+  onDone,
+}: {
+  subtest: Subtest;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const isSpasial = subtest.code === SPASIAL_CODE_FE;
+  const isSistematis = subtest.code === SISTEMATIS_CODE_FE;
+  const [items, setItems] = useState<BulkItem[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [replaceAll, setReplaceAll] = useState(true);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // Bersihin object URLs saat unmount.
+  useEffect(() => {
+    return () => {
+      for (const it of items) {
+        if (it.file && it.previewUrl) URL.revokeObjectURL(it.previewUrl);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const addFiles = (files: FileList | File[] | null) => {
+    if (!files) return;
+    const arr = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    if (arr.length === 0) {
+      toast.error("Pilih file gambar (.png/.jpg)");
+      return;
+    }
+    setItems((prev) => [
+      ...prev,
+      ...arr.map((f) => newBulkItem(f, subtest.code)),
+    ]);
+  };
+
+  const removeAt = (idx: number) => {
+    setItems((prev) => {
+      const next = prev.slice();
+      const removed = next.splice(idx, 1)[0];
+      if (removed?.file && removed.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+      return next;
+    });
+  };
+
+  const moveUp = (idx: number) => {
+    if (idx <= 0) return;
+    setItems((prev) => {
+      const next = prev.slice();
+      [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+      return next;
+    });
+  };
+
+  const moveDown = (idx: number) => {
+    setItems((prev) => {
+      if (idx >= prev.length - 1) return prev;
+      const next = prev.slice();
+      [next[idx + 1], next[idx]] = [next[idx], next[idx + 1]];
+      return next;
+    });
+  };
+
+  const setItem = (idx: number, patch: Partial<BulkItem>) => {
+    setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
+  };
+
+  const setKunci = (idx: number, partIdx: number, value: string) => {
+    setItems((prev) =>
+      prev.map((it, i) => {
+        if (i !== idx) return it;
+        const kunci = it.kunci.slice();
+        while (kunci.length < it.parts) kunci.push("");
+        kunci[partIdx] = value;
+        return { ...it, kunci };
+      }),
+    );
+  };
+
+  const setParts = (idx: number, parts: number) => {
+    const clamped = Math.max(1, Math.min(12, Math.floor(parts) || 1));
+    setItems((prev) =>
+      prev.map((it, i) => {
+        if (i !== idx) return it;
+        const kunci = it.kunci.slice(0, clamped);
+        while (kunci.length < clamped) kunci.push("");
+        return { ...it, parts: clamped, kunci };
+      }),
+    );
+  };
+
+  // Validasi: tiap item harus punya gambar + semua kunci terisi.
+  const validate = (): string | null => {
+    if (items.length === 0) return "Belum ada gambar yang dipilih.";
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (!it.file) return `Kartu #${i + 1}: gambar belum dipilih.`;
+      if (isSpasial && it.parts !== 5) return `Kartu #${i + 1}: SPASIAL harus 5 jawaban.`;
+      if (isSistematis && (it.parts < 1 || it.parts > 12))
+        return `Kartu #${i + 1}: SISTEMATIS parts harus 1-12.`;
+      for (let p = 0; p < it.parts; p++) {
+        const k = (it.kunci[p] ?? "").trim();
+        if (!k) return `Kartu #${i + 1}: kunci posisi ${p + 1} belum diisi.`;
+        if (isSpasial && !["B", "S"].includes(k.toUpperCase()))
+          return `Kartu #${i + 1}: kunci posisi ${p + 1} harus B atau S.`;
+        if (isSistematis && !/^[A-La-l]$/.test(k))
+          return `Kartu #${i + 1}: kunci posisi ${p + 1} harus huruf A-L.`;
+      }
+    }
+    return null;
+  };
+
+  const onSubmit = async () => {
+    const err = validate();
+    if (err) {
+      toast.error(err);
+      return;
+    }
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      const meta = items.map((it, i) => ({
+        questionNo: i + 1,
+        parts: it.parts,
+        kunci: it.kunci.slice(0, it.parts).map((s) => s.trim()),
+        prompt: it.prompt || "",
+        isExample: it.isExample,
+      }));
+      fd.append("meta", JSON.stringify(meta));
+      if (replaceAll) fd.append("replaceAll", "1");
+      items.forEach((it, i) => {
+        if (it.file) fd.append(`image_${i}`, it.file);
+      });
+      const res = await fetch(`/api/admin/subtests/${subtest.id}/bulk-questions`, {
+        method: "POST",
+        body: fd,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "Gagal simpan");
+        return;
+      }
+      toast.success(`Sukses: ${data.created} soal disimpan`);
+      onDone();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Drag-drop handler untuk seluruh modal.
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (busy) return;
+    addFiles(e.dataTransfer?.files ?? null);
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/60 flex items-start md:items-center justify-center p-2 md:p-6 overflow-y-auto"
+      onClick={onClose}
+    >
+      <div
+        className="brut-card bg-white w-full max-w-5xl my-4"
+        style={{ background: "#fff" }}
+        onClick={(e) => e.stopPropagation()}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onDrop={onDrop}
+      >
+        <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+          <div>
+            <p className="text-xs font-black uppercase">{subtest.testKind} • {subtest.code}</p>
+            <h3 className="text-2xl font-black uppercase">Upload Massal: {subtest.name}</h3>
+          </div>
+          <button className="brut-btn brut-btn-black" onClick={onClose} type="button">
+            TUTUP
+          </button>
+        </div>
+
+        <div className="brut-card mb-4" style={{ background: "#fef3c7" }}>
+          <p className="text-sm font-bold">
+            Pilih banyak gambar sekaligus (atau drag-drop ke area ini). Tiap gambar = 1 soal.
+            {isSpasial && (
+              <> Untuk SPASIAL: tiap soal punya <strong>5 jawaban B/S</strong> (default fixed).</>
+            )}
+            {isSistematis && (
+              <>
+                {" "}
+                Untuk SISTEMATIS: tiap soal punya <strong>12 jawaban huruf A-L</strong> (default).
+                Boleh kurang untuk baris terakhir (mis. 4 atau 2 di buku asli).
+              </>
+            )}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-2 mb-3 items-center justify-between">
+          <div className="flex flex-wrap gap-2 items-center">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="brut-input"
+              onChange={(e) => {
+                addFiles(e.target.files);
+                if (fileRef.current) fileRef.current.value = "";
+              }}
+            />
+            <span className="brut-tag" style={{ background: "#a3e635" }}>
+              {items.length} gambar
+            </span>
+          </div>
+          <label className="flex items-center gap-2 text-sm font-bold">
+            <input
+              type="checkbox"
+              checked={replaceAll}
+              onChange={(e) => setReplaceAll(e.target.checked)}
+            />
+            Ganti semua soal lama (default: ya)
+          </label>
+        </div>
+
+        {items.length === 0 && (
+          <div
+            className="border-2 border-dashed border-black p-8 text-center text-sm font-bold mb-4"
+            style={{ background: "#f5f5f5" }}
+          >
+            Drop gambar di sini, atau klik tombol Choose File di atas. Bisa pilih banyak gambar
+            sekaligus dengan Ctrl/Cmd+klik.
+          </div>
+        )}
+
+        <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
+          {items.map((it, idx) => (
+            <div
+              key={idx}
+              className="brut-card"
+              style={{ background: it.isExample ? "#e0f2fe" : "#f5f5f5" }}
+            >
+              <div className="flex items-start gap-3 flex-wrap">
+                <div className="flex flex-col items-center gap-1">
+                  <span className="brut-tag" style={{ background: "#facc15" }}>
+                    SOAL {idx + 1}
+                  </span>
+                  <button
+                    type="button"
+                    className="brut-btn text-xs"
+                    onClick={() => moveUp(idx)}
+                    disabled={idx === 0}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className="brut-btn text-xs"
+                    onClick={() => moveDown(idx)}
+                    disabled={idx === items.length - 1}
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    className="brut-btn brut-btn-pink text-xs"
+                    onClick={() => removeAt(idx)}
+                    title="Hapus soal ini"
+                  >
+                    HAPUS
+                  </button>
+                </div>
+                <div className="shrink-0">
+                  {it.previewUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={it.previewUrl}
+                      alt={`Gambar soal ${idx + 1}`}
+                      className="border-2 border-black max-h-40 max-w-[300px] object-contain bg-white"
+                    />
+                  ) : (
+                    <div className="border-2 border-black w-40 h-32 flex items-center justify-center text-xs font-bold">
+                      (belum ada gambar)
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1 min-w-[260px]">
+                  <div className="flex flex-wrap gap-3 items-center mb-2">
+                    {isSistematis && (
+                      <label className="text-xs font-black uppercase flex items-center gap-1">
+                        Parts:
+                        <input
+                          type="number"
+                          min={1}
+                          max={12}
+                          value={it.parts}
+                          onChange={(e) =>
+                            setParts(idx, parseInt(e.target.value || "12", 10))
+                          }
+                          className="brut-input w-16 text-sm"
+                        />
+                      </label>
+                    )}
+                    {isSpasial && (
+                      <span className="text-xs font-black uppercase">Parts: 5 (fixed)</span>
+                    )}
+                    <label className="text-xs font-black uppercase flex items-center gap-1">
+                      <input
+                        type="checkbox"
+                        checked={it.isExample}
+                        onChange={(e) => setItem(idx, { isExample: e.target.checked })}
+                      />
+                      Contoh Soal
+                    </label>
+                  </div>
+                  <div className="text-xs font-black uppercase mb-1">
+                    Kunci Jawaban ({it.parts} posisi)
+                  </div>
+                  <div
+                    className={
+                      isSpasial
+                        ? "grid grid-cols-5 gap-2"
+                        : "grid grid-cols-4 sm:grid-cols-6 md:grid-cols-12 gap-2"
+                    }
+                  >
+                    {Array.from({ length: it.parts }).map((_, p) => (
+                      <BulkKunciInput
+                        key={p}
+                        idx={p}
+                        value={it.kunci[p] ?? ""}
+                        isSpasial={isSpasial}
+                        onChange={(v) => setKunci(idx, p, v)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 mt-4 pt-3 border-t-2 border-black">
+          <span className="text-xs font-bold opacity-70">
+            {items.length} gambar siap disimpan.
+            {replaceAll
+              ? " Semua soal lama subtes ini akan diganti."
+              : " Soal baru akan ditambahkan (tidak menghapus yang lama)."}
+          </span>
+          <button
+            type="button"
+            className="brut-btn brut-btn-pink"
+            disabled={busy || items.length === 0}
+            onClick={onSubmit}
+          >
+            {busy ? "MENYIMPAN..." : "SIMPAN SEMUA"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BulkKunciInput({
+  idx,
+  value,
+  isSpasial,
+  onChange,
+}: {
+  idx: number;
+  value: string;
+  isSpasial: boolean;
+  onChange: (v: string) => void;
+}) {
+  // Untuk SPASIAL: tombol toggle B/S supaya cepat. Untuk SISTEMATIS: input 1
+  // huruf A-L.
+  if (isSpasial) {
+    return (
+      <div className="border-2 border-black bg-white p-1">
+        <div className="text-[10px] font-black text-center mb-1">{idx + 1}</div>
+        <div className="grid grid-cols-2 gap-1">
+          <button
+            type="button"
+            className={`brut-btn text-xs ${value.toUpperCase() === "B" ? "brut-btn-black" : ""}`}
+            onClick={() => onChange("B")}
+          >
+            B
+          </button>
+          <button
+            type="button"
+            className={`brut-btn text-xs ${value.toUpperCase() === "S" ? "brut-btn-pink" : ""}`}
+            onClick={() => onChange("S")}
+          >
+            S
+          </button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="border-2 border-black bg-white p-1">
+      <div className="text-[10px] font-black text-center mb-1">{idx + 1}</div>
+      <input
+        type="text"
+        maxLength={1}
+        value={value}
+        onChange={(e) => onChange(e.target.value.replace(/[^A-La-l]/g, "").toUpperCase())}
+        className="brut-input w-full text-center font-black uppercase"
+        placeholder="A-L"
+      />
     </div>
   );
 }
