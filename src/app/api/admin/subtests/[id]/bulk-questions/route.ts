@@ -68,6 +68,22 @@ export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  try {
+    return await handle(req, ctx);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[bulk-questions] unhandled error:", err);
+    return NextResponse.json(
+      { error: `Gagal menyimpan: ${msg}` },
+      { status: 500 },
+    );
+  }
+}
+
+async function handle(
+  req: NextRequest,
+  ctx: { params: Promise<{ id: string }> },
+) {
   const admin = getAdminFromRequest(req);
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -220,6 +236,10 @@ export async function POST(
   const doReplace = typeof replaceAll === "string" && (replaceAll === "1" || replaceAll === "true");
 
   // Replace seluruh Question subtes ini (default), atau append (kalau diminta).
+  // Saat append, questionNo dari client (1..N) akan bentrok dengan questionNo
+  // soal lama karena ada unique constraint @@unique([subtestId, questionNo,
+  // isExample]). Jadi kita re-base questionNo per group (isExample) dari max
+  // yang sudah ada + 1.
   if (doReplace) {
     await prisma.$transaction([
       prisma.answer.deleteMany({ where: { question: { subtestId: sub.id } } }),
@@ -227,6 +247,27 @@ export async function POST(
       prisma.question.createMany({ data: data as unknown as Prisma.QuestionCreateManyInput[] }),
     ]);
   } else {
+    const [maxSoal, maxContoh] = await Promise.all([
+      prisma.question.findFirst({
+        where: { subtestId: sub.id, isExample: false },
+        orderBy: { questionNo: "desc" },
+        select: { questionNo: true },
+      }),
+      prisma.question.findFirst({
+        where: { subtestId: sub.id, isExample: true },
+        orderBy: { questionNo: "desc" },
+        select: { questionNo: true },
+      }),
+    ]);
+    let nextSoal = (maxSoal?.questionNo ?? 0) + 1;
+    let nextContoh = (maxContoh?.questionNo ?? 0) + 1;
+    for (const row of data) {
+      if (row.isExample) {
+        row.questionNo = nextContoh++;
+      } else {
+        row.questionNo = nextSoal++;
+      }
+    }
     await prisma.question.createMany({
       data: data as unknown as Prisma.QuestionCreateManyInput[],
     });
