@@ -59,6 +59,11 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
   const existingMap: Record<string, unknown> = {};
   for (const a of existing) existingMap[a.questionId] = a.selected;
 
+  // Subtes dianggap selesai kalau semua soal real sudah punya jawaban. Saat
+  // selesai, runner masuk mode read-only (tidak bisa diubah / ngulang).
+  const isCompleted =
+    realQuestions.length > 0 && existing.length >= realQuestions.length;
+
   return (
     <SubtestRunner
       subtest={{
@@ -71,6 +76,7 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
       questions={questions}
       examples={examples}
       existingAnswers={existingMap}
+      isCompleted={isCompleted}
     />
   );
 }

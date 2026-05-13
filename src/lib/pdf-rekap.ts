@@ -50,7 +50,15 @@ export function buildRekapPDF(
   let y = 130;
   doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
-  const subtitle = `Kelas: ${meta.grade || "Semua Kelas"}    •    Total Peserta: ${rows.length}    •    Dicetak: ${meta.generatedAt.toLocaleString("id-ID")}`;
+  const printedAt = meta.generatedAt.toLocaleString("id-ID", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Jakarta",
+  });
+  const subtitle = `Kelas: ${meta.grade || "Semua Kelas"}    •    Total Peserta: ${rows.length}    •    Dicetak: ${printedAt} WIB`;
   doc.text(subtitle, margin, y);
   y += 18;
 

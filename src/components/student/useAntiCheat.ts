@@ -20,21 +20,46 @@ export type AntiCheatState = {
   lastAt: number;
 };
 
-const SUPPRESS_MS = 800; // dedupe rapid-fire events (e.g. blur + visibilitychange).
+// Dedupe rapid-fire events. Banyak aksi user yang tunggal sebenarnya memicu
+// >1 event browser (mis. pindah tab → blur + visibilitychange; tekan Ctrl+C
+// → keydown + copy; keluar fullscreen → fullscreenchange + blur). Dengan
+// dedupe ini, 1 aksi user dihitung sebagai 1 pelanggaran, bukan 2-3.
+const SUPPRESS_MS = 1200;
 
-function isShortcutBlocked(e: KeyboardEvent): boolean {
-  // Block obvious cheat shortcuts: copy/paste/cut, save page, view source, print,
-  // dev tools, find in page, open new tab. Whitelist Tab/Enter/letters/arrows.
+// Pasangan event yang harus dianggap satu aksi. Kalau salah satu sudah
+// dilaporkan dalam SUPPRESS_MS terakhir, yang lain di-suppress.
+const SAME_ACTION_GROUPS: ViolationType[][] = [
+  ["tab_hidden", "blur"],
+  ["fullscreen_exit", "blur"],
+  ["shortcut", "copy"],
+  ["shortcut", "paste"],
+  ["shortcut", "cut"],
+];
+
+function inSameActionGroup(a: ViolationType, b: ViolationType): boolean {
+  if (a === b) return true;
+  return SAME_ACTION_GROUPS.some((g) => g.includes(a) && g.includes(b));
+}
+
+function isShortcutBlocked(e: KeyboardEvent): {
+  blocked: boolean;
+  // Apakah event ini perlu dilaporkan sebagai pelanggaran "shortcut". Untuk
+  // ctrl+c/v/x kita tetap preventDefault tapi TIDAK report lewat shortcut —
+  // event copy/paste/cut yang lebih spesifik sudah menangani report-nya.
+  report: boolean;
+} {
   if (e.metaKey || e.ctrlKey) {
     const k = e.key.toLowerCase();
-    if (["c", "v", "x", "a", "s", "p", "u", "f", "t", "n"].includes(k)) return true;
+    // c/v/x ditangani oleh listener copy/paste/cut — jangan double-report.
+    if (["c", "v", "x"].includes(k)) return { blocked: true, report: false };
+    if (["a", "s", "p", "u", "f", "t", "n"].includes(k)) return { blocked: true, report: true };
   }
-  if (e.key === "F12") return true;
+  if (e.key === "F12") return { blocked: true, report: true };
   if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
     const k = e.key.toLowerCase();
-    if (["i", "j", "c"].includes(k)) return true;
+    if (["i", "j", "c"].includes(k)) return { blocked: true, report: true };
   }
-  return false;
+  return { blocked: false, report: false };
 }
 
 /**
@@ -97,10 +122,14 @@ export function useAntiCheat(opts: {
 
     const report = async (type: ViolationType) => {
       const now = Date.now();
-      // Dedupe identical event firing twice within suppress window.
+      // Dedupe: kalau event yang sama ATAU event dari grup aksi yang sama
+      // sudah dilaporkan dalam SUPPRESS_MS terakhir, abaikan. Ini mencegah
+      // 1 aksi user (mis. pindah tab) dihitung 2x karena memicu beberapa
+      // event browser sekaligus.
       if (
-        lastFireRef.current.type === type &&
-        now - lastFireRef.current.at < SUPPRESS_MS
+        lastFireRef.current.type != null &&
+        now - lastFireRef.current.at < SUPPRESS_MS &&
+        inSameActionGroup(lastFireRef.current.type, type)
       ) {
         return;
       }
@@ -174,9 +203,10 @@ export function useAntiCheat(opts: {
       report("context_menu");
     };
     const onKey = (e: KeyboardEvent) => {
-      if (isShortcutBlocked(e)) {
+      const { blocked, report: shouldReport } = isShortcutBlocked(e);
+      if (blocked) {
         e.preventDefault();
-        report("shortcut");
+        if (shouldReport) report("shortcut");
       }
     };
 

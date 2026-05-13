@@ -49,15 +49,30 @@ type Counts = {
   total: number;
 };
 
+// Render selalu di zona Asia/Jakarta (WIB) supaya konsisten dengan waktu
+// siswa di Indonesia — bukan waktu server (UTC).
 function fmt(dt: string | null): string {
   if (!dt) return "—";
-  return new Date(dt).toLocaleString("id-ID");
+  return (
+    new Date(dt).toLocaleString("id-ID", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "Asia/Jakarta",
+    }) + " WIB"
+  );
 }
 
 function fmtShort(dt: string | null): string {
   if (!dt) return "—";
   const d = new Date(dt);
-  return d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleTimeString("id-ID", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Jakarta",
+  });
 }
 
 function timeLeft(exp: string): string {
@@ -143,7 +158,9 @@ export default function AdminTokens() {
   useEffect(() => {
     load();
     const tickId = setInterval(() => setTick((n) => n + 1), 1000);
-    const reloadId = setInterval(load, 8000);
+    // Reload tiap 3 detik supaya presentase "sedang mengerjakan", "selesai",
+    // dst. terus up-to-date tanpa harus refresh manual.
+    const reloadId = setInterval(load, 3000);
     return () => {
       clearInterval(tickId);
       clearInterval(reloadId);

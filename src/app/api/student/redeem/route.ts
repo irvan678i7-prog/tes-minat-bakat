@@ -50,7 +50,9 @@ export async function POST(req: NextRequest) {
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 3 * 60 * 60,
+    // 12 jam: cukup lama supaya tidak putus di tengah tes. Batas waktu tes
+    // tetap dikendalikan oleh durationSec per subtes — bukan oleh cookie.
+    maxAge: 12 * 60 * 60,
   });
   return res;
 }

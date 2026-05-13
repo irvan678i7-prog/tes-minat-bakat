@@ -68,8 +68,37 @@ export async function POST(req: NextRequest) {
     at: parsed.data.occurredAt ?? new Date().toISOString(),
     subtestCode: parsed.data.subtestCode ?? null,
   };
+
+  // Server-side dedup (defense in depth): kalau request terakhir terjadi
+  // dalam 1.5 detik dari sekarang DAN merupakan event dari grup aksi yang
+  // sama (mis. tab_hidden + blur dari pindah tab yang sama), jangan tambah
+  // count — cukup log entry untuk audit. Ini melindungi dari race condition
+  // ketika 2 event browser dari 1 aksi user sampai ke server hampir bersamaan.
+  const SERVER_DEDUP_MS = 1500;
+  const SAME_ACTION_GROUPS: string[][] = [
+    ["tab_hidden", "blur"],
+    ["fullscreen_exit", "blur"],
+    ["shortcut", "copy"],
+    ["shortcut", "paste"],
+    ["shortcut", "cut"],
+  ];
+  const inSameGroup = (a: string, b: string): boolean => {
+    if (a === b) return true;
+    return SAME_ACTION_GROUPS.some((g) => g.includes(a) && g.includes(b));
+  };
+  const last = prevLog[prevLog.length - 1];
+  const lastAt = last ? Date.parse(last.at) : 0;
+  const nowMs = Date.parse(entry.at);
+  const isDup =
+    last &&
+    Number.isFinite(lastAt) &&
+    Number.isFinite(nowMs) &&
+    nowMs - lastAt >= 0 &&
+    nowMs - lastAt < SERVER_DEDUP_MS &&
+    inSameGroup(last.type, entry.type);
+
   const newLog = [...prevLog, entry].slice(-MAX_LOG_ENTRIES);
-  const newCount = sub.violationCount + 1;
+  const newCount = isDup ? sub.violationCount : sub.violationCount + 1;
   const newFlagged = sub.flaggedCheating || newCount >= VIOLATION_THRESHOLD;
 
   await prisma.submission.update({

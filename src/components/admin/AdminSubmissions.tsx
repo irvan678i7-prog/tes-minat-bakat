@@ -25,7 +25,16 @@ type ClassRow = { school: string; grade: string; testKind: "MINAT" | "BAKAT"; co
 
 function fmt(dt: string | null): string {
   if (!dt) return "—";
-  return new Date(dt).toLocaleString("id-ID");
+  return (
+    new Date(dt).toLocaleString("id-ID", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "Asia/Jakarta",
+    }) + " WIB"
+  );
 }
 
 export default function AdminSubmissions() {
@@ -49,6 +58,10 @@ export default function AdminSubmissions() {
 
   useEffect(() => {
     refresh();
+    // Auto-refresh tiap 5 detik supaya daftar peserta real-time — admin tidak
+    // perlu refresh manual untuk melihat siapa yang baru saja selesai.
+    const id = setInterval(refresh, 5000);
+    return () => clearInterval(id);
   }, []);
 
   const onDelete = async (s: Sub) => {
