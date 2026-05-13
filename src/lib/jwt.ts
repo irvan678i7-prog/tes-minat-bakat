@@ -14,7 +14,10 @@ export function signAdminToken(p: AdminPayload, expiresIn: SignOptions["expiresI
   return jwt.sign(p, SECRET, { expiresIn });
 }
 
-export function signStudentToken(p: StudentPayload, expiresIn: SignOptions["expiresIn"] = "3h"): string {
+// Sesi siswa diberi masa berlaku panjang (12 jam) supaya "waktu token" tidak
+// memutus sesi di tengah pengerjaan. Batas waktu tes diatur via durationSec
+// per subtes — bukan dari masa berlaku JWT.
+export function signStudentToken(p: StudentPayload, expiresIn: SignOptions["expiresIn"] = "12h"): string {
   return jwt.sign(p, SECRET, { expiresIn });
 }
 

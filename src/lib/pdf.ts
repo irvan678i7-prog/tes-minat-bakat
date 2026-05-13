@@ -43,6 +43,8 @@ const TIER_COLORS: Record<string, string> = {
   LB: SUCCESS,
 };
 
+// Selalu render di zona waktu Asia/Jakarta (WIB) supaya waktu di laporan
+// konsisten dengan waktu siswa di Indonesia — bukan UTC server.
 function fmtDate(d?: Date | null): string {
   if (!d) return "—";
   return new Date(d).toLocaleString("id-ID", {
@@ -51,7 +53,8 @@ function fmtDate(d?: Date | null): string {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-  });
+    timeZone: "Asia/Jakarta",
+  }) + " WIB";
 }
 
 function fmtDateOnly(d?: Date | null): string {
@@ -60,6 +63,7 @@ function fmtDateOnly(d?: Date | null): string {
     day: "2-digit",
     month: "long",
     year: "numeric",
+    timeZone: "Asia/Jakarta",
   });
 }
 

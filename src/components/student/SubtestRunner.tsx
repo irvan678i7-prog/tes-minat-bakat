@@ -127,11 +127,13 @@ export default function SubtestRunner({
   questions,
   examples,
   existingAnswers,
+  isCompleted = false,
 }: {
   subtest: { code: string; name: string; description: string; instructions?: string; durationSec: number };
   questions: Question[];
   examples: ExampleQuestion[];
   existingAnswers: Record<string, unknown>;
+  isCompleted?: boolean;
 }) {
   const router = useRouter();
   const [answers, setAnswers] = useState<Record<string, string | string[]>>(() => {
@@ -335,13 +337,17 @@ export default function SubtestRunner({
     router.push("/test");
   };
 
+  // Saat waktu habis: jangan langsung pindah ke /test — cukup tampilkan toast
+  // peringatan sekali. Siswa boleh menyelesaikan/menyimpan jawaban yang masih
+  // dalam pengetikan, lalu klik "SELESAI SUBTES" sendiri. Ini mencegah siswa
+  // ter-yanked keluar sebelum sempat menyimpan jawaban.
+  const [timeUpNotified, setTimeUpNotified] = useState(false);
   useEffect(() => {
-    if (timeUp) {
-      toast("Waktu habis untuk subtes ini.");
-      finishSub();
+    if (timeUp && !timeUpNotified) {
+      setTimeUpNotified(true);
+      toast("Waktu untuk subtes ini sudah habis. Klik SELESAI SUBTES untuk lanjut.");
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeUp]);
+  }, [timeUp, timeUpNotified]);
 
   const handleStart = () => {
     if (typeof window !== "undefined") {
@@ -353,6 +359,53 @@ export default function SubtestRunner({
   };
 
   if (!q) return null;
+
+  // ── Completed screen: subtes sudah dijawab semua → tidak boleh diulang.
+  //    Tampilkan banner "Subtes Selesai" + tombol kembali ke daftar.
+  if (isCompleted) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <header className="border-b-4 border-black bg-green-300 sticky top-0 z-20">
+          <div className="max-w-4xl mx-auto px-6 py-3 flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <div className="text-xs font-black uppercase opacity-70">SUBTES</div>
+              <div className="text-xl font-black uppercase">{subtest.name}</div>
+            </div>
+            <span className="brut-tag" style={{ background: "#000", color: "#fff" }}>
+              SUBTES SELESAI
+            </span>
+          </div>
+        </header>
+        <main className="flex-1 max-w-4xl mx-auto px-6 py-8 w-full space-y-6">
+          <div className="brut-card" style={{ background: "#a3e635" }}>
+            <h2 className="text-2xl font-black uppercase mb-2">Subtes Ini Sudah Selesai</h2>
+            <p className="font-semibold">
+              Anda sudah menjawab semua {questions.length} soal pada subtes <strong>{subtest.name}</strong>.
+              Jawaban tidak dapat diubah lagi. Silakan lanjut ke subtes berikutnya atau klik
+              <strong> SELESAIKAN TES</strong> di daftar subtes setelah semua subtes selesai.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3 items-center justify-between">
+            <button
+              onClick={() => {
+                if (typeof window !== "undefined") {
+                  // Bersihkan timer/started flag biar tidak nyangkut di state
+                  // lama saat masuk ke subtes lain.
+                  window.localStorage.removeItem(STORAGE_KEY(subtest.code));
+                  window.localStorage.removeItem(STARTED_KEY(subtest.code));
+                }
+                router.push("/test");
+              }}
+              className="brut-btn brut-btn-pink text-lg"
+              type="button"
+            >
+              ← KEMBALI KE DAFTAR SUBTES
+            </button>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   // ── Intro screen: instructions + example questions, before timer ─────
   if (hydrated && !started) {
@@ -402,12 +455,16 @@ export default function SubtestRunner({
             <div className="brut-card" style={{ background: "#22d3ee" }}>
               <h2 className="text-2xl font-black uppercase mb-2">Contoh Soal</h2>
               <p className="text-sm font-bold mb-4">
-                Pelajari contoh berikut. Soal contoh tidak dihitung sebagai nilai. Klik
+                Coba isi/klik jawaban di bawah untuk latihan. Setelah klik <span className="bg-black text-white px-1">CEK JAWABAN</span>, kunci akan ditampilkan. Soal contoh tidak dihitung sebagai nilai. Klik
                 tombol <span className="bg-black text-white px-1">MULAI</span> di bawah saat siap.
               </p>
               <div className="space-y-4">
                 {examples.map((ex) => (
-                  <ExamplePreview key={ex.id} q={ex} />
+                  <ExamplePreview
+                    key={ex.id}
+                    q={ex}
+                    subtestCode={subtest.code}
+                  />
                 ))}
               </div>
             </div>
@@ -757,7 +814,11 @@ export default function SubtestRunner({
             ← SEBELUMNYA
           </button>
           <span className="text-sm font-bold">Terjawab: {answeredCount}/{questions.length}</span>
-          {idx < questions.length - 1 ? (
+          {timeUp ? (
+            <button onClick={finishSub} className="brut-btn brut-btn-pink">
+              SELESAI SUBTES (WAKTU HABIS)
+            </button>
+          ) : idx < questions.length - 1 ? (
             <button onClick={goNext} className="brut-btn brut-btn-black">
               SELANJUTNYA →
             </button>
@@ -798,7 +859,13 @@ export default function SubtestRunner({
   );
 }
 
-function ExamplePreview({ q }: { q: ExampleQuestion }) {
+function ExamplePreview({
+  q,
+  subtestCode,
+}: {
+  q: ExampleQuestion;
+  subtestCode: string;
+}) {
   const opts = (Array.isArray(q.options) ? (q.options as OptionItem[]) : []).filter(
     (o) => o && typeof o === "object",
   );
@@ -815,6 +882,55 @@ function ExamplePreview({ q }: { q: ExampleQuestion }) {
   const correctSet = correctSetFor(q);
   const correctTexts = correctTextFor(q);
   const isText = q.inputMode === "TEXT";
+  const isSistematis = subtestCode === "BAKAT_7_SISTEMATISASI";
+  const isSpasial = subtestCode === "BAKAT_5_SPASIAL";
+
+  // Local practice state. Tidak dikirim ke server — hanya untuk latihan siswa
+  // sebelum klik MULAI.
+  const [pickSingle, setPickSingle] = useState<string>("");
+  const [pickMulti, setPickMulti] = useState<string[]>(() =>
+    Array.from({ length: Math.max(q.parts, 1) }, () => ""),
+  );
+  const [textSingle, setTextSingle] = useState<string>("");
+  const [textMulti, setTextMulti] = useState<string[]>(() =>
+    Array.from({ length: Math.max(q.parts, 1) }, () => ""),
+  );
+  const [showKey, setShowKey] = useState(false);
+
+  const resetPractice = () => {
+    setPickSingle("");
+    setPickMulti(Array.from({ length: Math.max(q.parts, 1) }, () => ""));
+    setTextSingle("");
+    setTextMulti(Array.from({ length: Math.max(q.parts, 1) }, () => ""));
+    setShowKey(false);
+  };
+
+  const setMulti = (
+    setter: (next: string[]) => void,
+    cur: string[],
+    partIdx: number,
+    value: string,
+  ) => {
+    const next = cur.slice();
+    while (next.length < q.parts) next.push("");
+    next[partIdx] = value;
+    setter(next);
+  };
+
+  const correctClassFor = (partIdx: number, value: string): string => {
+    if (!showKey) return "";
+    const expected = (correctTexts[partIdx] || "").trim().toUpperCase();
+    const got = (value || "").trim().toUpperCase();
+    if (!expected) return "";
+    return got === expected ? "bg-green-200" : "bg-red-100";
+  };
+  const correctBg = (isCorrect: boolean, selected: boolean): string => {
+    if (!showKey) return selected ? "#facc15" : "#fff";
+    if (selected && isCorrect) return "#a3e635";
+    if (selected && !isCorrect) return "#fca5a5";
+    if (!selected && isCorrect) return "#bbf7d0";
+    return "#fff";
+  };
 
   return (
     <div className="border-2 border-black p-3 bg-white">
@@ -867,7 +983,224 @@ function ExamplePreview({ q }: { q: ExampleQuestion }) {
           )}
         </div>
       )}
-      {isText && (
+
+      {/* INTERACTIVE INPUT AREA — mirror runner UI in mini form */}
+      {isText ? (
+        q.parts <= 1 ? (
+          <div className="mt-3">
+            <label className="text-xs font-black uppercase block mb-1">
+              Coba Jawab
+            </label>
+            <input
+              type="text"
+              inputMode="text"
+              autoComplete="off"
+              value={textSingle}
+              onChange={(e) => {
+                setTextSingle(e.target.value);
+                if (showKey) setShowKey(false);
+              }}
+              placeholder="Ketik jawaban di sini"
+              className={`w-full border-2 border-black px-3 py-2 text-base font-bold bg-white ${correctClassFor(0, textSingle)}`}
+            />
+          </div>
+        ) : isSistematis ? (
+          <div className="mt-3">
+            <div className="text-xs font-black uppercase mb-1">
+              Coba Isi {q.parts} Jawaban
+            </div>
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+              {Array.from({ length: q.parts }).map((_, i) => (
+                <div key={i} className="border-2 border-black bg-white p-1">
+                  <div className="text-xs font-black uppercase mb-1 text-center">
+                    {partLabel(q, i)}
+                  </div>
+                  <input
+                    type="text"
+                    inputMode="text"
+                    autoComplete="off"
+                    value={textMulti[i] ?? ""}
+                    onChange={(e) => {
+                      setMulti(setTextMulti, textMulti, i, e.target.value);
+                      if (showKey) setShowKey(false);
+                    }}
+                    placeholder="—"
+                    className={`w-full border border-black px-1 py-1 text-center text-sm font-bold ${correctClassFor(i, textMulti[i] ?? "")}`}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="mt-3 space-y-2">
+            {Array.from({ length: q.parts }).map((_, i) => (
+              <div key={i} className="border-2 border-black p-2 bg-white">
+                <label className="text-xs font-black uppercase block mb-1">
+                  {partImages.length > 0 ? "Sisi" : "Bagian"} {partLabel(q, i)}
+                </label>
+                <input
+                  type="text"
+                  inputMode="text"
+                  autoComplete="off"
+                  value={textMulti[i] ?? ""}
+                  onChange={(e) => {
+                    setMulti(setTextMulti, textMulti, i, e.target.value);
+                    if (showKey) setShowKey(false);
+                  }}
+                  placeholder={`Jawaban ${partLabel(q, i)}`}
+                  className={`w-full border-2 border-black px-2 py-1 text-base font-bold ${correctClassFor(i, textMulti[i] ?? "")}`}
+                />
+              </div>
+            ))}
+          </div>
+        )
+      ) : q.parts <= 1 ? (
+        <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+          {opts.map((o) => {
+            const selected = pickSingle === o.key;
+            const isCorrect = correctSet.has(String(o.key).toUpperCase());
+            return (
+              <li key={o.key}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPickSingle(o.key);
+                    if (showKey) setShowKey(false);
+                  }}
+                  className="border-2 border-black p-2 w-full text-left flex gap-2 items-start"
+                  style={{ background: correctBg(isCorrect, selected) }}
+                >
+                  <span className="font-black">{o.key}.</span>
+                  <div className="flex-1">
+                    {o.imageUrl && (
+                      <Image
+                        src={o.imageUrl}
+                        alt={`Opsi ${o.key}`}
+                        width={120}
+                        height={120}
+                        className="border-2 border-black mb-1 max-h-32 w-auto"
+                        unoptimized
+                      />
+                    )}
+                    <p className="text-sm font-semibold whitespace-pre-wrap">
+                      {o.label || (o.imageUrl ? "(gambar)" : "—")}
+                    </p>
+                    {showKey && isCorrect && (
+                      <span className="brut-tag mt-1 inline-block" style={{ background: "#000", color: "#fff" }}>
+                        KUNCI
+                      </span>
+                    )}
+                  </div>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : isSpasial ? (
+        <div className="mt-3">
+          <div className="text-xs font-black uppercase mb-2">
+            Coba pilih B / S untuk tiap bentuk
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
+            {Array.from({ length: q.parts }).map((_, partIdx) => {
+              const cur = pickMulti[partIdx] ?? "";
+              const expected = (correctTexts[partIdx] || "").toUpperCase();
+              return (
+                <div
+                  key={partIdx}
+                  className="border-2 border-black bg-white p-2 flex flex-col gap-1 items-center"
+                >
+                  <div className="text-sm font-black">{partLabel(q, partIdx)}</div>
+                  <div className="flex gap-1">
+                    {opts.map((o) => {
+                      const selected = cur === o.key;
+                      const isCorrect = expected === o.key.toUpperCase();
+                      return (
+                        <button
+                          key={o.key}
+                          type="button"
+                          onClick={() => {
+                            setMulti(setPickMulti, pickMulti, partIdx, o.key);
+                            if (showKey) setShowKey(false);
+                          }}
+                          className="border-2 border-black px-3 py-1 font-black"
+                          style={{
+                            background: correctBg(isCorrect, selected),
+                            minWidth: 36,
+                          }}
+                        >
+                          {o.key}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 space-y-2">
+          {Array.from({ length: q.parts }).map((_, partIdx) => {
+            const cur = pickMulti[partIdx] ?? "";
+            const expected = (correctTexts[partIdx] || "").toUpperCase();
+            return (
+              <div key={partIdx} className="border-2 border-black p-2 bg-white">
+                <div className="text-xs font-black uppercase mb-1">
+                  Bagian {partLabel(q, partIdx)}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {opts.map((o) => {
+                    const selected = cur === o.key;
+                    const isCorrect = expected === o.key.toUpperCase();
+                    return (
+                      <button
+                        key={o.key}
+                        type="button"
+                        onClick={() => {
+                          setMulti(setPickMulti, pickMulti, partIdx, o.key);
+                          if (showKey) setShowKey(false);
+                        }}
+                        className="border-2 border-black px-2 py-1 font-bold"
+                        style={{ background: correctBg(isCorrect, selected) }}
+                      >
+                        <span className="font-black mr-1">{o.key}</span>
+                        <span className="text-sm">{o.label || ""}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="mt-3 flex flex-wrap gap-2 items-center">
+        <button
+          type="button"
+          onClick={() => setShowKey(true)}
+          className="brut-btn brut-btn-black"
+          style={{ padding: "4px 10px", fontSize: 12 }}
+        >
+          CEK JAWABAN
+        </button>
+        <button
+          type="button"
+          onClick={resetPractice}
+          className="brut-btn brut-btn-white"
+          style={{ padding: "4px 10px", fontSize: 12 }}
+        >
+          ULANG
+        </button>
+        {showKey && (
+          <span className="text-xs font-bold ml-2">
+            Kunci ditampilkan di bawah. Jawaban benar berwarna hijau.
+          </span>
+        )}
+      </div>
+
+      {showKey && (
         <div className="mt-2 border-2 border-black p-2" style={{ background: "#fff7ed" }}>
           <div className="text-xs font-black uppercase mb-1">Kunci Jawaban (Contoh)</div>
           {q.parts > 1 ? (
@@ -878,7 +1211,7 @@ function ExamplePreview({ q }: { q: ExampleQuestion }) {
                   className="brut-tag"
                   style={{ background: "#a3e635" }}
                 >
-                  Bagian {partLabel(q, i)} = {correctTexts[i] || "—"}
+                  {partImages.length > 0 ? "Sisi" : "Bagian"} {partLabel(q, i)} = {correctTexts[i] || "—"}
                 </span>
               ))}
             </div>
@@ -888,42 +1221,6 @@ function ExamplePreview({ q }: { q: ExampleQuestion }) {
             </span>
           )}
         </div>
-      )}
-      {!isText && opts.length > 0 && (
-        <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {opts.map((o) => {
-            const isCorrect = correctSet.has(String(o.key).toUpperCase());
-            return (
-              <li
-                key={o.key}
-                className="border-2 border-black p-2 flex gap-2 items-start"
-                style={{ background: isCorrect ? "#a3e635" : "#fff" }}
-              >
-                <span className="font-black">{o.key}.</span>
-                <div className="flex-1">
-                  {o.imageUrl && (
-                    <Image
-                      src={o.imageUrl}
-                      alt={`Opsi ${o.key}`}
-                      width={120}
-                      height={120}
-                      className="border-2 border-black mb-1 max-h-32 w-auto"
-                      unoptimized
-                    />
-                  )}
-                  <p className="text-sm font-semibold whitespace-pre-wrap">
-                    {o.label || (o.imageUrl ? "(gambar)" : "—")}
-                  </p>
-                  {isCorrect && (
-                    <span className="brut-tag mt-1 inline-block" style={{ background: "#000", color: "#fff" }}>
-                      KUNCI
-                    </span>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
       )}
     </div>
   );
