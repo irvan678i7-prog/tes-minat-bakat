@@ -1208,7 +1208,7 @@ function BulkKunciInput({
         maxLength={1}
         value={value}
         onChange={(e) => onChange(e.target.value.replace(/[^A-Xa-x]/g, "").toUpperCase())}
-        className="brut-input w-full text-center font-black uppercase"
+        className="kunci-input w-full text-center font-black uppercase"
         placeholder="A-X"
       />
     </div>
