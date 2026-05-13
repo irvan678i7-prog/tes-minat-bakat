@@ -17,10 +17,19 @@ type Row = Record<string, unknown> & {
 
 const OPTION_KEYS = "ABCDEFGHIJKLMNOPQRSTUVWX".split("");
 
-// Subtes spesifik dengan kolom kunci_1..kunci_12 (SISTEMATIS).
+// Subtes spesifik dengan kolom kunci_1..kunci_12 (SISTEMATIS). Parts variabel
+// per soal (max 12), dibaca dari kolom 'parts' di tiap baris Excel.
 const SISTEMATIS_CODE = "BAKAT_7_SISTEMATISASI";
 // Subtes spesifik dengan kolom gambar per Sisi (3D).
 const PER_PART_IMAGES_CODE = "BAKAT_6_3DIMENSI";
+// Subtes spesifik dengan kolom kunci_1..kunci_5 (SPASIAL). Parts = 5; tiap
+// kunci diisi 'B' atau 'S'.
+const SPASIAL_CODE = "BAKAT_5_SPASIAL";
+const SPASIAL_PARTS = 5;
+const SPASIAL_OPTIONS: { key: string; label: string }[] = [
+  { key: "B", label: "Sama (B)" },
+  { key: "S", label: "Beda (S)" },
+];
 
 function buildOptions(r: Row): { key: string; label: string; imageUrl?: string }[] {
   const opts: { key: string; label: string; imageUrl?: string }[] = [];
@@ -52,10 +61,11 @@ function buildPartImages(r: Row, parts: number): string[] {
   return out;
 }
 
-// SISTEMATIS: ambil 12 kolom kunci_1..kunci_12 sebagai array kunci jawaban.
-function buildSistematisKunci(r: Row): string[] {
+// Ambil N kolom kunci_1..kunci_N sebagai array kunci jawaban. Dipakai oleh
+// SISTEMATIS (parts variabel, max 12) dan SPASIAL (parts = 5).
+function buildKunciKolom(r: Row, parts: number): string[] {
   const arr: string[] = [];
-  for (let i = 1; i <= 12; i++) arr.push(String(r[`kunci_${i}`] ?? "").trim());
+  for (let i = 1; i <= parts; i++) arr.push(String(r[`kunci_${i}`] ?? "").trim());
   return arr;
 }
 
@@ -105,13 +115,24 @@ function rowsToData(
 }[] {
   const isSistematis = subtestCode === SISTEMATIS_CODE;
   const isPerPartImages = subtestCode === PER_PART_IMAGES_CODE;
+  const isSpasial = subtestCode === SPASIAL_CODE;
   return list.map((r, i) => {
     const inputMode = resolveInputMode(r, fallbackMode);
+    // Parts: SPASIAL is always 5, SISTEMATIS is variable (capped at 12),
+    // others default to row.parts / seed.parts.
+    const rawParts = Number(r.parts ?? fallbackParts) || fallbackParts;
+    const parts = isSpasial
+      ? SPASIAL_PARTS
+      : isSistematis
+      ? Math.max(1, Math.min(12, rawParts))
+      : rawParts;
     let opts: unknown;
     if (isPerPartImages) {
       // Simpan gambar per Sisi sebagai object di kolom options.
-      const parts = Number(r.parts ?? fallbackParts) || fallbackParts;
       opts = { partImages: buildPartImages(r, parts) };
+    } else if (isSpasial) {
+      // Hardcode opsi B/S — admin tidak perlu isi option* di template.
+      opts = SPASIAL_OPTIONS;
     } else if (inputMode === "TEXT") {
       opts = [];
     } else {
@@ -122,13 +143,13 @@ function rowsToData(
           ? remapMinatOptions(rawOpts, tagInner)
           : rawOpts;
     }
-    const parts = isSistematis
-      ? 12
-      : Number(r.parts ?? fallbackParts) || fallbackParts;
     let correct: string | string[];
     if (isSistematis) {
-      // 12 kolom kunci_1..kunci_12 → array of 12 strings (case preserved).
-      correct = buildSistematisKunci(r);
+      // N kolom kunci_1..kunci_N (parts) → array of N strings (case preserved).
+      correct = buildKunciKolom(r, parts);
+    } else if (isSpasial) {
+      // 5 kolom kunci_1..kunci_5 → array of 5 strings (B/S, upper-cased).
+      correct = buildKunciKolom(r, parts).map((s) => s.toUpperCase());
     } else {
       const correctStr = String(r.correctAnswer ?? "").trim();
       if (inputMode === "TEXT") {
@@ -165,11 +186,13 @@ function nonEmpty(r: Row): boolean {
   const promptStr = String(r.prompt ?? "").trim();
   const imageStr = String(r.imageUrl ?? "").trim();
   const correctStr = String(r.correctAnswer ?? "").trim();
-  const sistematisAny = buildSistematisKunci(r).some((v) => v.length > 0);
+  // Kolom kunci_1..kunci_12 dipakai SISTEMATIS (12 kolom) & SPASIAL (5
+  // kolom). Cek semua 12 supaya nonEmpty bekerja untuk kedua kasus.
+  const kunciAny = buildKunciKolom(r, 12).some((v) => v.length > 0);
   const perPartImages = Array.from({ length: 6 }, (_, i) =>
     String(r[`sisi${i + 1}_image`] ?? "").trim(),
   ).some((v) => v.length > 0);
-  return !!(promptStr || imageStr || opts.length > 0 || correctStr || sistematisAny || perPartImages);
+  return !!(promptStr || imageStr || opts.length > 0 || correctStr || kunciAny || perPartImages);
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {

@@ -17,6 +17,20 @@ type Row = Record<string, unknown> & {
 
 const OPTION_KEYS = "ABCDEFGHIJKLMNOPQRSTUVWX".split("");
 
+const SISTEMATIS_CODE = "BAKAT_7_SISTEMATISASI";
+const SPASIAL_CODE = "BAKAT_5_SPASIAL";
+const SPASIAL_PARTS = 5;
+const SPASIAL_OPTIONS: { key: string; label: string }[] = [
+  { key: "B", label: "Sama (B)" },
+  { key: "S", label: "Beda (S)" },
+];
+
+function buildKunciKolom(r: Row, parts: number): string[] {
+  const arr: string[] = [];
+  for (let i = 1; i <= parts; i++) arr.push(String(r[`kunci_${i}`] ?? "").trim());
+  return arr;
+}
+
 function buildOptions(r: Row): { key: string; label: string; imageUrl?: string }[] {
   const opts: { key: string; label: string; imageUrl?: string }[] = [];
   for (const k of OPTION_KEYS) {
@@ -67,11 +81,13 @@ export async function POST(req: NextRequest) {
       const explicit = r.subtestCode ? String(r.subtestCode).trim() : "";
       const code = explicit || codeFromSheet;
       if (!code) continue;
-      // Skip rows with empty prompt AND no image AND no options (treat as blank)
+      // Skip rows with empty prompt AND no image AND no options AND no kunci_*
+      // columns (treat as blank).
       const opts = buildOptions(r);
       const promptStr = String(r.prompt ?? "").trim();
       const imageStr = String(r.imageUrl ?? "").trim();
-      if (!promptStr && !imageStr && opts.length === 0) continue;
+      const kunciAny = buildKunciKolom(r, 12).some((v) => v.length > 0);
+      if (!promptStr && !imageStr && opts.length === 0 && !kunciAny) continue;
       if (!grouped[code]) grouped[code] = [];
       grouped[code].push(r);
     }
@@ -86,14 +102,35 @@ export async function POST(req: NextRequest) {
     }
     const existingCount = await prisma.question.count({ where: { subtestId: subtest.id } });
 
+    const isSistematis = code === SISTEMATIS_CODE;
+    const isSpasial = code === SPASIAL_CODE;
     const data = list.map((r, i) => {
-      const opts = buildOptions(r);
-      const parts = Number(r.parts ?? 1) || 1;
-      const correctStr = String(r.correctAnswer ?? "").trim();
-      const correct =
-        parts > 1
-          ? correctStr.split(/[,;|]/).map((s) => s.trim().toUpperCase()).filter(Boolean)
-          : correctStr.toUpperCase();
+      const rawParts = Number(r.parts ?? 1) || 1;
+      const parts = isSpasial
+        ? SPASIAL_PARTS
+        : isSistematis
+        ? Math.max(1, Math.min(12, rawParts))
+        : rawParts;
+      let opts: unknown;
+      if (isSpasial) {
+        opts = SPASIAL_OPTIONS;
+      } else if (isSistematis) {
+        opts = [];
+      } else {
+        opts = buildOptions(r);
+      }
+      let correct: string | string[];
+      if (isSistematis) {
+        correct = buildKunciKolom(r, parts);
+      } else if (isSpasial) {
+        correct = buildKunciKolom(r, parts).map((s) => s.toUpperCase());
+      } else {
+        const correctStr = String(r.correctAnswer ?? "").trim();
+        correct =
+          parts > 1
+            ? correctStr.split(/[,;|]/).map((s) => s.trim().toUpperCase()).filter(Boolean)
+            : correctStr.toUpperCase();
+      }
       return {
         subtestId: subtest.id,
         questionNo: Number(r.questionNo ?? i + 1) || i + 1,

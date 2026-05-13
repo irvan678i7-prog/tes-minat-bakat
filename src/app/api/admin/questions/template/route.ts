@@ -10,7 +10,24 @@ export function sheetNameForCode(code: string): string {
   return code.replace(/[\\/?*[\]:]/g, "_").slice(0, 31);
 }
 
+// SISTEMATIS pakai kolom kunci_1..kunci_12 (parts variabel, max 12). SPASIAL
+// pakai kunci_1..kunci_5 (B/S, parts=5). Keduanya TIDAK pakai correctAnswer.
+function isSistematis(s: SubtestSeed): boolean {
+  return s.code === "BAKAT_7_SISTEMATISASI";
+}
+function isSpasial(s: SubtestSeed): boolean {
+  return s.code === "BAKAT_5_SPASIAL";
+}
+const SISTEMATIS_KUNCI_COLS = Array.from({ length: 12 }, (_, i) => `kunci_${i + 1}`);
+const SPASIAL_KUNCI_COLS = Array.from({ length: 5 }, (_, i) => `kunci_${i + 1}`);
+
 function buildHeaders(s: SubtestSeed): string[] {
+  if (isSistematis(s)) {
+    return ["questionNo", "prompt", "imageUrl", "parts", ...SISTEMATIS_KUNCI_COLS, "scoringTag"];
+  }
+  if (isSpasial(s)) {
+    return ["questionNo", "prompt", "imageUrl", "parts", ...SPASIAL_KUNCI_COLS, "scoringTag"];
+  }
   const optionCols: string[] = [];
   const labels = s.optionLabels.length > 0 ? s.optionLabels : OPTION_KEYS.slice(0, 5);
   for (const k of labels) {
@@ -31,6 +48,18 @@ function exampleRowForSubtest(s: SubtestSeed): Record<string, string | number> {
     imageUrl: "",
     parts: s.parts,
   };
+  if (isSistematis(s)) {
+    const seq = ["B", "A", "D", "C", "E", "B", "A", "C", "D", "E", "A", "B"];
+    for (let i = 0; i < 12; i++) row[`kunci_${i + 1}`] = seq[i] ?? "";
+    row.scoringTag = "";
+    return row;
+  }
+  if (isSpasial(s)) {
+    const seq = ["S", "B", "B", "B", "S"];
+    for (let i = 0; i < 5; i++) row[`kunci_${i + 1}`] = seq[i];
+    row.scoringTag = "";
+    return row;
+  }
   const labels = s.optionLabels.length > 0 ? s.optionLabels : ["A", "B", "C", "D", "E"];
   for (let i = 0; i < labels.length; i++) {
     row[`option${labels[i]}`] = `Pilihan ${labels[i]}`;
@@ -59,6 +88,8 @@ export async function GET(req: NextRequest) {
     ["4. Untuk soal visual, setiap pilihan jawaban juga bisa pakai gambar lewat kolom 'optionAImage', 'optionBImage', dst."],
     ["5. Upload gambar lewat tab 'Bank Soal' admin → tombol UPLOAD GAMBAR. URL akan otomatis di-copy ke clipboard."],
     ["6. Untuk soal multi-bagian (parts > 1), tulis kunci jawaban dipisah ';' atau ','. Contoh: A;B atau A,B,C."],
+    ["6b. SISTEMATIS: parts variabel per soal (max 12), pakai kolom kunci_1..kunci_12 (kolom sisanya boleh kosong) — TIDAK pakai correctAnswer."],
+    ["6c. SPASIAL: parts = 5 per soal, pakai kolom kunci_1..kunci_5 (isi 'B' atau 'S') — TIDAK pakai correctAnswer."],
     ["7. Untuk subtes MINAT, kolom 'correctAnswer' boleh kosong (tidak ada benar/salah)."],
     ["8. Save sebagai .xlsx, lalu upload via tombol UPLOAD di tab 'Bank Soal'."],
     [""],

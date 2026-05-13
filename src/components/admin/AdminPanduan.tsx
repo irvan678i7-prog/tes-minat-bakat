@@ -107,7 +107,10 @@ export default function AdminPanduan() {
                 <strong>TEXT</strong>: ketik jawaban yang diharapkan (mis. <Code>42</Code>,{" "}
                 <Code>B</Code>, atau multi-bagian <Code>5;9</Code> / <Code>A;B;C</Code>).
                 Pencocokan abaikan huruf besar/kecil &amp; spasi. Untuk Minat:{" "}
-                <strong>biarkan kosong</strong>.
+                <strong>biarkan kosong</strong>. Khusus{" "}
+                <Code>BAKAT_7_SISTEMATISASI</Code> &amp; <Code>BAKAT_5_SPASIAL</Code>:
+                kolom ini <strong>tidak dipakai</strong> — pakai{" "}
+                <Code>kunci_1</Code>..<Code>kunci_N</Code> (lihat bagian khusus).
               </td>
             </tr>
             <tr>
@@ -280,14 +283,26 @@ export default function AdminPanduan() {
               <td><Code>A;B;C</Code></td>
             </tr>
             <tr>
+              <td><Code>BAKAT_5_SPASIAL</Code> — Pengenalan Spasial</td>
+              <td>
+                Tiap soal = 1 gambar stem berisi <strong>5 bentuk</strong> (nomor 1–5).
+                Siswa memilih <Code>B</Code> (sama/serupa) atau <Code>S</Code> (beda)
+                untuk tiap bentuk. Template pakai kolom{" "}
+                <Code>kunci_1</Code>..<Code>kunci_5</Code> (isi <Code>B</Code> atau{" "}
+                <Code>S</Code> per kolom). Skor: 1 poin per kunci benar (maks 5/soal).
+              </td>
+              <td><Code>kunci_1..5</Code> = <Code>S B B B S</Code></td>
+            </tr>
+            <tr>
               <td><Code>BAKAT_7_SISTEMATISASI</Code> — Sistematisasi</td>
               <td>
-                Ada KUNCI SIMBOL→HURUF (mis. ✈=A, ⚀=B, ⚘=C, ★=D, …). Setiap soal
-                menampilkan 1 simbol; siswa <strong>mengetik</strong> huruf yang sesuai
-                kunci. Letakkan gambar kunci di kolom <Code>imageUrl</Code> contoh soal
-                pertama (atau di Instruksi subtes) supaya tampil sebelum timer mulai.
+                Tiap soal = 1 gambar stem berisi <strong>N simbol/posisi</strong> (max
+                12) + N kolom isian. Siswa mengetik 1 jawaban per posisi. Set{" "}
+                <Code>parts</Code> = N (variabel per soal), lalu isi kolom{" "}
+                <Code>kunci_1</Code>..<Code>kunci_N</Code>. Kolom kunci sisanya boleh
+                dibiarkan kosong. Total <Code>parts</Code> seluruh soal sebaiknya ≈ 150.
               </td>
-              <td><Code>B</Code></td>
+              <td><Code>kunci_1..N</Code> = <Code>B A D C …</Code></td>
             </tr>
             <tr>
               <td><Code>BAKAT_9_FIGURAL</Code> — Figural Angka</td>

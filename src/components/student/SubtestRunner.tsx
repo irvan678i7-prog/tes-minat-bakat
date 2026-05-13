@@ -206,8 +206,12 @@ export default function SubtestRunner({
     }
     return [];
   }, [q]);
-  // SISTEMATIS: 1 soal = 12 isian TEXT (parts=12). Tampilkan dalam grid.
+  // SISTEMATIS: 1 soal = N isian TEXT (parts variabel, max 12). Tampilkan
+  // dalam grid kolom angka.
   const isSistematisGrid = subtest.code === "BAKAT_7_SISTEMATISASI";
+  // SPASIAL: 1 soal = 5 jawaban B/S (parts=5). Tampilkan dalam grid kolom
+  // angka, tiap kolom punya tombol B & S.
+  const isSpasialGrid = subtest.code === "BAKAT_5_SPASIAL";
 
   const sync = useAnswerSync();
 
@@ -554,7 +558,7 @@ export default function SubtestRunner({
             ) : isSistematisGrid ? (
               <div className="mt-4">
                 <div className="text-sm font-black uppercase mb-2">
-                  Isi 12 Jawaban (sesuai posisi 1-12 pada gambar)
+                  Isi {q.parts} Jawaban (sesuai posisi 1-{q.parts} pada gambar)
                 </div>
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
                   {Array.from({ length: q.parts }).map((_, partIdx) => {
@@ -675,6 +679,47 @@ export default function SubtestRunner({
                   </button>
                 );
               })}
+            </div>
+          ) : isSpasialGrid ? (
+            <div className="mt-4">
+              <div className="text-sm font-black uppercase mb-2">
+                Pilih B (sama) atau S (beda) untuk setiap bentuk
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                {Array.from({ length: q.parts }).map((_, partIdx) => {
+                  const cur = (answers[q.id] as string[]) || [];
+                  const value = cur[partIdx] || "";
+                  return (
+                    <div
+                      key={partIdx}
+                      className="border-4 border-black bg-white p-2 flex flex-col gap-2 items-center"
+                    >
+                      <div className="text-base font-black">{partLabel(q, partIdx)}</div>
+                      <div className="flex gap-2 w-full justify-center">
+                        {opts.map((o) => {
+                          const sel = value === o.key;
+                          return (
+                            <button
+                              key={o.key}
+                              type="button"
+                              onClick={() => handleSelectPart(partIdx, o.key)}
+                              className={`brut-checkbox justify-center ${sel ? "selected selected-cyan" : ""}`}
+                              style={{ minWidth: 56 }}
+                            >
+                              <span
+                                className="brut-tag"
+                                style={{ background: sel ? "#000" : "#facc15", color: sel ? "#fff" : "#000" }}
+                              >
+                                {o.key}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           ) : (
             <div className="space-y-3 mt-4">
