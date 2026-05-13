@@ -572,9 +572,12 @@ type BulkItem = {
   file: File | null;
   // Preview URL (object URL kalau ada File, atau URL imageUrl existing).
   previewUrl: string;
+  // OPTIONAL gambar kedua (mis. SISTEMATIS: gambar soal + gambar pertanyaan).
+  file2: File | null;
+  previewUrl2: string;
   parts: number;
   // Kunci jawaban per part. Untuk SPASIAL: "B" / "S". Untuk SISTEMATIS: 1 huruf
-  // (A-L untuk 1-12). Disimpan sebagai string lepas supaya tidak repot
+  // (A-X untuk 1-24). Disimpan sebagai string lepas supaya tidak repot
   // validasinya saat ketik.
   kunci: string[];
   // Label nomor untuk tiap sel di lembar jawaban siswa. Default "1","2",….
@@ -590,9 +593,13 @@ type BulkItem = {
 const SPASIAL_CODE_FE = "BAKAT_5_SPASIAL";
 const SISTEMATIS_CODE_FE = "BAKAT_7_SISTEMATISASI";
 
+// Max parts (jumlah sel jawaban) per soal SISTEMATIS. Buku Sistematisasi
+// pakai huruf A-X (24 opsi), jadi max 24 sel per soal masuk akal.
+const SISTEMATIS_MAX_PARTS = 24;
+
 function defaultPartsFor(code: string): number {
   if (code === SPASIAL_CODE_FE) return 5;
-  return 12; // SISTEMATIS default — admin bisa override per kartu (mis. 4 atau 2).
+  return 12; // SISTEMATIS default — admin bisa override per kartu.
 }
 
 function newBulkItem(file: File | null, code: string): BulkItem {
@@ -600,6 +607,8 @@ function newBulkItem(file: File | null, code: string): BulkItem {
   return {
     file,
     previewUrl: file ? URL.createObjectURL(file) : "",
+    file2: null,
+    previewUrl2: "",
     parts,
     kunci: Array.from({ length: parts }).map(() => ""),
     partLabels: Array.from({ length: parts }, (_, i) => String(i + 1)),
@@ -629,6 +638,7 @@ function BulkUploadModal({
     return () => {
       for (const it of items) {
         if (it.file && it.previewUrl) URL.revokeObjectURL(it.previewUrl);
+        if (it.file2 && it.previewUrl2) URL.revokeObjectURL(it.previewUrl2);
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -652,8 +662,25 @@ function BulkUploadModal({
       const next = prev.slice();
       const removed = next.splice(idx, 1)[0];
       if (removed?.file && removed.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+      if (removed?.file2 && removed.previewUrl2) URL.revokeObjectURL(removed.previewUrl2);
       return next;
     });
+  };
+
+  // Set/replace gambar kedua per item. Otomatis revoke object URL lama supaya
+  // memori bersih.
+  const setFile2 = (idx: number, file: File | null) => {
+    setItems((prev) =>
+      prev.map((it, i) => {
+        if (i !== idx) return it;
+        if (it.file2 && it.previewUrl2) URL.revokeObjectURL(it.previewUrl2);
+        return {
+          ...it,
+          file2: file,
+          previewUrl2: file ? URL.createObjectURL(file) : "",
+        };
+      }),
+    );
   };
 
   const moveUp = (idx: number) => {
@@ -759,8 +786,8 @@ function BulkUploadModal({
         if (!k) return `Kartu #${i + 1}: kunci posisi ${p + 1} belum diisi.`;
         if (isSpasial && !["B", "S"].includes(k.toUpperCase()))
           return `Kartu #${i + 1}: kunci posisi ${p + 1} harus B atau S.`;
-        if (isSistematis && !/^[A-La-l]$/.test(k))
-          return `Kartu #${i + 1}: kunci posisi ${p + 1} harus huruf A-L.`;
+        if (isSistematis && !/^[A-Xa-x]$/.test(k))
+          return `Kartu #${i + 1}: kunci posisi ${p + 1} harus huruf A-X.`;
       }
     }
     return null;
@@ -787,6 +814,7 @@ function BulkUploadModal({
       if (replaceAll) fd.append("replaceAll", "1");
       items.forEach((it, i) => {
         if (it.file) fd.append(`image_${i}`, it.file);
+        if (it.file2) fd.append(`image2_${i}`, it.file2);
       });
       const res = await fetch(`/api/admin/subtests/${subtest.id}/bulk-questions`, {
         method: "POST",
@@ -846,8 +874,9 @@ function BulkUploadModal({
             {isSistematis && (
               <>
                 {" "}
-                Untuk SISTEMATIS: tiap soal punya <strong>12 jawaban huruf A-L</strong> (default).
-                Boleh kurang untuk baris terakhir (mis. 4 atau 2 di buku asli).
+                Untuk SISTEMATIS: tiap soal punya hingga <strong>24 jawaban huruf A-X</strong>
+                {" "}(default 12). Atur jumlah lewat kolom <em>Parts</em>. Bisa juga upload
+                {" "}<strong>2 gambar per soal</strong> (mis. gambar soal + gambar pertanyaan).
               </>
             )}
           </p>
@@ -934,17 +963,63 @@ function BulkUploadModal({
                     HAPUS
                   </button>
                 </div>
-                <div className="shrink-0">
-                  {it.previewUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={it.previewUrl}
-                      alt={`Gambar soal ${idx + 1}`}
-                      className="border-2 border-black max-h-40 max-w-[300px] object-contain bg-white"
-                    />
-                  ) : (
-                    <div className="border-2 border-black w-40 h-32 flex items-center justify-center text-xs font-bold">
-                      (belum ada gambar)
+                <div className="shrink-0 flex flex-col gap-2">
+                  <div>
+                    <div className="text-[10px] font-black uppercase mb-1">Gambar Soal</div>
+                    {it.previewUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={it.previewUrl}
+                        alt={`Gambar soal ${idx + 1}`}
+                        className="border-2 border-black max-h-32 max-w-[260px] object-contain bg-white"
+                      />
+                    ) : (
+                      <div className="border-2 border-black w-40 h-24 flex items-center justify-center text-xs font-bold">
+                        (belum ada)
+                      </div>
+                    )}
+                  </div>
+                  {isSistematis && (
+                    <div>
+                      <div className="text-[10px] font-black uppercase mb-1 flex items-center gap-2">
+                        Gambar Pertanyaan
+                        {it.file2 && (
+                          <button
+                            type="button"
+                            className="brut-btn brut-btn-pink text-[10px]"
+                            onClick={() => setFile2(idx, null)}
+                            title="Hapus gambar pertanyaan"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                      {it.previewUrl2 ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={it.previewUrl2}
+                          alt={`Gambar pertanyaan ${idx + 1}`}
+                          className="border-2 border-black max-h-32 max-w-[260px] object-contain bg-white"
+                        />
+                      ) : (
+                        <label
+                          className="border-2 border-dashed border-black w-40 h-24 flex flex-col items-center justify-center text-xs font-bold cursor-pointer bg-yellow-50 hover:bg-yellow-100"
+                          title="Tambahkan gambar pertanyaan (opsional)"
+                        >
+                          + UPLOAD
+                          <span className="text-[9px] font-normal">(opsional)</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0] ?? null;
+                              if (f) setFile2(idx, f);
+                              e.target.value = "";
+                            }}
+                          />
+                        </label>
+                      )}
                     </div>
                   )}
                 </div>
@@ -956,7 +1031,7 @@ function BulkUploadModal({
                         <input
                           type="number"
                           min={1}
-                          max={12}
+                          max={SISTEMATIS_MAX_PARTS}
                           value={it.parts}
                           onChange={(e) =>
                             setParts(idx, parseInt(e.target.value || "12", 10))
@@ -1132,9 +1207,9 @@ function BulkKunciInput({
         type="text"
         maxLength={1}
         value={value}
-        onChange={(e) => onChange(e.target.value.replace(/[^A-La-l]/g, "").toUpperCase())}
+        onChange={(e) => onChange(e.target.value.replace(/[^A-Xa-x]/g, "").toUpperCase())}
         className="brut-input w-full text-center font-black uppercase"
-        placeholder="A-L"
+        placeholder="A-X"
       />
     </div>
   );

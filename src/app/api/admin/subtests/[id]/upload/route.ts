@@ -18,9 +18,11 @@ type Row = Record<string, unknown> & {
 
 const OPTION_KEYS = "ABCDEFGHIJKLMNOPQRSTUVWX".split("");
 
-// Subtes spesifik dengan kolom kunci_1..kunci_12 (SISTEMATIS). Parts variabel
-// per soal (max 12), dibaca dari kolom 'parts' di tiap baris Excel.
+// Subtes spesifik dengan kolom kunci_1..kunci_N (SISTEMATIS). Parts variabel
+// per soal (max 24, sesuai buku yang pakai opsi A-X), dibaca dari kolom
+// 'parts' di tiap baris Excel.
 const SISTEMATIS_CODE = "BAKAT_7_SISTEMATISASI";
+const SISTEMATIS_MAX_PARTS = 24;
 // Subtes spesifik dengan kolom gambar per Sisi (3D).
 const PER_PART_IMAGES_CODE = "BAKAT_6_3DIMENSI";
 // Subtes spesifik dengan kolom kunci_1..kunci_5 (SPASIAL). Parts = 5; tiap
@@ -63,7 +65,7 @@ function buildPartImages(r: Row, parts: number): string[] {
 }
 
 // Ambil N kolom kunci_1..kunci_N sebagai array kunci jawaban. Dipakai oleh
-// SISTEMATIS (parts variabel, max 12) dan SPASIAL (parts = 5).
+// SISTEMATIS (parts variabel, max 24) dan SPASIAL (parts = 5).
 function buildKunciKolom(r: Row, parts: number): string[] {
   const arr: string[] = [];
   for (let i = 1; i <= parts; i++) arr.push(String(r[`kunci_${i}`] ?? "").trim());
@@ -133,13 +135,13 @@ function rowsToData(
   const isSpasial = subtestCode === SPASIAL_CODE;
   return list.map((r, i) => {
     const inputMode = resolveInputMode(r, fallbackMode);
-    // Parts: SPASIAL is always 5, SISTEMATIS is variable (capped at 12),
-    // others default to row.parts / seed.parts.
+    // Parts: SPASIAL is always 5, SISTEMATIS is variable (capped at
+    // SISTEMATIS_MAX_PARTS = 24), others default to row.parts / seed.parts.
     const rawParts = Number(r.parts ?? fallbackParts) || fallbackParts;
     const parts = isSpasial
       ? SPASIAL_PARTS
       : isSistematis
-      ? Math.max(1, Math.min(12, rawParts))
+      ? Math.max(1, Math.min(SISTEMATIS_MAX_PARTS, rawParts))
       : rawParts;
     const partLabelsArr = isSpasial || isSistematis ? buildPartLabels(r, parts) : null;
     const partLabels: Prisma.InputJsonValue | typeof Prisma.JsonNull =
@@ -207,9 +209,9 @@ function nonEmpty(r: Row): boolean {
   const promptStr = String(r.prompt ?? "").trim();
   const imageStr = String(r.imageUrl ?? "").trim();
   const correctStr = String(r.correctAnswer ?? "").trim();
-  // Kolom kunci_1..kunci_12 dipakai SISTEMATIS (12 kolom) & SPASIAL (5
-  // kolom). Cek semua 12 supaya nonEmpty bekerja untuk kedua kasus.
-  const kunciAny = buildKunciKolom(r, 12).some((v) => v.length > 0);
+  // Kolom kunci_1..kunci_N dipakai SISTEMATIS (max 24) & SPASIAL (5).
+  // Cek semua kolom supaya nonEmpty bekerja untuk kedua kasus.
+  const kunciAny = buildKunciKolom(r, SISTEMATIS_MAX_PARTS).some((v) => v.length > 0);
   const perPartImages = Array.from({ length: 6 }, (_, i) =>
     String(r[`sisi${i + 1}_image`] ?? "").trim(),
   ).some((v) => v.length > 0);

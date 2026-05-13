@@ -11,16 +11,17 @@ function isTextMode(s: SubtestSeed): boolean {
   return s.defaultInputMode === "TEXT";
 }
 
-// Subtes yang biasanya butuh 2 gambar dalam 1 soal (mis. Penalaran Urutan —
-// buku menampilkan 2 panel gambar dalam 1 soal).
+// Subtes yang biasanya butuh 2 gambar dalam 1 soal:
+// - BAKAT_4_URUTAN: 2 panel gambar.
+// - BAKAT_7_SISTEMATISASI: 1 gambar soal + 1 gambar pertanyaan.
 function needsTwoImages(s: SubtestSeed): boolean {
-  return s.code === "BAKAT_4_URUTAN";
+  return s.code === "BAKAT_4_URUTAN" || s.code === "BAKAT_7_SISTEMATISASI";
 }
 
-// SISTEMATIS: 1 soal = 1 gambar + N kolom jawaban (TEXT). Jumlah jawaban
-// (parts) bisa berbeda per soal (max 12). Template pakai kolom
-// kunci_1..kunci_12 supaya admin tinggal isi N kolom sesuai parts; kolom
-// sisanya boleh dibiarkan kosong.
+// SISTEMATIS: 1 soal = 1-2 gambar + N kolom jawaban (TEXT). Jumlah jawaban
+// (parts) bisa berbeda per soal (max 24, sesuai buku yang pakai opsi A-X).
+// Template pakai kolom kunci_1..kunci_24 supaya admin tinggal isi N kolom
+// sesuai parts; kolom sisanya boleh dibiarkan kosong.
 function isSistematis(s: SubtestSeed): boolean {
   return s.code === "BAKAT_7_SISTEMATISASI";
 }
@@ -38,8 +39,9 @@ function usesPerPartOptionImages(s: SubtestSeed): boolean {
   return s.code === "BAKAT_6_3DIMENSI";
 }
 
-const SISTEMATIS_KUNCI_COLS = Array.from({ length: 12 }, (_, i) => `kunci_${i + 1}`);
-const SISTEMATIS_LABEL_COLS = Array.from({ length: 12 }, (_, i) => `label_${i + 1}`);
+const SISTEMATIS_MAX_PARTS = 24;
+const SISTEMATIS_KUNCI_COLS = Array.from({ length: SISTEMATIS_MAX_PARTS }, (_, i) => `kunci_${i + 1}`);
+const SISTEMATIS_LABEL_COLS = Array.from({ length: SISTEMATIS_MAX_PARTS }, (_, i) => `label_${i + 1}`);
 const SPASIAL_KUNCI_COLS = Array.from({ length: 5 }, (_, i) => `kunci_${i + 1}`);
 const SPASIAL_LABEL_COLS = Array.from({ length: 5 }, (_, i) => `label_${i + 1}`);
 
@@ -60,6 +62,7 @@ function buildHeaders(s: SubtestSeed): string[] {
       "questionNo",
       "prompt",
       "imageUrl",
+      "imageUrl2",
       "parts",
       "inputMode",
       ...SISTEMATIS_KUNCI_COLS,
@@ -147,7 +150,7 @@ function exampleSoalRow(s: SubtestSeed, no: number): Record<string, string | num
   };
   if (needsTwoImages(s)) row.imageUrl2 = "";
   if (isSistematis(s)) {
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < SISTEMATIS_MAX_PARTS; i++) {
       row[`kunci_${i + 1}`] = ["B", "A", "D", "C", "E", "B", "A", "C", "D", "E", "A", "B"][i] ?? "";
       // Default kosong → label otomatis 1..N per soal. Admin boleh isi
       // (mis. 13, 14, …) untuk override jadi nomor berkesinambungan.
@@ -209,7 +212,7 @@ function blankSoalRow(s: SubtestSeed, no: number): Record<string, string | numbe
   };
   if (needsTwoImages(s)) row.imageUrl2 = "";
   if (isSistematis(s)) {
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < SISTEMATIS_MAX_PARTS; i++) {
       row[`kunci_${i + 1}`] = "";
       row[`label_${i + 1}`] = "";
     }
@@ -294,7 +297,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       ? ["5. Kolom 'inputMode' = TEXT untuk subtes ini (jawaban diketik siswa, BUKAN pilihan ganda)."]
       : ["5. Kolom 'inputMode' = CHOICE (pilihan ganda). Kolom 'option*' & 'option*Image' untuk pilihan jawaban."],
     isSistematis(seed)
-      ? ["6. SISTEMATIS: 1 soal = 1 gambar stem (berisi N simbol/posisi) + kolom jawaban 'kunci_1'..'kunci_N' (max 12). Set kolom 'parts' = N untuk soal tsb, lalu isi N kolom kunci pertama (kolom sisanya kosong). Jumlah N boleh beda antar soal; total parts seluruh soal sebaiknya ≈ 150. Kolom 'label_1'..'label_12' opsional — isi kalau ingin override nomor sel di lembar jawaban siswa (mis. label_1=13, label_2=14,… untuk soal #2 supaya nomornya berkesinambungan). Kosongkan = otomatis 1..N per soal."]
+      ? ["6. SISTEMATIS: 1 soal = 1-2 gambar (imageUrl = gambar soal/stem; imageUrl2 = gambar pertanyaan, opsional) + kolom jawaban 'kunci_1'..'kunci_N' (max 24, sesuai opsi A-X). Set kolom 'parts' = N untuk soal tsb, lalu isi N kolom kunci pertama (kolom sisanya kosong). Jumlah N boleh beda antar soal; total parts seluruh soal sebaiknya ≈ 150. Kolom 'label_1'..'label_24' opsional — isi kalau ingin override nomor sel di lembar jawaban siswa (mis. label_1=13, label_2=14,… untuk soal #2 supaya nomornya berkesinambungan). Kosongkan = otomatis 1..N per soal."]
       : isSpasial(seed)
       ? ["6. SPASIAL: 1 soal = 1 gambar stem (berisi 5 bentuk) + 5 kolom jawaban 'kunci_1'..'kunci_5'. Tiap kolom diisi 'B' (sama/serupa) atau 'S' (beda). Kolom 'parts' tetap 5. Kolom 'label_1'..'label_5' opsional — isi kalau ingin override nomor sel di lembar jawaban siswa (mis. label_1=6, label_2=7,… untuk soal #2 supaya berkesinambungan). Kosongkan = otomatis 1..5 per soal."]
       : usesPerPartOptionImages(seed)
@@ -309,7 +312,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     seed.testKind === "MINAT"
       ? ["7. Subtes MINAT: tiap soal HANYA 2 opsi (optionA & optionB). 'correctAnswer' DIKOSONGKAN — tidak ada benar/salah."]
       : isSistematis(seed)
-      ? ["7. Kolom 'correctAnswer' TIDAK ADA — pakai kunci_1..kunci_12 saja. Skor: 1 poin per kunci yang benar (maks 12 poin per soal)."]
+      ? ["7. Kolom 'correctAnswer' TIDAK ADA — pakai kunci_1..kunci_24 saja (isi N pertama sesuai 'parts'). Skor: 1 poin per kunci yang benar (maks N poin per soal)."]
       : isSpasial(seed)
       ? ["7. Kolom 'correctAnswer' TIDAK ADA — pakai kunci_1..kunci_5 saja. Skor: 1 poin per kunci yang benar (maks 5 poin per soal)."]
       : ["7. Untuk subtes BAKAT, kolom 'correctAnswer' WAJIB diisi sesuai kunci."],
@@ -321,7 +324,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       : seed.code.startsWith("MINAT_PROG_")
       ? ["   Untuk Program (A-H), 'scoringTag' = pasangan huruf program/karier yang dipasangkan (lihat Tabel Program di Panduan Admin)."]
       : isSistematis(seed)
-      ? ["   FORMAT TES: gambar stem berisi N simbol/posisi (max 12). Siswa mengetik jawaban (huruf/angka) untuk setiap posisi."]
+      ? ["   FORMAT TES: gambar stem berisi N simbol/posisi (max 24). Siswa mengetik jawaban (huruf/angka) untuk setiap posisi."]
       : isSpasial(seed)
       ? ["   FORMAT TES: gambar stem berisi 5 bentuk (1-5). Siswa memilih tombol B (sama) atau S (beda) untuk tiap bentuk."]
       : usesPerPartOptionImages(seed)
