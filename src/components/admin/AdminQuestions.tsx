@@ -630,6 +630,7 @@ function BulkUploadModal({
   const isSistematis = subtest.code === SISTEMATIS_CODE_FE;
   const [items, setItems] = useState<BulkItem[]>([]);
   const [busy, setBusy] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState("");
   const [replaceAll, setReplaceAll] = useState(true);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -801,25 +802,57 @@ function BulkUploadModal({
     }
     setBusy(true);
     try {
+      // Upload tiap gambar terpisah ke /api/admin/questions/image (per-request
+      // payload kecil) supaya tidak kena limit body Vercel ~4.5MB. Setelah
+      // semua URL didapat, kirim hanya JSON meta ke bulk-questions.
+      const uploadOne = async (f: File): Promise<string> => {
+        const fd = new FormData();
+        fd.append("file", f);
+        const r = await fetch("/api/admin/questions/image", {
+          method: "POST",
+          body: fd,
+        });
+        const j: { url?: string; error?: string } = await r.json().catch(() => ({}));
+        if (!r.ok || !j.url) throw new Error(j.error || `Upload gagal (status ${r.status})`);
+        return j.url;
+      };
+
+      const meta: Array<Record<string, unknown>> = [];
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        setUploadStatus(`Mengunggah gambar ${i + 1}/${items.length}...`);
+        let imageUrl = "";
+        let imageUrl2 = "";
+        try {
+          if (it.file) imageUrl = await uploadOne(it.file);
+          if (it.file2) imageUrl2 = await uploadOne(it.file2);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          toast.error(`Kartu #${i + 1}: ${msg}`);
+          return;
+        }
+        meta.push({
+          questionNo: i + 1,
+          parts: it.parts,
+          kunci: it.kunci.slice(0, it.parts).map((s) => s.trim()),
+          partLabels: it.partLabels
+            .slice(0, it.parts)
+            .map((s) => String(s).trim()),
+          prompt: it.prompt || "",
+          isExample: it.isExample,
+          imageUrl,
+          imageUrl2,
+        });
+      }
+
+      setUploadStatus("Menyimpan ke database...");
       const fd = new FormData();
-      const meta = items.map((it, i) => ({
-        questionNo: i + 1,
-        parts: it.parts,
-        kunci: it.kunci.slice(0, it.parts).map((s) => s.trim()),
-        partLabels: it.partLabels.slice(0, it.parts).map((s) => String(s).trim()),
-        prompt: it.prompt || "",
-        isExample: it.isExample,
-      }));
       fd.append("meta", JSON.stringify(meta));
       if (replaceAll) fd.append("replaceAll", "1");
-      items.forEach((it, i) => {
-        if (it.file) fd.append(`image_${i}`, it.file);
-        if (it.file2) fd.append(`image2_${i}`, it.file2);
-      });
-      const res = await fetch(`/api/admin/subtests/${subtest.id}/bulk-questions`, {
-        method: "POST",
-        body: fd,
-      });
+      const res = await fetch(
+        `/api/admin/subtests/${subtest.id}/bulk-questions`,
+        { method: "POST", body: fd },
+      );
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         toast.error(data.error || "Gagal simpan");
@@ -827,7 +860,11 @@ function BulkUploadModal({
       }
       toast.success(`Sukses: ${data.created} soal disimpan`);
       onDone();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(`Gagal: ${msg}`);
     } finally {
+      setUploadStatus("");
       setBusy(false);
     }
   };
@@ -1093,7 +1130,7 @@ function BulkUploadModal({
             disabled={busy || items.length === 0}
             onClick={onSubmit}
           >
-            {busy ? "MENYIMPAN..." : "SIMPAN SEMUA"}
+            {busy ? (uploadStatus || "MENYIMPAN...") : "SIMPAN SEMUA"}
           </button>
         </div>
       </div>

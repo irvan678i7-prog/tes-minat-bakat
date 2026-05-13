@@ -28,6 +28,7 @@ type MetaItem = {
   questionNo?: number;
   isExample?: boolean;
   imageUrl?: string; // gambar yang sudah ada (re-use, tidak upload ulang)
+  imageUrl2?: string; // gambar pertanyaan opsional (sudah diupload terpisah)
   // Custom label nomor di tiap sel lembar jawaban (override default 1..N).
   // Boleh string angka (mis. "6") atau huruf. Panjang = parts.
   partLabels?: unknown;
@@ -178,7 +179,10 @@ async function handle(
           { status: 500 },
         );
       }
-      uploadedUrls2[i] = r2.url;
+      if (r2.url !== null) uploadedUrls2[i] = r2.url;
+      else if (meta[i].imageUrl2 && typeof meta[i].imageUrl2 === "string")
+        uploadedUrls2[i] = meta[i].imageUrl2 as string;
+      else uploadedUrls2[i] = null;
     }
   }
 
