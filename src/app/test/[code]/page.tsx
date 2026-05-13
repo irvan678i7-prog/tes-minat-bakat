@@ -28,7 +28,30 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
   const seedCfg = [...BAKAT_SUBTESTS, ...MINAT_SUBTESTS].find(
     (x) => x.code === subtest.code,
   );
-  const partLabels = seedCfg?.partLabels ?? [];
+  const fallbackPartLabels = seedCfg?.partLabels ?? [];
+
+  // SPASIAL & SISTEMATIS: tiap soal punya N parts dan label posisinya harus
+  // "nyambung" antar gambar (gambar 1 = posisi 1-5, gambar 2 = 6-10, dst).
+  // Kita hitung startNo per soal berdasarkan urutan questionNo (bukan urutan
+  // setelah shuffle) lalu pasang ke partLabels masing-masing soal.
+  const isCumulativeNumbered =
+    subtest.code === "BAKAT_5_SPASIAL" || subtest.code === "BAKAT_7_SISTEMATISASI";
+  const startNoById = new Map<string, number>();
+  if (isCumulativeNumbered) {
+    const sortedReal = [...realQuestions].sort((a, b) => a.questionNo - b.questionNo);
+    let acc = 1;
+    for (const q of sortedReal) {
+      startNoById.set(q.id, acc);
+      acc += q.parts;
+    }
+  }
+  const labelsFor = (q: { id: string; parts: number }): string[] => {
+    if (isCumulativeNumbered) {
+      const start = startNoById.get(q.id) ?? 1;
+      return Array.from({ length: q.parts }, (_, i) => String(start + i));
+    }
+    return fallbackPartLabels;
+  };
 
   const questions = shuffle(realQuestions, `${sub.randomSeed}:${subtest.code}`).map((q) => ({
     id: q.id,
@@ -38,7 +61,7 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
     parts: q.parts,
     options: q.options,
     inputMode: (q.inputMode === "TEXT" ? "TEXT" : "CHOICE") as "CHOICE" | "TEXT",
-    partLabels,
+    partLabels: labelsFor(q),
   }));
 
   const examples = exampleQuestions.map((q) => ({
@@ -50,7 +73,9 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
     options: q.options,
     correct: q.correct,
     inputMode: (q.inputMode === "TEXT" ? "TEXT" : "CHOICE") as "CHOICE" | "TEXT",
-    partLabels,
+    // Contoh soal: pakai partLabels statis dari config (1..N) supaya tidak
+    // mengacaukan nomor global soal beneran.
+    partLabels: fallbackPartLabels,
   }));
 
   const existing = await prisma.answer.findMany({

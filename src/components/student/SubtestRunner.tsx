@@ -455,8 +455,11 @@ export default function SubtestRunner({
             <div className="brut-card" style={{ background: "#22d3ee" }}>
               <h2 className="text-2xl font-black uppercase mb-2">Contoh Soal</h2>
               <p className="text-sm font-bold mb-4">
-                Coba isi/klik jawaban di bawah untuk latihan. Setelah klik <span className="bg-black text-white px-1">CEK JAWABAN</span>, kunci akan ditampilkan. Soal contoh tidak dihitung sebagai nilai. Klik
-                tombol <span className="bg-black text-white px-1">MULAI</span> di bawah saat siap.
+                Kunci jawaban contoh sudah ditampilkan di atas tiap soal supaya Anda tidak
+                bingung waktu masuk ke soal asli. Anda boleh mencoba mengisi/klik jawaban untuk
+                latihan — jawaban Anda akan langsung dicocokkan (hijau = benar, merah = salah).
+                Soal contoh tidak dihitung sebagai nilai. Klik tombol{" "}
+                <span className="bg-black text-white px-1">MULAI</span> di bawah saat siap.
               </p>
               <div className="space-y-4">
                 {examples.map((ex) => (
@@ -615,7 +618,7 @@ export default function SubtestRunner({
             ) : isSistematisGrid ? (
               <div className="mt-4">
                 <div className="text-sm font-black uppercase mb-2">
-                  Isi {q.parts} Jawaban (sesuai posisi 1-{q.parts} pada gambar)
+                  Isi {q.parts} Jawaban (sesuai posisi {partLabel(q, 0)}-{partLabel(q, q.parts - 1)} pada gambar)
                 </div>
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
                   {Array.from({ length: q.parts }).map((_, partIdx) => {
@@ -895,14 +898,15 @@ function ExamplePreview({
   const [textMulti, setTextMulti] = useState<string[]>(() =>
     Array.from({ length: Math.max(q.parts, 1) }, () => ""),
   );
-  const [showKey, setShowKey] = useState(false);
+  // Kunci jawaban contoh selalu ditampilkan supaya siswa tidak bingung
+  // (sebelumnya: ngumpet sampai klik CEK JAWABAN — kurang membantu). Kita
+  // tidak lagi menggunakan state showKey.
 
   const resetPractice = () => {
     setPickSingle("");
     setPickMulti(Array.from({ length: Math.max(q.parts, 1) }, () => ""));
     setTextSingle("");
     setTextMulti(Array.from({ length: Math.max(q.parts, 1) }, () => ""));
-    setShowKey(false);
   };
 
   const setMulti = (
@@ -918,14 +922,17 @@ function ExamplePreview({
   };
 
   const correctClassFor = (partIdx: number, value: string): string => {
-    if (!showKey) return "";
     const expected = (correctTexts[partIdx] || "").trim().toUpperCase();
     const got = (value || "").trim().toUpperCase();
-    if (!expected) return "";
+    // Kalau siswa belum ngetik apa-apa, jangan kasih warna (biar tidak
+    // berasa "salah" padahal cuma kosong).
+    if (!expected || !got) return "";
     return got === expected ? "bg-green-200" : "bg-red-100";
   };
   const correctBg = (isCorrect: boolean, selected: boolean): string => {
-    if (!showKey) return selected ? "#facc15" : "#fff";
+    // Kunci selalu ditampilkan: posisi benar di-highlight hijau muda walau
+    // belum di-klik. Pilihan yang siswa klik berubah jadi hijau-terang kalau
+    // benar, merah kalau salah.
     if (selected && isCorrect) return "#a3e635";
     if (selected && !isCorrect) return "#fca5a5";
     if (!selected && isCorrect) return "#bbf7d0";
@@ -950,6 +957,31 @@ function ExamplePreview({
         )}
       </div>
       <p className="font-bold whitespace-pre-wrap mb-2">{q.prompt || "—"}</p>
+
+      {/* KUNCI JAWABAN — selalu ditampilkan di atas supaya siswa langsung
+          tahu jawaban contoh tanpa harus klik tombol apa-apa. */}
+      <div className="mb-3 border-2 border-black p-2" style={{ background: "#fff7ed" }}>
+        <div className="text-xs font-black uppercase mb-1">Kunci Jawaban Contoh</div>
+        {q.parts > 1 ? (
+          <div className="flex flex-wrap gap-2">
+            {Array.from({ length: q.parts }).map((_, i) => (
+              <span
+                key={i}
+                className="brut-tag"
+                style={{ background: "#a3e635" }}
+              >
+                {partImages.length > 0 ? "Sisi" : "Posisi"} {partLabel(q, i)} ={" "}
+                {correctTexts[i] || "—"}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <span className="brut-tag" style={{ background: "#a3e635" }}>
+            {correctTexts[0] || "—"}
+          </span>
+        )}
+      </div>
+
       {q.imageUrl && (
         <div className="my-2 inline-block border-2 border-black p-1 bg-white">
           <Image
@@ -996,10 +1028,7 @@ function ExamplePreview({
               inputMode="text"
               autoComplete="off"
               value={textSingle}
-              onChange={(e) => {
-                setTextSingle(e.target.value);
-                if (showKey) setShowKey(false);
-              }}
+              onChange={(e) => setTextSingle(e.target.value)}
               placeholder="Ketik jawaban di sini"
               className={`w-full border-2 border-black px-3 py-2 text-base font-bold bg-white ${correctClassFor(0, textSingle)}`}
             />
@@ -1007,7 +1036,7 @@ function ExamplePreview({
         ) : isSistematis ? (
           <div className="mt-3">
             <div className="text-xs font-black uppercase mb-1">
-              Coba Isi {q.parts} Jawaban
+              Coba Isi {q.parts} Jawaban (kunci sudah ditampilkan di atas)
             </div>
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
               {Array.from({ length: q.parts }).map((_, i) => (
@@ -1020,10 +1049,9 @@ function ExamplePreview({
                     inputMode="text"
                     autoComplete="off"
                     value={textMulti[i] ?? ""}
-                    onChange={(e) => {
-                      setMulti(setTextMulti, textMulti, i, e.target.value);
-                      if (showKey) setShowKey(false);
-                    }}
+                    onChange={(e) =>
+                      setMulti(setTextMulti, textMulti, i, e.target.value)
+                    }
                     placeholder="—"
                     className={`w-full border border-black px-1 py-1 text-center text-sm font-bold ${correctClassFor(i, textMulti[i] ?? "")}`}
                   />
@@ -1043,10 +1071,9 @@ function ExamplePreview({
                   inputMode="text"
                   autoComplete="off"
                   value={textMulti[i] ?? ""}
-                  onChange={(e) => {
-                    setMulti(setTextMulti, textMulti, i, e.target.value);
-                    if (showKey) setShowKey(false);
-                  }}
+                  onChange={(e) =>
+                    setMulti(setTextMulti, textMulti, i, e.target.value)
+                  }
                   placeholder={`Jawaban ${partLabel(q, i)}`}
                   className={`w-full border-2 border-black px-2 py-1 text-base font-bold ${correctClassFor(i, textMulti[i] ?? "")}`}
                 />
@@ -1063,10 +1090,7 @@ function ExamplePreview({
               <li key={o.key}>
                 <button
                   type="button"
-                  onClick={() => {
-                    setPickSingle(o.key);
-                    if (showKey) setShowKey(false);
-                  }}
+                  onClick={() => setPickSingle(o.key)}
                   className="border-2 border-black p-2 w-full text-left flex gap-2 items-start"
                   style={{ background: correctBg(isCorrect, selected) }}
                 >
@@ -1085,7 +1109,7 @@ function ExamplePreview({
                     <p className="text-sm font-semibold whitespace-pre-wrap">
                       {o.label || (o.imageUrl ? "(gambar)" : "—")}
                     </p>
-                    {showKey && isCorrect && (
+                    {isCorrect && (
                       <span className="brut-tag mt-1 inline-block" style={{ background: "#000", color: "#fff" }}>
                         KUNCI
                       </span>
@@ -1119,10 +1143,9 @@ function ExamplePreview({
                         <button
                           key={o.key}
                           type="button"
-                          onClick={() => {
-                            setMulti(setPickMulti, pickMulti, partIdx, o.key);
-                            if (showKey) setShowKey(false);
-                          }}
+                          onClick={() =>
+                            setMulti(setPickMulti, pickMulti, partIdx, o.key)
+                          }
                           className="border-2 border-black px-3 py-1 font-black"
                           style={{
                             background: correctBg(isCorrect, selected),
@@ -1157,10 +1180,9 @@ function ExamplePreview({
                       <button
                         key={o.key}
                         type="button"
-                        onClick={() => {
-                          setMulti(setPickMulti, pickMulti, partIdx, o.key);
-                          if (showKey) setShowKey(false);
-                        }}
+                        onClick={() =>
+                          setMulti(setPickMulti, pickMulti, partIdx, o.key)
+                        }
                         className="border-2 border-black px-2 py-1 font-bold"
                         style={{ background: correctBg(isCorrect, selected) }}
                       >
@@ -1179,49 +1201,16 @@ function ExamplePreview({
       <div className="mt-3 flex flex-wrap gap-2 items-center">
         <button
           type="button"
-          onClick={() => setShowKey(true)}
-          className="brut-btn brut-btn-black"
-          style={{ padding: "4px 10px", fontSize: 12 }}
-        >
-          CEK JAWABAN
-        </button>
-        <button
-          type="button"
           onClick={resetPractice}
           className="brut-btn brut-btn-white"
           style={{ padding: "4px 10px", fontSize: 12 }}
         >
-          ULANG
+          ULANG LATIHAN
         </button>
-        {showKey && (
-          <span className="text-xs font-bold ml-2">
-            Kunci ditampilkan di bawah. Jawaban benar berwarna hijau.
-          </span>
-        )}
+        <span className="text-xs font-bold ml-1 opacity-80">
+          Jawaban yang Anda klik/ketik langsung dicocokkan dengan kunci.
+        </span>
       </div>
-
-      {showKey && (
-        <div className="mt-2 border-2 border-black p-2" style={{ background: "#fff7ed" }}>
-          <div className="text-xs font-black uppercase mb-1">Kunci Jawaban (Contoh)</div>
-          {q.parts > 1 ? (
-            <div className="flex flex-wrap gap-2">
-              {Array.from({ length: q.parts }).map((_, i) => (
-                <span
-                  key={i}
-                  className="brut-tag"
-                  style={{ background: "#a3e635" }}
-                >
-                  {partImages.length > 0 ? "Sisi" : "Bagian"} {partLabel(q, i)} = {correctTexts[i] || "—"}
-                </span>
-              ))}
-            </div>
-          ) : (
-            <span className="brut-tag" style={{ background: "#a3e635" }}>
-              {correctTexts[0] || "—"}
-            </span>
-          )}
-        </div>
-      )}
     </div>
   );
 }

@@ -345,6 +345,7 @@ function InstructionsModal({
 
 function PreviewModal({ subtest, onClose }: { subtest: Subtest; onClose: () => void }) {
   const [questions, setQuestions] = useState<Question[] | null>(null);
+  const isCumulative = BULK_UPLOAD_CODES.has(subtest.code);
 
   useEffect(() => {
     let cancelled = false;
@@ -363,7 +364,19 @@ function PreviewModal({ subtest, onClose }: { subtest: Subtest; onClose: () => v
 
   const loading = questions === null;
   const examples = (questions || []).filter((q) => q.isExample);
-  const real = (questions || []).filter((q) => !q.isExample);
+  const real = (questions || [])
+    .filter((q) => !q.isExample)
+    .sort((a, b) => a.questionNo - b.questionNo);
+  // SPASIAL/SISTEMATIS: hitung nomor awal global per soal. Soal urutan ke-i
+  // mulai dari sum(parts[0..i-1]) + 1.
+  const startNoById = new Map<string, number>();
+  if (isCumulative) {
+    let acc = 1;
+    for (const q of real) {
+      startNoById.set(q.id, acc);
+      acc += q.parts;
+    }
+  }
 
   return (
     <div
@@ -406,7 +419,7 @@ function PreviewModal({ subtest, onClose }: { subtest: Subtest; onClose: () => v
                 <h4 className="text-lg font-black uppercase mb-2">Soal ({real.length})</h4>
                 <div className="space-y-3">
                   {real.map((q) => (
-                    <QuestionPreview key={q.id} q={q} />
+                    <QuestionPreview key={q.id} q={q} startNo={startNoById.get(q.id)} />
                   ))}
                 </div>
               </div>
@@ -418,7 +431,19 @@ function PreviewModal({ subtest, onClose }: { subtest: Subtest; onClose: () => v
   );
 }
 
-function QuestionPreview({ q }: { q: Question }) {
+function QuestionPreview({ q, startNo }: { q: Question; startNo?: number }) {
+  // Untuk SPASIAL/SISTEMATIS startNo dipasok dari PreviewModal sesuai
+  // akumulasi parts. Untuk subtes lain (atau soal contoh) tidak dikirim —
+  // jatuh ke label posisi lokal (1, 2, ...).
+  const labelFor = (i: number): string =>
+    startNo != null ? String(startNo + i) : String(i + 1);
+  const endNo = startNo != null ? startNo + q.parts - 1 : q.questionNo;
+  const headerNo =
+    startNo != null && !q.isExample
+      ? q.parts > 1
+        ? `${startNo}-${endNo}`
+        : String(startNo)
+      : String(q.questionNo);
   const opts = (Array.isArray(q.options) ? (q.options as OptionItem[]) : []).filter(
     (o) => o && typeof o === "object",
   );
@@ -449,7 +474,7 @@ function QuestionPreview({ q }: { q: Question }) {
     <div className="brut-card" style={{ background: q.isExample ? "#e0f2fe" : "#f5f5f5" }}>
       <div className="flex items-baseline gap-2 mb-2 flex-wrap">
         <span className="brut-tag" style={{ background: q.isExample ? "#000" : "#facc15", color: q.isExample ? "#fff" : "#000" }}>
-          {q.isExample ? "CONTOH" : "NO"} {q.questionNo}
+          {q.isExample ? "CONTOH" : "NO"} {headerNo}
         </span>
         {isText && (
           <span className="brut-tag" style={{ background: "#a3e635" }}>
@@ -493,7 +518,7 @@ function QuestionPreview({ q }: { q: Question }) {
           {partImages.map((img, i) =>
             img ? (
               <div key={i} className="border-2 border-black p-2 bg-white">
-                <div className="text-xs font-black uppercase mb-1">Sisi {i + 1}</div>
+                <div className="text-xs font-black uppercase mb-1">Sisi {labelFor(i)}</div>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={img}
@@ -516,7 +541,7 @@ function QuestionPreview({ q }: { q: Question }) {
                   className="brut-tag"
                   style={{ background: "#a3e635" }}
                 >
-                  Bagian {i + 1} = {correctTexts[i] || "—"}
+                  Posisi {labelFor(i)} = {correctTexts[i] || "—"}
                 </span>
               ))}
             </div>
@@ -580,6 +605,9 @@ type BulkItem = {
   prompt: string;
   // Jadikan contoh soal (tampil sebelum timer mulai).
   isExample: boolean;
+  // Override nomor soal awal di gambar ini. null = auto (lanjut dari kartu
+  // sebelumnya). Admin boleh isi manual kalau urutan gambar tidak mulai dari 1.
+  startNoOverride: number | null;
 };
 
 const SPASIAL_CODE_FE = "BAKAT_5_SPASIAL";
@@ -599,7 +627,22 @@ function newBulkItem(file: File | null, code: string): BulkItem {
     kunci: Array.from({ length: parts }).map(() => ""),
     prompt: "",
     isExample: false,
+    startNoOverride: null,
   };
+}
+
+// Hitung nomor soal awal per kartu. Kalau kartu punya override, pakai itu;
+// kalau tidak, lanjut dari nomor terakhir kartu sebelumnya (real soal saja —
+// kartu yang ditandai "Contoh Soal" tidak ikut menambah counter).
+function computeStartNos(items: BulkItem[]): number[] {
+  const out: number[] = [];
+  let acc = 1;
+  for (const it of items) {
+    const start = it.startNoOverride && it.startNoOverride > 0 ? it.startNoOverride : acc;
+    out.push(start);
+    if (!it.isExample) acc = start + it.parts;
+  }
+  return out;
 }
 
 function BulkUploadModal({
@@ -696,22 +739,27 @@ function BulkUploadModal({
     );
   };
 
+  const startNos = computeStartNos(items);
+
   // Validasi: tiap item harus punya gambar + semua kunci terisi.
   const validate = (): string | null => {
     if (items.length === 0) return "Belum ada gambar yang dipilih.";
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
-      if (!it.file) return `Kartu #${i + 1}: gambar belum dipilih.`;
-      if (isSpasial && it.parts !== 5) return `Kartu #${i + 1}: SPASIAL harus 5 jawaban.`;
+      const startNo = startNos[i];
+      const labelOf = (p: number) => String(startNo + p);
+      if (!it.file) return `Soal mulai ${labelOf(0)}: gambar belum dipilih.`;
+      if (isSpasial && it.parts !== 5)
+        return `Soal mulai ${labelOf(0)}: SPASIAL harus 5 jawaban.`;
       if (isSistematis && (it.parts < 1 || it.parts > 12))
-        return `Kartu #${i + 1}: SISTEMATIS parts harus 1-12.`;
+        return `Soal mulai ${labelOf(0)}: SISTEMATIS parts harus 1-12.`;
       for (let p = 0; p < it.parts; p++) {
         const k = (it.kunci[p] ?? "").trim();
-        if (!k) return `Kartu #${i + 1}: kunci posisi ${p + 1} belum diisi.`;
+        if (!k) return `Posisi ${labelOf(p)}: kunci belum diisi.`;
         if (isSpasial && !["B", "S"].includes(k.toUpperCase()))
-          return `Kartu #${i + 1}: kunci posisi ${p + 1} harus B atau S.`;
+          return `Posisi ${labelOf(p)}: kunci harus B atau S.`;
         if (isSistematis && !/^[A-La-l]$/.test(k))
-          return `Kartu #${i + 1}: kunci posisi ${p + 1} harus huruf A-L.`;
+          return `Posisi ${labelOf(p)}: kunci harus huruf A-L.`;
       }
     }
     return null;
@@ -726,8 +774,14 @@ function BulkUploadModal({
     setBusy(true);
     try {
       const fd = new FormData();
+      // questionNo dikirim sesuai startNo komputasi untuk soal real: gambar 1
+      // = 1, gambar 2 (parts=5) = 6, dst. Pakai startNo bikin sortir & label
+      // di runner otomatis konsisten. Untuk soal contoh, pakai counter
+      // tersendiri (1, 2, 3, ...) supaya tidak bentrok dengan unique
+      // constraint [subtestId, questionNo, isExample=true].
+      let exNo = 0;
       const meta = items.map((it, i) => ({
-        questionNo: i + 1,
+        questionNo: it.isExample ? ++exNo : startNos[i],
         parts: it.parts,
         kunci: it.kunci.slice(0, it.parts).map((s) => s.trim()),
         prompt: it.prompt || "",
@@ -841,7 +895,10 @@ function BulkUploadModal({
         )}
 
         <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
-          {items.map((it, idx) => (
+          {items.map((it, idx) => {
+            const startNo = startNos[idx];
+            const endNo = startNo + it.parts - 1;
+            return (
             <div
               key={idx}
               className="brut-card"
@@ -850,7 +907,11 @@ function BulkUploadModal({
               <div className="flex items-start gap-3 flex-wrap">
                 <div className="flex flex-col items-center gap-1">
                   <span className="brut-tag" style={{ background: "#facc15" }}>
-                    SOAL {idx + 1}
+                    {it.isExample
+                      ? `CONTOH ${idx + 1}`
+                      : startNo === endNo
+                        ? `SOAL ${startNo}`
+                        : `SOAL ${startNo}-${endNo}`}
                   </span>
                   <button
                     type="button"
@@ -911,6 +972,25 @@ function BulkUploadModal({
                     {isSpasial && (
                       <span className="text-xs font-black uppercase">Parts: 5 (fixed)</span>
                     )}
+                    <label
+                      className="text-xs font-black uppercase flex items-center gap-1"
+                      title="Default: auto-lanjut dari kartu sebelumnya. Isi manual kalau perlu override."
+                    >
+                      Mulai nomor:
+                      <input
+                        type="number"
+                        min={1}
+                        placeholder={String(startNo)}
+                        value={it.startNoOverride ?? ""}
+                        onChange={(e) => {
+                          const v = e.target.value.trim();
+                          const num = v === "" ? null : Math.max(1, parseInt(v, 10) || 0);
+                          setItem(idx, { startNoOverride: num });
+                        }}
+                        className="brut-input w-20 text-sm"
+                      />
+                      <span className="opacity-60">(auto: {startNo})</span>
+                    </label>
                     <label className="text-xs font-black uppercase flex items-center gap-1">
                       <input
                         type="checkbox"
@@ -921,7 +1001,7 @@ function BulkUploadModal({
                     </label>
                   </div>
                   <div className="text-xs font-black uppercase mb-1">
-                    Kunci Jawaban ({it.parts} posisi)
+                    Kunci Jawaban (posisi {startNo}–{endNo})
                   </div>
                   <div
                     className={
@@ -933,7 +1013,7 @@ function BulkUploadModal({
                     {Array.from({ length: it.parts }).map((_, p) => (
                       <BulkKunciInput
                         key={p}
-                        idx={p}
+                        displayNo={startNo + p}
                         value={it.kunci[p] ?? ""}
                         isSpasial={isSpasial}
                         onChange={(v) => setKunci(idx, p, v)}
@@ -943,7 +1023,8 @@ function BulkUploadModal({
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2 mt-4 pt-3 border-t-2 border-black">
@@ -968,22 +1049,23 @@ function BulkUploadModal({
 }
 
 function BulkKunciInput({
-  idx,
+  displayNo,
   value,
   isSpasial,
   onChange,
 }: {
-  idx: number;
+  displayNo: number;
   value: string;
   isSpasial: boolean;
   onChange: (v: string) => void;
 }) {
   // Untuk SPASIAL: tombol toggle B/S supaya cepat. Untuk SISTEMATIS: input 1
-  // huruf A-L.
+  // huruf A-L. Label di atas pakai nomor global (1, 2, ..., 65) bukan posisi
+  // lokal supaya sesuai sama buku asli.
   if (isSpasial) {
     return (
       <div className="border-2 border-black bg-white p-1">
-        <div className="text-[10px] font-black text-center mb-1">{idx + 1}</div>
+        <div className="text-[10px] font-black text-center mb-1">{displayNo}</div>
         <div className="grid grid-cols-2 gap-1">
           <button
             type="button"
@@ -1005,7 +1087,7 @@ function BulkKunciInput({
   }
   return (
     <div className="border-2 border-black bg-white p-1">
-      <div className="text-[10px] font-black text-center mb-1">{idx + 1}</div>
+      <div className="text-[10px] font-black text-center mb-1">{displayNo}</div>
       <input
         type="text"
         maxLength={1}
