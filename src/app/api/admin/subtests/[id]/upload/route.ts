@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getAdminFromRequest } from "@/lib/auth";
 import { BAKAT_SUBTESTS, MINAT_SUBTESTS, type InputMode } from "@/lib/test-config";
@@ -69,6 +70,19 @@ function buildKunciKolom(r: Row, parts: number): string[] {
   return arr;
 }
 
+// Ambil N kolom label_1..label_N sebagai array label nomor sel "lembar
+// jawaban" (override default 1..N). Mengembalikan null kalau admin pakai
+// default (semua kosong atau semua persis 1..N) supaya student view
+// fallback ke label seed config.
+function buildPartLabels(r: Row, parts: number): string[] | null {
+  const arr: string[] = [];
+  for (let i = 1; i <= parts; i++) arr.push(String(r[`label_${i}`] ?? "").trim());
+  const isAllEmpty = arr.every((s) => s === "");
+  const isDefault = arr.every((s, i) => s === String(i + 1));
+  if (isAllEmpty || isDefault) return null;
+  return arr;
+}
+
 // MINAT: opsi di template selalu A,B (sepasang). scoringTag (mis. "A,B" atau
 // "B,C") menentukan huruf BIDANG/PROGRAM yang sebenarnya dipilih siswa. Kita
 // remap key opsi sesuai scoringTag supaya scoring tinggal hitung huruf yang
@@ -109,6 +123,7 @@ function rowsToData(
   parts: number;
   options: object;
   correct: object;
+  partLabels: Prisma.InputJsonValue | typeof Prisma.JsonNull;
   scoringTag: string | null;
   isExample: boolean;
   inputMode: string;
@@ -126,6 +141,11 @@ function rowsToData(
       : isSistematis
       ? Math.max(1, Math.min(12, rawParts))
       : rawParts;
+    const partLabelsArr = isSpasial || isSistematis ? buildPartLabels(r, parts) : null;
+    const partLabels: Prisma.InputJsonValue | typeof Prisma.JsonNull =
+      partLabelsArr === null
+        ? Prisma.JsonNull
+        : (partLabelsArr as unknown as Prisma.InputJsonValue);
     let opts: unknown;
     if (isPerPartImages) {
       // Simpan gambar per Sisi sebagai object di kolom options.
@@ -174,6 +194,7 @@ function rowsToData(
       parts,
       options: opts as unknown as object,
       correct: correct as unknown as object,
+      partLabels,
       scoringTag: r.scoringTag ? String(r.scoringTag) : null,
       isExample,
       inputMode,

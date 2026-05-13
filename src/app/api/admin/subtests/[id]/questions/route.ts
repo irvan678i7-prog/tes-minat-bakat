@@ -21,6 +21,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       parts: true,
       options: true,
       correct: true,
+      partLabels: true,
       scoringTag: true,
       isExample: true,
       inputMode: true,

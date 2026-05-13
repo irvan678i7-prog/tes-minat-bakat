@@ -86,7 +86,17 @@ export async function POST(req: NextRequest) {
   const seedCfg = [...BAKAT_SUBTESTS, ...MINAT_SUBTESTS].find(
     (x) => x.code === subtest.code,
   );
-  const partLabels = seedCfg?.partLabels ?? [];
+  const seedPartLabels = seedCfg?.partLabels ?? [];
+
+  // Per-soal partLabels: Question.partLabels override seed default. Kalau
+  // null, pakai seed; kalau seed juga kosong, pakai "1","2",..."parts".
+  const resolvePartLabels = (q: { parts: number; partLabels: unknown }): string[] => {
+    if (Array.isArray(q.partLabels) && q.partLabels.length > 0) {
+      return q.partLabels.map((v) => (v == null ? "" : String(v)));
+    }
+    if (seedPartLabels.length > 0) return seedPartLabels;
+    return Array.from({ length: q.parts }, (_, i) => String(i + 1));
+  };
 
   const seed = `${sub.randomSeed}:${subtest.code}`;
   const realQuestions = subtest.questions.filter((q) => !q.isExample);
@@ -107,7 +117,7 @@ export async function POST(req: NextRequest) {
       parts: q.parts,
       options: q.options,
       inputMode: q.inputMode,
-      partLabels,
+      partLabels: resolvePartLabels(q),
     };
   });
 
@@ -121,7 +131,7 @@ export async function POST(req: NextRequest) {
     options: q.options,
     correct: q.correct,
     inputMode: q.inputMode,
-    partLabels,
+    partLabels: resolvePartLabels(q),
   }));
 
   // Existing saved answers (for resume) — only for real questions.

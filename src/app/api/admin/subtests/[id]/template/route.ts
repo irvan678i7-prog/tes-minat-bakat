@@ -39,7 +39,9 @@ function usesPerPartOptionImages(s: SubtestSeed): boolean {
 }
 
 const SISTEMATIS_KUNCI_COLS = Array.from({ length: 12 }, (_, i) => `kunci_${i + 1}`);
+const SISTEMATIS_LABEL_COLS = Array.from({ length: 12 }, (_, i) => `label_${i + 1}`);
 const SPASIAL_KUNCI_COLS = Array.from({ length: 5 }, (_, i) => `kunci_${i + 1}`);
+const SPASIAL_LABEL_COLS = Array.from({ length: 5 }, (_, i) => `label_${i + 1}`);
 
 function partOptionImageCols(s: SubtestSeed): string[] {
   if (!usesPerPartOptionImages(s)) return [];
@@ -61,6 +63,7 @@ function buildHeaders(s: SubtestSeed): string[] {
       "parts",
       "inputMode",
       ...SISTEMATIS_KUNCI_COLS,
+      ...SISTEMATIS_LABEL_COLS,
       "scoringTag",
     ];
   }
@@ -72,6 +75,7 @@ function buildHeaders(s: SubtestSeed): string[] {
       "parts",
       "inputMode",
       ...SPASIAL_KUNCI_COLS,
+      ...SPASIAL_LABEL_COLS,
       "scoringTag",
     ];
   }
@@ -145,13 +149,19 @@ function exampleSoalRow(s: SubtestSeed, no: number): Record<string, string | num
   if (isSistematis(s)) {
     for (let i = 0; i < 12; i++) {
       row[`kunci_${i + 1}`] = ["B", "A", "D", "C", "E", "B", "A", "C", "D", "E", "A", "B"][i] ?? "";
+      // Default kosong → label otomatis 1..N per soal. Admin boleh isi
+      // (mis. 13, 14, …) untuk override jadi nomor berkesinambungan.
+      row[`label_${i + 1}`] = "";
     }
     row.scoringTag = "";
     return row;
   }
   if (isSpasial(s)) {
     const seq = ["S", "B", "B", "B", "S"];
-    for (let i = 0; i < 5; i++) row[`kunci_${i + 1}`] = seq[i];
+    for (let i = 0; i < 5; i++) {
+      row[`kunci_${i + 1}`] = seq[i];
+      row[`label_${i + 1}`] = "";
+    }
     row.scoringTag = "";
     return row;
   }
@@ -199,12 +209,18 @@ function blankSoalRow(s: SubtestSeed, no: number): Record<string, string | numbe
   };
   if (needsTwoImages(s)) row.imageUrl2 = "";
   if (isSistematis(s)) {
-    for (let i = 0; i < 12; i++) row[`kunci_${i + 1}`] = "";
+    for (let i = 0; i < 12; i++) {
+      row[`kunci_${i + 1}`] = "";
+      row[`label_${i + 1}`] = "";
+    }
     row.scoringTag = "";
     return row;
   }
   if (isSpasial(s)) {
-    for (let i = 0; i < 5; i++) row[`kunci_${i + 1}`] = "";
+    for (let i = 0; i < 5; i++) {
+      row[`kunci_${i + 1}`] = "";
+      row[`label_${i + 1}`] = "";
+    }
     row.scoringTag = "";
     return row;
   }
@@ -278,9 +294,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       ? ["5. Kolom 'inputMode' = TEXT untuk subtes ini (jawaban diketik siswa, BUKAN pilihan ganda)."]
       : ["5. Kolom 'inputMode' = CHOICE (pilihan ganda). Kolom 'option*' & 'option*Image' untuk pilihan jawaban."],
     isSistematis(seed)
-      ? ["6. SISTEMATIS: 1 soal = 1 gambar stem (berisi N simbol/posisi) + kolom jawaban 'kunci_1'..'kunci_N' (max 12). Set kolom 'parts' = N untuk soal tsb, lalu isi N kolom kunci pertama (kolom sisanya kosong). Jumlah N boleh beda antar soal; total parts seluruh soal sebaiknya ≈ 150."]
+      ? ["6. SISTEMATIS: 1 soal = 1 gambar stem (berisi N simbol/posisi) + kolom jawaban 'kunci_1'..'kunci_N' (max 12). Set kolom 'parts' = N untuk soal tsb, lalu isi N kolom kunci pertama (kolom sisanya kosong). Jumlah N boleh beda antar soal; total parts seluruh soal sebaiknya ≈ 150. Kolom 'label_1'..'label_12' opsional — isi kalau ingin override nomor sel di lembar jawaban siswa (mis. label_1=13, label_2=14,… untuk soal #2 supaya nomornya berkesinambungan). Kosongkan = otomatis 1..N per soal."]
       : isSpasial(seed)
-      ? ["6. SPASIAL: 1 soal = 1 gambar stem (berisi 5 bentuk) + 5 kolom jawaban 'kunci_1'..'kunci_5'. Tiap kolom diisi 'B' (sama/serupa) atau 'S' (beda). Kolom 'parts' tetap 5."]
+      ? ["6. SPASIAL: 1 soal = 1 gambar stem (berisi 5 bentuk) + 5 kolom jawaban 'kunci_1'..'kunci_5'. Tiap kolom diisi 'B' (sama/serupa) atau 'S' (beda). Kolom 'parts' tetap 5. Kolom 'label_1'..'label_5' opsional — isi kalau ingin override nomor sel di lembar jawaban siswa (mis. label_1=6, label_2=7,… untuk soal #2 supaya berkesinambungan). Kosongkan = otomatis 1..5 per soal."]
       : usesPerPartOptionImages(seed)
       ? [`6. 3D: Tiap soal punya 1 gambar stem (balok 3D) + 3 gambar pilihan per Sisi (Sisi ${partLabelStr}). Upload 1 gambar per Sisi di kolom 'sisi1_image', 'sisi2_image', 'sisi3_image' (gambar berisi 5 pilihan A-E). Kunci diketik siswa di kolom 'correctAnswer' (3 huruf dipisah ;) — mis. ${textCorrectExample(seed)}.`]
       : isText && seed.parts > 1

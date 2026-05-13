@@ -76,6 +76,10 @@ model Question {
   parts         Int             @default(1)
   options       Json
   correct       Json
+  // Per-question override untuk label nomor di tiap sel "lembar jawaban"
+  // (mis. SPASIAL & SISTEMATIS). null = pakai default dari test-config
+  // (1, 2, 3, …). Disimpan sebagai array string.
+  partLabels    Json?
   scoringTag    String?
   isExample     Boolean         @default(false)
   inputMode     String          @default("CHOICE")
