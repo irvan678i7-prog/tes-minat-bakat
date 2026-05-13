@@ -13,6 +13,9 @@ import { getSupabaseAdmin, SUPABASE_BUCKET } from "@/lib/supabase";
 const SISTEMATIS_CODE = "BAKAT_7_SISTEMATISASI";
 const SPASIAL_CODE = "BAKAT_5_SPASIAL";
 const SPASIAL_PARTS = 5;
+// Max parts per soal SISTEMATIS. Bumped 12 -> 24 supaya match buku yang
+// pakai opsi A-X (24 huruf).
+const SISTEMATIS_MAX_PARTS = 24;
 const SPASIAL_OPTIONS: { key: string; label: string }[] = [
   { key: "B", label: "Sama (B)" },
   { key: "S", label: "Beda (S)" },
@@ -106,44 +109,60 @@ export async function POST(
 
   const isSpasial = sub.code === SPASIAL_CODE;
   const isSistematis = sub.code === SISTEMATIS_CODE;
+  const subCode = sub.code;
 
   const sb = getSupabaseAdmin();
 
+  // Helper upload satu File ke Supabase storage. Return public URL atau null
+  // kalau file kosong. Mengembalikan error message kalau gagal supaya caller
+  // bisa propagate ke client.
+  async function uploadOne(
+    f: FormDataEntryValue | null,
+    i: number,
+    slot: "image" | "image2",
+  ): Promise<{ url: string | null; error?: string }> {
+    if (!(f instanceof File) || f.size === 0) return { url: null };
+    if (!sb) return { url: null, error: "Supabase storage belum dikonfigurasi" };
+    const ext = (f.name.split(".").pop() || "png").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const safeExt = ext.length > 0 && ext.length <= 5 ? ext : "png";
+    const key = `bulk-${subCode}-${slot}-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}.${safeExt}`;
+    const buf = Buffer.from(await f.arrayBuffer());
+    const { error } = await sb.storage.from(SUPABASE_BUCKET).upload(key, buf, {
+      contentType: f.type || "application/octet-stream",
+      upsert: false,
+    });
+    if (error) return { url: null, error: error.message };
+    const { data: pub } = sb.storage.from(SUPABASE_BUCKET).getPublicUrl(key);
+    return { url: pub.publicUrl };
+  }
+
   // Upload gambar yang dikirim sebagai file. Pastikan setiap meta entry punya
   // imageUrl (entah dari upload baru atau dari nilai yang sudah ada).
+  // imageUrl2 hanya didukung untuk SISTEMATIS (gambar soal + gambar pertanyaan).
   const uploadedUrls: (string | null)[] = new Array(meta.length).fill(null);
+  const uploadedUrls2: (string | null)[] = new Array(meta.length).fill(null);
   for (let i = 0; i < meta.length; i++) {
-    const f = form.get(`image_${i}`);
-    if (f instanceof File && f.size > 0) {
-      if (!sb) {
-        return NextResponse.json(
-          { error: "Supabase storage belum dikonfigurasi" },
-          { status: 500 },
-        );
-      }
-      const ext = (f.name.split(".").pop() || "png").toLowerCase().replace(/[^a-z0-9]/g, "");
-      const safeExt = ext.length > 0 && ext.length <= 5 ? ext : "png";
-      const key = `bulk-${sub.code}-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}.${safeExt}`;
-      const buf = Buffer.from(await f.arrayBuffer());
-      const { error } = await sb.storage.from(SUPABASE_BUCKET).upload(key, buf, {
-        contentType: f.type || "application/octet-stream",
-        upsert: false,
-      });
-      if (error) {
-        return NextResponse.json(
-          { error: `Upload gambar ke-${i + 1} gagal: ${error.message}` },
-          { status: 500 },
-        );
-      }
-      const { data: pub } = sb.storage.from(SUPABASE_BUCKET).getPublicUrl(key);
-      uploadedUrls[i] = pub.publicUrl;
-    } else if (meta[i].imageUrl && typeof meta[i].imageUrl === "string") {
+    const r1 = await uploadOne(form.get(`image_${i}`), i, "image");
+    if (r1.error) {
+      return NextResponse.json(
+        { error: `Upload gambar ke-${i + 1} gagal: ${r1.error}` },
+        { status: 500 },
+      );
+    }
+    if (r1.url !== null) uploadedUrls[i] = r1.url;
+    else if (meta[i].imageUrl && typeof meta[i].imageUrl === "string")
       uploadedUrls[i] = meta[i].imageUrl as string;
-    } else {
-      // Belum ada gambar untuk index ini. Kita tetap bolehkan supaya admin bisa
-      // simpan draft tanpa gambar — tapi soal tanpa gambar TIDAK terlihat oleh
-      // siswa kalau prompt juga kosong.
-      uploadedUrls[i] = null;
+    else uploadedUrls[i] = null;
+
+    if (isSistematis) {
+      const r2 = await uploadOne(form.get(`image2_${i}`), i, "image2");
+      if (r2.error) {
+        return NextResponse.json(
+          { error: `Upload gambar pertanyaan ke-${i + 1} gagal: ${r2.error}` },
+          { status: 500 },
+        );
+      }
+      uploadedUrls2[i] = r2.url;
     }
   }
 
@@ -166,7 +185,7 @@ export async function POST(
     const parts = isSpasial
       ? SPASIAL_PARTS
       : isSistematis
-      ? Math.max(1, Math.min(12, Number(m.parts ?? 12) || 12))
+      ? Math.max(1, Math.min(SISTEMATIS_MAX_PARTS, Number(m.parts ?? 12) || 12))
       : Math.max(1, Number(m.parts ?? 1) || 1);
     const kunci = normalizeKunci(m.kunci, parts);
     // SPASIAL kunci selalu upper-case (B/S). SISTEMATIS dibiarkan (huruf
@@ -185,7 +204,7 @@ export async function POST(
       questionNo: Number(m.questionNo ?? i + 1) || i + 1,
       prompt: typeof m.prompt === "string" ? m.prompt : "",
       imageUrl: uploadedUrls[i],
-      imageUrl2: null,
+      imageUrl2: uploadedUrls2[i],
       parts,
       options: opts,
       correct: correctArr as unknown as object,
