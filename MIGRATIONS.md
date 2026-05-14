@@ -40,7 +40,8 @@ di DB, lalu menjalankan `ALTER TABLE` yang diperlukan secara otomatis.
 | File | Deskripsi | Status |
 |------|-----------|--------|
 | `prisma/sql/0001_subtestprogress_lock_columns.sql` | Tambah kolom `finishedAt` & `finishReason` di `SubtestProgress` (fix error P2022 di Vercel) | applied |
-| `prisma/sql/0002_drop_stale_subtestprogress_userid.sql` | Drop kolom `userId` (peninggalan schema lama) dari `SubtestProgress` (fix error P2011 saat upsert) | **PERLU DI-APPLY** |
+| `prisma/sql/0002_drop_stale_subtestprogress_userid.sql` | Drop kolom `userId` (peninggalan schema lama) dari `SubtestProgress` (fix error P2011 saat upsert) | applied |
+| `prisma/sql/0003_drop_stale_subtestprogress_updatedat.sql` | Drop kolom `updatedAt` (peninggalan schema lama) dari `SubtestProgress` (fix error P2011 saat upsert) | **PERLU DI-APPLY** |
 
 Setiap SQL di folder `prisma/sql/` ditulis idempoten, jadi tidak masalah
 kalau kamu jalankan ulang.
