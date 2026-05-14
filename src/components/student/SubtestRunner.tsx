@@ -57,6 +57,7 @@ function violationLabel(t: string | null): string {
     case "tab_hidden":
       return "Pindah tab / ganti aplikasi";
     case "blur":
+      // Tidak lagi dikirim oleh client, tapi tetap muncul untuk log lama.
       return "Klik di luar halaman tes";
     case "fullscreen_exit":
       return "Keluar dari mode full-screen";
@@ -70,9 +71,29 @@ function violationLabel(t: string | null): string {
       return "Klik kanan";
     case "shortcut":
       return "Pintasan keyboard terlarang";
+    case "screenshot":
+      return "Mengambil screenshot";
+    case "screen_record":
+      return "Merekam layar";
     default:
       return "Aktivitas mencurigakan";
   }
+}
+
+// Rapikan teks instruksi / soal: trim, normalisasi whitespace, runtuhkan
+// baris kosong >2 menjadi 2, dan trim spasi di tiap baris. Tetap pertahankan
+// baris baru tunggal supaya layout dari admin terjaga.
+function cleanText(raw: string | null | undefined): string {
+  if (!raw) return "";
+  return raw
+    .replace(/\r\n?/g, "\n")
+    // Trim spasi/tab di ujung tiap baris.
+    .replace(/[ \t]+\n/g, "\n")
+    // Runtuhkan baris kosong berturut-turut (>=3) menjadi 2.
+    .replace(/\n{3,}/g, "\n\n")
+    // Runtuhkan spasi/tab beruntun (selain awal baris) menjadi satu.
+    .replace(/([^\n \t]) {2,}/g, "$1 ")
+    .trim();
 }
 
 function SyncBadge({
@@ -128,12 +149,17 @@ export default function SubtestRunner({
   examples,
   existingAnswers,
   isCompleted = false,
+  serverStartedAt = null,
 }: {
   subtest: { code: string; name: string; description: string; instructions?: string; durationSec: number };
   questions: Question[];
   examples: ExampleQuestion[];
   existingAnswers: Record<string, unknown>;
   isCompleted?: boolean;
+  // Timestamp ISO dari server: kapan subtes ini dimulai pertama kali.
+  // Jadi sumber kebenaran timer, mengalahkan localStorage. Null kalau
+  // belum ada progress di DB.
+  serverStartedAt?: string | null;
 }) {
   const router = useRouter();
   const [answers, setAnswers] = useState<Record<string, string | string[]>>(() => {
@@ -161,31 +187,49 @@ export default function SubtestRunner({
   );
   const hydrated = typeof window !== "undefined";
   const [startedManual, setStartedManual] = useState(false);
-  const started = startedManual || startedFromStorage === "1";
+  // Kalau server sudah punya progress (timer sudah jalan), langsung anggap
+  // started — tidak perlu nunggu siswa klik MULAI lagi. Ini juga menjaga
+  // konsistensi: kalau siswa reload tab di tengah pengerjaan, dia langsung
+  // masuk ke layar soal, bukan intro.
+  const serverStartedEpoch = serverStartedAt ? Date.parse(serverStartedAt) : NaN;
+  const hasServerStart =
+    Number.isFinite(serverStartedEpoch) && serverStartedEpoch > 0;
+  const started =
+    startedManual || startedFromStorage === "1" || hasServerStart;
 
   const [idx, setIdx] = useState(() => {
     const firstUnanswered = questions.findIndex((q) => !existingAnswers[q.id]);
     return firstUnanswered === -1 ? 0 : firstUnanswered;
   });
 
-  // Timer: starts only after student clicks "Mulai".
+  // Timer: starts only after student clicks "Mulai" (atau langsung kalau
+  // server sudah punya startedAt). Sumber timer = serverStartedAt kalau ada,
+  // fallback ke localStorage. localStorage TIDAK menimpa server — kalau
+  // server bilang sudah mulai jam X, itu yang dipakai.
   const [tick, setTick] = useState<{ startedAt: number; now: number } | null>(null);
 
   useEffect(() => {
     if (!started || typeof window === "undefined") return;
-    const saved = window.localStorage.getItem(STORAGE_KEY(subtest.code));
     let s: number;
-    if (saved) {
-      s = parseInt(saved);
-    } else {
-      s = Date.now();
+    if (hasServerStart) {
+      s = serverStartedEpoch;
+      // Sinkronkan localStorage supaya kalau server tiba-tiba tidak kirim,
+      // tetap konsisten.
       window.localStorage.setItem(STORAGE_KEY(subtest.code), String(s));
+    } else {
+      const saved = window.localStorage.getItem(STORAGE_KEY(subtest.code));
+      if (saved) {
+        s = parseInt(saved);
+      } else {
+        s = Date.now();
+        window.localStorage.setItem(STORAGE_KEY(subtest.code), String(s));
+      }
     }
     const update = () => setTick({ startedAt: s, now: Date.now() });
     update();
     const id = setInterval(update, 1000);
     return () => clearInterval(id);
-  }, [started, subtest.code]);
+  }, [started, subtest.code, hasServerStart, serverStartedEpoch]);
 
   const elapsed = tick ? Math.floor((tick.now - tick.startedAt) / 1000) : 0;
   const remaining = subtest.durationSec - elapsed;
@@ -322,31 +366,55 @@ export default function SubtestRunner({
 
   const goNext = () => setIdx((i) => Math.min(i + 1, questions.length - 1));
   const goPrev = () => setIdx((i) => Math.max(i - 1, 0));
-  const finishSub = async () => {
-    // Make sure typing buffer + queued answers are flushed before leaving.
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem(STORAGE_KEY(subtest.code));
-      window.localStorage.removeItem(STARTED_KEY(subtest.code));
-    }
+
+  // Cegah double-call kalau siswa cepat-cepat klik selesai dan timer
+  // habis bersamaan, atau klik SELESAI berulang kali.
+  const [locking, setLocking] = useState(false);
+  const finishSub = async (reason: "MANUAL" | "TIME_UP" = "MANUAL") => {
+    if (locking) return;
+    setLocking(true);
+    // Flush jawaban yang masih dalam buffer ke server SEBELUM kunci
+    // subtes — supaya server tidak menolak dengan 409 "sudah dikunci".
     try {
       await sync.flush();
     } catch {
       // ignore — retries will continue in background on next page
     }
-    toast.success("Subtes selesai. Kembali ke daftar.");
+    // Kunci subtes di server. Idempoten; aman dipanggil >1 kali.
+    try {
+      await fetch("/api/student/test/subtest-finish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subtestCode: subtest.code, reason }),
+      });
+    } catch {
+      // Best-effort; lazy-lock di /test akan tetap mengunci kalau timer
+      // sudah lewat. Kita lanjut redirect.
+    }
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(STORAGE_KEY(subtest.code));
+      window.localStorage.removeItem(STARTED_KEY(subtest.code));
+    }
+    toast.success(
+      reason === "TIME_UP"
+        ? "Waktu habis. Subtes terkunci, kembali ke daftar."
+        : "Subtes selesai. Kembali ke daftar.",
+    );
     router.push("/test");
   };
 
-  // Saat waktu habis: jangan langsung pindah ke /test — cukup tampilkan toast
-  // peringatan sekali. Siswa boleh menyelesaikan/menyimpan jawaban yang masih
-  // dalam pengetikan, lalu klik "SELESAI SUBTES" sendiri. Ini mencegah siswa
-  // ter-yanked keluar sebelum sempat menyimpan jawaban.
+  // Saat waktu habis: AUTO LOCK subtes (server-side) lalu redirect. Sebelum
+  // redirect, kita tetap sempatkan flush jawaban yang masih dalam buffer.
+  // Siswa TIDAK BISA lagi mengerjakan setelah waktu habis (server akan
+  // tolak request answer dengan 409).
   const [timeUpNotified, setTimeUpNotified] = useState(false);
   useEffect(() => {
     if (timeUp && !timeUpNotified) {
       setTimeUpNotified(true);
-      toast("Waktu untuk subtes ini sudah habis. Klik SELESAI SUBTES untuk lanjut.");
+      toast("Waktu subtes habis. Mengunci & kembali ke daftar…");
+      void finishSub("TIME_UP");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeUp, timeUpNotified]);
 
   const handleStart = () => {
@@ -427,8 +495,10 @@ export default function SubtestRunner({
           <div className="brut-card" style={{ background: "#facc15" }}>
             <h2 className="text-2xl font-black uppercase mb-2">Petunjuk Pengerjaan</h2>
             <p className="text-sm font-bold uppercase opacity-80 mb-3">{subtest.description}</p>
-            {subtest.instructions && subtest.instructions.trim() ? (
-              <p className="font-semibold whitespace-pre-wrap">{subtest.instructions}</p>
+            {cleanText(subtest.instructions) ? (
+              <p className="font-semibold whitespace-pre-wrap leading-relaxed break-words">
+                {cleanText(subtest.instructions)}
+              </p>
             ) : (
               <p className="font-semibold opacity-80">
                 Belum ada instruksi khusus. Pastikan Anda membaca soal dengan teliti dan menjawab sesuai
@@ -521,6 +591,23 @@ export default function SubtestRunner({
             >
               {fmtTime(remaining)}
             </span>
+            {!timeUp && (
+              <button
+                onClick={() => {
+                  const msg =
+                    answeredCount < questions.length
+                      ? `Selesaikan subtes ini? Masih ada ${questions.length - answeredCount} soal yang belum dijawab dan TIDAK BISA dibuka lagi.`
+                      : "Selesaikan subtes ini? Subtes akan dikunci dan TIDAK BISA dibuka lagi.";
+                  if (!confirm(msg)) return;
+                  void finishSub("MANUAL");
+                }}
+                disabled={locking}
+                className="brut-btn brut-btn-pink text-xs"
+                title="Akhiri subtes ini sekarang. Subtes terkunci permanen."
+              >
+                {locking ? "MENGUNCI…" : "SELESAIKAN SUBTES"}
+              </button>
+            )}
           </div>
         </div>
         {ac.state.lastAt > 0 && ac.state.lastAt > ackedAt && (
@@ -564,7 +651,9 @@ export default function SubtestRunner({
       <main className="flex-1 max-w-4xl mx-auto px-6 py-8 w-full">
         <div className="brut-card mb-6" style={{ background: "#fff" }}>
           <div className="text-sm font-bold uppercase mb-2">{subtest.description}</div>
-          <div className="text-xl font-bold whitespace-pre-wrap">{q.prompt}</div>
+          <div className="text-xl font-bold whitespace-pre-wrap leading-relaxed break-words">
+            {cleanText(q.prompt)}
+          </div>
           {(q.imageUrl || q.imageUrl2) && (
             <div className="my-4 flex flex-wrap items-start gap-3">
               {q.imageUrl && (
@@ -815,16 +904,31 @@ export default function SubtestRunner({
           </button>
           <span className="text-sm font-bold">Terjawab: {answeredCount}/{questions.length}</span>
           {timeUp ? (
-            <button onClick={finishSub} className="brut-btn brut-btn-pink">
-              SELESAI SUBTES (WAKTU HABIS)
+            <button
+              onClick={() => finishSub("TIME_UP")}
+              disabled={locking}
+              className="brut-btn brut-btn-pink"
+            >
+              {locking ? "MENGUNCI…" : "SELESAI SUBTES (WAKTU HABIS)"}
             </button>
           ) : idx < questions.length - 1 ? (
             <button onClick={goNext} className="brut-btn brut-btn-black">
               SELANJUTNYA →
             </button>
           ) : (
-            <button onClick={finishSub} className="brut-btn brut-btn-pink">
-              SIMPAN &amp; KEMBALI
+            <button
+              onClick={() => {
+                const msg =
+                  answeredCount < questions.length
+                    ? `Selesaikan subtes ini? Masih ada ${questions.length - answeredCount} soal yang belum dijawab dan TIDAK BISA dibuka lagi.`
+                    : "Selesaikan subtes ini? Subtes akan dikunci dan TIDAK BISA dibuka lagi.";
+                if (!confirm(msg)) return;
+                void finishSub("MANUAL");
+              }}
+              disabled={locking}
+              className="brut-btn brut-btn-pink"
+            >
+              {locking ? "MENGUNCI…" : "SELESAIKAN SUBTES ✓"}
             </button>
           )}
         </div>
@@ -949,7 +1053,9 @@ function ExamplePreview({
           </span>
         )}
       </div>
-      <p className="font-bold whitespace-pre-wrap mb-2">{q.prompt || "—"}</p>
+      <p className="font-bold whitespace-pre-wrap leading-relaxed break-words mb-2">
+        {cleanText(q.prompt) || "—"}
+      </p>
       {(q.imageUrl || q.imageUrl2) && (
         <div className="my-2 flex flex-wrap items-start gap-2">
           {q.imageUrl && (
@@ -1098,8 +1204,8 @@ function ExamplePreview({
                         unoptimized
                       />
                     )}
-                    <p className="text-sm font-semibold whitespace-pre-wrap">
-                      {o.label || (o.imageUrl ? "(gambar)" : "—")}
+                    <p className="text-sm font-semibold whitespace-pre-wrap leading-relaxed break-words">
+                      {cleanText(o.label) || (o.imageUrl ? "(gambar)" : "—")}
                     </p>
                     {showKey && isCorrect && (
                       <span className="brut-tag mt-1 inline-block" style={{ background: "#000", color: "#fff" }}>

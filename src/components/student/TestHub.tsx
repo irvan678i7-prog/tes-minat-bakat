@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import toast from "react-hot-toast";
+import TestRules from "@/components/student/TestRules";
 
 type Sub = {
   id: string;
@@ -13,6 +14,8 @@ type Sub = {
   durationSec: number;
   total: number;
   answered: number;
+  locked: boolean;
+  finishReason: string | null;
 };
 
 // Try the finish call up to a few times with exponential backoff so a flaky
@@ -51,9 +54,48 @@ export default function TestHub({
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // "Semua subtes sudah dijalani" — boleh tombol SELESAIKAN TES aktif kalau
+  // tiap subtes ATAU sudah dikunci (waktu habis / siswa klik selesai) ATAU
+  // sudah dijawab penuh. Dengan kata lain: siswa tidak perlu menjawab semua
+  // soal di subtes yang waktunya habis sebelum boleh submit total.
   const allDone =
     subtests.length > 0 &&
-    subtests.every((s) => s.total === 0 || s.answered >= s.total);
+    subtests.every(
+      (s) => s.total === 0 || s.locked || s.answered >= s.total,
+    );
+
+  // Tampilkan aturan tes sekali per submission. Setelah siswa klik
+  // "Saya Mengerti", flag disimpan di localStorage supaya reload tidak
+  // memunculkan aturan lagi. Siswa tetap bisa membuka kembali dari
+  // tombol di header.
+  const RULES_KEY = `test_rules_ack_${testKind}`;
+  // Pakai useSyncExternalStore supaya tidak ada setState-in-effect dan
+  // tidak ada hydration flicker. SSR default = belum di-ack (tampilkan
+  // modal) supaya kalau JS sempat delay, modal sudah terlihat dari HTML.
+  const ackFromStorage = useSyncExternalStore(
+    () => () => {},
+    () => {
+      try {
+        return window.localStorage.getItem(RULES_KEY) === "1" ? "1" : "0";
+      } catch {
+        return "0";
+      }
+    },
+    () => "0",
+  );
+  const [manuallyShown, setManuallyShown] = useState(false);
+  const [acked, setAcked] = useState(false);
+  const showRules = manuallyShown || (!acked && ackFromStorage !== "1");
+
+  const acknowledgeRules = () => {
+    try {
+      window.localStorage.setItem(RULES_KEY, "1");
+    } catch {
+      // Abaikan, modal akan tertutup tetap.
+    }
+    setAcked(true);
+    setManuallyShown(false);
+  };
 
   const finish = async () => {
     if (!confirm("Selesaikan tes? Anda tidak dapat mengubah jawaban setelah dikirim.")) return;
@@ -84,17 +126,40 @@ export default function TestHub({
 
   return (
     <div className="min-h-screen flex flex-col">
+      {showRules && (
+        <TestRules
+          testKind={testKind}
+          onAcknowledge={acknowledgeRules}
+          onClose={
+            // Modal dapat ditutup hanya kalau dibuka manual via tombol di
+            // header (siswa sudah pernah setuju sebelumnya).
+            manuallyShown && ackFromStorage === "1"
+              ? () => setManuallyShown(false)
+              : undefined
+          }
+        />
+      )}
       <header className="border-b-4 border-black bg-yellow-300">
-        <div className="max-w-4xl mx-auto px-6 py-5 flex items-center justify-between">
+        <div className="max-w-4xl mx-auto px-6 py-5 flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-2xl md:text-3xl font-black uppercase">
               Tes {testKind}
             </h1>
             <p className="font-semibold">Peserta: {studentName}</p>
           </div>
-          <span className="brut-tag" style={{ background: "#000", color: "#fff" }}>
-            {subtests.length} SUBTES
-          </span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setManuallyShown(true)}
+              className="brut-btn brut-btn-white text-xs"
+              title="Lihat aturan tes"
+            >
+              ⚑ ATURAN TES
+            </button>
+            <span className="brut-tag" style={{ background: "#000", color: "#fff" }}>
+              {subtests.length} SUBTES
+            </span>
+          </div>
         </div>
       </header>
       <main className="flex-1 max-w-4xl mx-auto px-6 py-8 w-full space-y-4">
@@ -104,35 +169,82 @@ export default function TestHub({
         </p>
         <ol className="space-y-3">
           {subtests.map((s, idx) => {
-            const done = s.total > 0 && s.answered >= s.total;
             const empty = s.total === 0;
+            const done = !empty && s.answered >= s.total;
+            // Subtes terkunci: TIDAK BISA dibuka lagi. Warna abu, badge
+            // SELESAI, tombol mati total (bukan <Link>).
+            const locked = s.locked;
+            const reasonLabel =
+              s.finishReason === "TIME_UP"
+                ? "WAKTU HABIS"
+                : s.finishReason === "MANUAL"
+                ? "DISELESAIKAN"
+                : "SELESAI";
+            let bg: string;
+            if (empty) bg = "#fff";
+            else if (locked) bg = "#d4d4d8"; // abu (zinc-300)
+            else if (done) bg = "#a3e635"; // hijau (lime-400)
+            else bg = "#22d3ee"; // cyan-400
             return (
               <li
                 key={s.id}
                 className="brut-card flex items-center justify-between gap-4"
-                style={{ background: empty ? "#fff" : done ? "#a3e635" : "#22d3ee" }}
+                style={{ background: bg }}
               >
                 <div className="flex-1">
                   <div className="text-sm font-bold opacity-70">SUBTES {idx + 1}</div>
                   <div className="text-xl font-black uppercase">{s.name}</div>
                   <div className="text-sm font-semibold">{s.description}</div>
-                  <div className="text-xs font-bold mt-1">
-                    {s.total === 0 ? (
-                      <span className="brut-tag" style={{ background: "#ff4d8d" }}>BELUM ADA SOAL</span>
+                  <div className="text-xs font-bold mt-1 flex flex-wrap gap-2 items-center">
+                    {empty ? (
+                      <span className="brut-tag" style={{ background: "#ff4d8d" }}>
+                        BELUM ADA SOAL
+                      </span>
                     ) : (
                       <>
-                        {s.answered}/{s.total} terjawab •{" "}
-                        Waktu {Math.round(s.durationSec / 60)} menit
+                        <span>
+                          {s.answered}/{s.total} terjawab •{" "}
+                          Waktu {Math.round(s.durationSec / 60)} menit
+                        </span>
+                        {locked && (
+                          <span
+                            className="brut-tag"
+                            style={{ background: "#000", color: "#fff" }}
+                            title={
+                              s.finishReason === "TIME_UP"
+                                ? "Waktu subtes habis — subtes terkunci otomatis."
+                                : "Siswa sudah klik tombol Selesai di subtes ini."
+                            }
+                          >
+                            {reasonLabel}
+                          </span>
+                        )}
                       </>
                     )}
                   </div>
                 </div>
-                <Link
-                  href={`/test/${s.code}`}
-                  className={`brut-btn ${done ? "brut-btn-black" : ""} ${empty ? "opacity-50 pointer-events-none" : ""}`}
-                >
-                  {done ? "REVIEW" : s.answered > 0 ? "LANJUT" : "MULAI"}
-                </Link>
+                {locked ? (
+                  <span
+                    className="brut-btn"
+                    style={{
+                      background: "#71717a",
+                      color: "#fff",
+                      cursor: "not-allowed",
+                      opacity: 0.7,
+                    }}
+                    aria-disabled="true"
+                    title="Subtes ini sudah selesai dan tidak bisa dibuka lagi."
+                  >
+                    SELESAI
+                  </span>
+                ) : (
+                  <Link
+                    href={`/test/${s.code}`}
+                    className={`brut-btn ${done ? "brut-btn-black" : ""} ${empty ? "opacity-50 pointer-events-none" : ""}`}
+                  >
+                    {done ? "REVIEW" : s.answered > 0 ? "LANJUT" : "MULAI"}
+                  </Link>
+                )}
               </li>
             );
           })}
