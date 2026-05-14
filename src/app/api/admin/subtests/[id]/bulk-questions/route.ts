@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomBytes } from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getAdminFromRequest } from "@/lib/auth";
 import { getSupabaseAdmin, SUPABASE_BUCKET } from "@/lib/supabase";
+import { ALLOWED_IMAGE_MIME, MAX_UPLOAD_BYTES, MIME_TO_EXT } from "@/lib/env";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 // Bulk upload soal berbasis gambar — khusus subtes yang strukturnya
 // "1 gambar = 1 soal dengan N kunci jawaban", seperti SISTEMATIS (parts 12)
@@ -140,12 +145,26 @@ async function handle(
   ): Promise<{ url: string | null; error?: string }> {
     if (!(f instanceof File) || f.size === 0) return { url: null };
     if (!sb) return { url: null, error: "Supabase storage belum dikonfigurasi" };
-    const ext = (f.name.split(".").pop() || "png").toLowerCase().replace(/[^a-z0-9]/g, "");
-    const safeExt = ext.length > 0 && ext.length <= 5 ? ext : "png";
-    const key = `bulk-${subCode}-${slot}-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}.${safeExt}`;
+    // Validasi MIME (jangan percaya ekstensi nama file) + batas ukuran.
+    const mime = (f.type || "").toLowerCase();
+    if (!ALLOWED_IMAGE_MIME.has(mime)) {
+      return {
+        url: null,
+        error: `Tipe file tidak didukung (${mime || "unknown"}). Hanya: ${Array.from(
+          ALLOWED_IMAGE_MIME,
+        ).join(", ")}`,
+      };
+    }
+    if (f.size > MAX_UPLOAD_BYTES) {
+      const mb = (MAX_UPLOAD_BYTES / (1024 * 1024)).toFixed(1);
+      return { url: null, error: `Ukuran file melebihi batas ${mb} MB.` };
+    }
+    const safeExt = MIME_TO_EXT[mime] || "bin";
+    // Nama key random pakai randomBytes (CSPRNG) — jangan ambil dari nama file.
+    const key = `bulk-${subCode}-${slot}-${Date.now()}-${i}-${randomBytes(6).toString("hex")}.${safeExt}`;
     const buf = Buffer.from(await f.arrayBuffer());
     const { error } = await sb.storage.from(SUPABASE_BUCKET).upload(key, buf, {
-      contentType: f.type || "application/octet-stream",
+      contentType: mime,
       upsert: false,
     });
     if (error) return { url: null, error: error.message };

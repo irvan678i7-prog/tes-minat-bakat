@@ -5,6 +5,16 @@ import { getAdminFromRequest } from "@/lib/auth";
 import { buildReportPDF } from "@/lib/pdf";
 import { scoreSubmission, type ScoringPayload } from "@/lib/scoring";
 
+// PDF generation pakai jspdf (Node-only API) — paksa Node runtime, jangan
+// kena edge runtime fallback. `dynamic = force-dynamic` supaya Next tidak
+// coba cache response sebagai static.
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+// Vercel Hobby plan max 10 detik. Route ini cepat karena `Result` di-cache
+// saat siswa menyelesaikan tes (lihat `api/student/test/finish/route.ts`),
+// jadi GET PDF tidak perlu re-score — hanya render PDF dari payload.
+export const maxDuration = 10;
+
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const admin = getAdminFromRequest(req);
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
