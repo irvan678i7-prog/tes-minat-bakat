@@ -9,7 +9,7 @@ export default function TestHomeLoading() {
         <div className="max-w-5xl mx-auto px-6 py-5 flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-baseline gap-3">
             <h1 className="text-2xl md:text-3xl font-black uppercase tracking-tight">
-              TES MINAT &amp; BAKAT
+              EKIU
             </h1>
             <span className="brut-tag" style={{ background: "#000", color: "#fff" }}>
               MEMUAT…

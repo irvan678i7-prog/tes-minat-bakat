@@ -43,7 +43,7 @@ export function buildRekapPDF(
   doc.setTextColor(BLACK);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(20);
-  doc.text("REKAP HASIL TES", margin, 42);
+  doc.text("EKIU — REKAP HASIL TES", margin, 42);
   doc.setFontSize(28);
   doc.text(`${meta.testKind === "BAKAT" ? "TES BAKAT" : "TES MINAT"} — ${meta.school || "Semua Sekolah"}`.toUpperCase(), margin, 78);
 

@@ -1,7 +1,11 @@
 // Skoring profesional ala tes IQ ternama (Wechsler-style). Output:
 // - z-score, T-score, percentile, stanine per subtes
 // - Composite Index (GRI, VSI, PSI, VCI) — mirip indeks Wechsler
-// - FSIQ (Full Scale IQ) dengan mean 100, SD 15, dan 95% CI ±5
+// - 4 kategori akumulasi IQ Prediktif: Penalaran, Verbal, Kuantitatif, Spasial
+// - FSIQ (Estimasi Kemampuan Intelektual Umum / EKIU)
+//   Rumus: IQ_z = (0.30 × Penalaran) + (0.25 × Verbal)
+//                + (0.25 × Kuantitatif) + (0.20 × Spasial)
+//   IQ = clamp(round(100 + 15 × IQ_z), 50, 160), CI 95% ±5
 // - Pita kategori Wechsler standar (Very Superior … Extremely Low)
 // - Narrative interpretation otomatis (paragraph) berdasarkan profil siswa
 //
@@ -170,6 +174,59 @@ export const COMPOSITE_GROUPS: Record<string, { name: string; short: string; mem
   },
 };
 
+// ── 4 Kategori Akumulasi IQ Prediktif ────────────────────────────────────
+//
+// Sesuai rumus rekomendasi:
+//   IQ_prediksi = (0.30 × Penalaran) + (0.25 × Verbal)
+//               + (0.25 × Kuantitatif) + (0.20 × Spasial)
+// Tiap kategori adalah rata-rata z-score subtes anggotanya. Hasil akhir
+// dikonversi ke skala IQ (mean 100, SD 15).
+//
+// Sistematisasi (klerikal murni) tidak masuk formula IQ — tetap dilaporkan
+// sebagai bagian indeks komposit PSI.
+
+export type IqCategoryCode = "P" | "V" | "K" | "S";
+
+export const IQ_CATEGORY_GROUPS: Record<
+  IqCategoryCode,
+  { name: string; short: string; weight: number; members: string[] }
+> = {
+  P: {
+    name: "Penalaran",
+    short: "Penalaran",
+    weight: 0.30,
+    members: ["BAKAT_1_VISUAL", "BAKAT_4_URUTAN"],
+  },
+  V: {
+    name: "Verbal",
+    short: "Verbal",
+    weight: 0.25,
+    members: ["BAKAT_3_VERBAL", "BAKAT_8_KOSAKATA"],
+  },
+  K: {
+    name: "Kuantitatif",
+    short: "Kuantitatif",
+    weight: 0.25,
+    members: ["BAKAT_2_NUMERIK", "BAKAT_9_FIGURAL"],
+  },
+  S: {
+    name: "Spasial",
+    short: "Spasial",
+    weight: 0.20,
+    members: ["BAKAT_5_SPASIAL", "BAKAT_6_3DIMENSI"],
+  },
+};
+
+export type IqCategoryScore = {
+  code: IqCategoryCode;
+  name: string;
+  weight: number;     // 0.30 / 0.25 / 0.25 / 0.20
+  meanZ: number;      // rata-rata z-score subtes anggota
+  scaled: number;     // 100 + 15 * meanZ, clamp 50-160
+  percentile: number; // dari meanZ
+  band: WechslerBandInfo;
+};
+
 export type CompositeIndex = {
   code: string;
   name: string;
@@ -210,11 +267,15 @@ export function wechslerBand(score: number): WechslerBandInfo {
 // ── Full Scale IQ ─────────────────────────────────────────────────────────
 
 export type FSIQResult = {
-  score: number;       // 100 + 15 * mean(z across all subtests), clamp 50-160
+  score: number;       // 100 + 15 * (weighted mean of category z-scores), clamp 50-160
   ci95Low: number;     // score - 5
   ci95High: number;    // score + 5
   band: ReturnType<typeof wechslerBand>;
   percentile: number;  // dari z agregat
+  // Formula akumulasi: 0.30*Penalaran + 0.25*Verbal + 0.25*Kuantitatif + 0.20*Spasial
+  formula: string;
+  // Breakdown 4 kategori yang dipakai di formula.
+  categories: IqCategoryScore[];
 };
 
 function meanZ(values: number[]): number {
@@ -255,6 +316,7 @@ export type ProSubtestScore = SubtestRaw & {
 export type ProBakatPayload = {
   subtests: ProSubtestScore[];
   composites: CompositeIndex[];
+  iqCategories: IqCategoryScore[];
   fsiq: FSIQResult;
   // Narasi otomatis untuk dimasukkan ke PDF / hasil.
   narrative: string;
@@ -296,70 +358,69 @@ export function computeProBakat(
     };
   });
 
-  // FSIQ — mean z dari semua subtes (bobot sama).
-  const allZ = scored.map((s) => s.zScore);
-  const overallZ = meanZ(allZ);
-  const fsiqScore = clamp(Math.round(100 + 15 * overallZ), 50, 160);
+  // ── IQ Prediktif: akumulasi 4 kategori dengan bobot ─────────────────
+  // Rumus: IQ_z = 0.30*P + 0.25*V + 0.25*K + 0.20*S
+  // di mana tiap kategori = mean z-score subtes anggotanya.
+  const iqCategories: IqCategoryScore[] = (
+    Object.keys(IQ_CATEGORY_GROUPS) as IqCategoryCode[]
+  ).map((code) => {
+    const g = IQ_CATEGORY_GROUPS[code];
+    const memberZs = g.members
+      .map((m) => zMap.get(m))
+      .filter((v): v is number => typeof v === "number");
+    const mz = meanZ(memberZs);
+    const scaled = clamp(Math.round(100 + 15 * mz), 50, 160);
+    return {
+      code,
+      name: g.name,
+      weight: g.weight,
+      meanZ: Math.round(mz * 100) / 100,
+      scaled,
+      percentile: scoreToPercentile(scaled),
+      band: wechslerBand(scaled),
+    };
+  });
+
+  const totalWeight = iqCategories.reduce((s, c) => s + c.weight, 0) || 1;
+  const weightedZ =
+    iqCategories.reduce((s, c) => s + c.weight * c.meanZ, 0) / totalWeight;
+  const fsiqScore = clamp(Math.round(100 + 15 * weightedZ), 50, 160);
   const fsiq: FSIQResult = {
     score: fsiqScore,
     ci95Low: clamp(fsiqScore - 5, 50, 160),
     ci95High: clamp(fsiqScore + 5, 50, 160),
     band: wechslerBand(fsiqScore),
     percentile: scoreToPercentile(fsiqScore),
+    formula:
+      "IQ = (0.30 \u00D7 Penalaran) + (0.25 \u00D7 Verbal) + (0.25 \u00D7 Kuantitatif) + (0.20 \u00D7 Spasial)",
+    categories: iqCategories,
   };
 
   const narrative = buildNarrative(scored, composites, fsiq);
-  return { subtests: scored, composites, fsiq, narrative };
+  return { subtests: scored, composites, iqCategories, fsiq, narrative };
 }
 
 // ── Narrative builder ────────────────────────────────────────────────────
 
 function buildNarrative(
   subtests: ProSubtestScore[],
-  composites: CompositeIndex[],
+  _composites: CompositeIndex[],
   fsiq: FSIQResult,
 ): string {
-  // Sort subtes berdasarkan z untuk identifikasi kekuatan & area pengembangan.
+  // Versi ringkas untuk laporan 1-halaman: cukup 1-2 kalimat fokus pada
+  // IQ + kekuatan & area pengembangan.
   const sorted = [...subtests].sort((a, b) => b.zScore - a.zScore);
-  const strengths = sorted.slice(0, 2).filter((s) => s.zScore > 0);
-  const weak = sorted.slice(-2).filter((s) => s.zScore < 0);
-
+  const top = sorted[0];
+  const bot = sorted[sorted.length - 1];
   const parts: string[] = [];
 
   parts.push(
-    `Berdasarkan hasil tes, peserta menunjukkan skor IQ profil sebesar ${fsiq.score} (CI 95% ${fsiq.ci95Low}-${fsiq.ci95High}), berada pada kategori ${fsiq.band.label} dengan estimasi percentile ${fsiq.percentile}.`,
+    `Peserta memperoleh EKIU ${fsiq.score} (CI 95% ${fsiq.ci95Low}\u2013${fsiq.ci95High}), kategori ${fsiq.band.label} \u2014 percentile ${fsiq.percentile}.`,
   );
-
-  // Composite highlights — sebut indeks tertinggi sebagai "ranah dominan".
-  const sortedC = [...composites].sort((a, b) => b.scaled - a.scaled);
-  const top = sortedC[0];
-  const bot = sortedC[sortedC.length - 1];
   if (top && bot && top.code !== bot.code) {
     parts.push(
-      `Profil komposit menunjukkan ranah ${top.name} (${top.short} = ${top.scaled}, ${top.band.label}) sebagai area paling menonjol, sementara ${bot.name} (${bot.short} = ${bot.scaled}, ${bot.band.label}) menjadi area yang lebih membutuhkan pengembangan.`,
+      `Kekuatan paling menonjol pada ${top.name} (PR ${top.percentile}); area yang paling perlu dilatih adalah ${bot.name} (PR ${bot.percentile}).`,
     );
   }
-
-  if (strengths.length > 0) {
-    const list = strengths
-      .map((s) => `${s.name} (PR ${s.percentile}, T-score ${s.tScore})`)
-      .join(" dan ");
-    parts.push(
-      `Kekuatan utama terlihat pada ${list} — peserta cenderung lebih cepat dan akurat di tugas-tugas serupa.`,
-    );
-  }
-  if (weak.length > 0) {
-    const list = weak
-      .map((s) => `${s.name} (PR ${s.percentile})`)
-      .join(" dan ");
-    parts.push(
-      `Area yang perlu dilatih lebih lanjut adalah ${list}. Latihan terbimbing dan pengulangan dapat meningkatkan performa di area ini.`,
-    );
-  }
-
-  parts.push(
-    "Skor ini bersifat skrining minat dan bakat, BUKAN diagnosis klinis. Hasil sebaiknya digunakan bersama pertimbangan akademik, minat pribadi, dan masukan guru pembimbing.",
-  );
-
   return parts.join(" ");
 }
