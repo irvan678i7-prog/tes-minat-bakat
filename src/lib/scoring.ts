@@ -9,6 +9,7 @@ import {
   computeProBakat,
   type CompositeIndex,
   type FSIQResult,
+  type IqCategoryScore,
   type ProSubtestScore,
 } from "./scoring-pro";
 
@@ -35,6 +36,7 @@ export type ScoringPayload = {
   bakat?: {
     topProfiles: { name: string; description: string; majors: string[]; careers: string[]; matchScore: number }[];
     composites?: CompositeIndex[];
+    iqCategories?: IqCategoryScore[];
     fsiq?: FSIQResult;
     narrative?: string;
   };
@@ -206,6 +208,7 @@ function scoreBakat(sub: SubWithAnswers): ScoringPayload {
         matchScore: p.matchScore,
       })),
       composites: pro.composites,
+      iqCategories: pro.iqCategories,
       fsiq: pro.fsiq,
       narrative: pro.narrative,
     },

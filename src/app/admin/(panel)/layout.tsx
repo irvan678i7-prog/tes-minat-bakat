@@ -18,7 +18,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       <header className="border-b-4 border-black bg-black text-white">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <Link href="/admin" className="text-xl font-black tracking-tight uppercase">
-            ADMIN PANEL <span className="bg-yellow-300 text-black px-2 ml-1">TMB</span>
+            ADMIN PANEL <span className="bg-yellow-300 text-black px-2 ml-1">EKIU</span>
           </Link>
           <div className="flex items-center gap-3">
             <span className="text-sm font-bold opacity-80">{me.email}</span>

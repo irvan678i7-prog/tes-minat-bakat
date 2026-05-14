@@ -6,9 +6,14 @@ export default function Home() {
     <div className="min-h-screen flex flex-col">
       <header className="border-b-4 border-black bg-yellow-300">
         <div className="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
-          <h1 className="text-2xl md:text-3xl font-black tracking-tight uppercase">
-            TES MINAT &amp; BAKAT
-          </h1>
+          <div>
+            <h1 className="text-2xl md:text-3xl font-black tracking-tight uppercase leading-none">
+              EKIU
+            </h1>
+            <p className="text-[10px] md:text-xs font-bold uppercase tracking-wider mt-0.5">
+              Estimasi Kemampuan Intelektual Umum
+            </p>
+          </div>
           <Link href="/admin/login" className="brut-btn brut-btn-black text-sm">
             ADMIN
           </Link>
@@ -74,7 +79,7 @@ export default function Home() {
 
       <footer className="border-t-4 border-black bg-black text-white">
         <div className="max-w-6xl mx-auto px-6 py-4 text-sm font-bold uppercase tracking-wider">
-          © {new Date().getFullYear()} Tes Minat &amp; Bakat — Brutalism Edition
+          © {new Date().getFullYear()} EKIU — Estimasi Kemampuan Intelektual Umum
         </div>
       </footer>
     </div>
