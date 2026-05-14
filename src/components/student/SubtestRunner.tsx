@@ -57,6 +57,7 @@ function violationLabel(t: string | null): string {
     case "tab_hidden":
       return "Pindah tab / ganti aplikasi";
     case "blur":
+      // Tidak lagi dikirim oleh client, tapi tetap muncul untuk log lama.
       return "Klik di luar halaman tes";
     case "fullscreen_exit":
       return "Keluar dari mode full-screen";
@@ -70,9 +71,29 @@ function violationLabel(t: string | null): string {
       return "Klik kanan";
     case "shortcut":
       return "Pintasan keyboard terlarang";
+    case "screenshot":
+      return "Mengambil screenshot";
+    case "screen_record":
+      return "Merekam layar";
     default:
       return "Aktivitas mencurigakan";
   }
+}
+
+// Rapikan teks instruksi / soal: trim, normalisasi whitespace, runtuhkan
+// baris kosong >2 menjadi 2, dan trim spasi di tiap baris. Tetap pertahankan
+// baris baru tunggal supaya layout dari admin terjaga.
+function cleanText(raw: string | null | undefined): string {
+  if (!raw) return "";
+  return raw
+    .replace(/\r\n?/g, "\n")
+    // Trim spasi/tab di ujung tiap baris.
+    .replace(/[ \t]+\n/g, "\n")
+    // Runtuhkan baris kosong berturut-turut (>=3) menjadi 2.
+    .replace(/\n{3,}/g, "\n\n")
+    // Runtuhkan spasi/tab beruntun (selain awal baris) menjadi satu.
+    .replace(/([^\n \t]) {2,}/g, "$1 ")
+    .trim();
 }
 
 function SyncBadge({
@@ -427,8 +448,10 @@ export default function SubtestRunner({
           <div className="brut-card" style={{ background: "#facc15" }}>
             <h2 className="text-2xl font-black uppercase mb-2">Petunjuk Pengerjaan</h2>
             <p className="text-sm font-bold uppercase opacity-80 mb-3">{subtest.description}</p>
-            {subtest.instructions && subtest.instructions.trim() ? (
-              <p className="font-semibold whitespace-pre-wrap">{subtest.instructions}</p>
+            {cleanText(subtest.instructions) ? (
+              <p className="font-semibold whitespace-pre-wrap leading-relaxed break-words">
+                {cleanText(subtest.instructions)}
+              </p>
             ) : (
               <p className="font-semibold opacity-80">
                 Belum ada instruksi khusus. Pastikan Anda membaca soal dengan teliti dan menjawab sesuai
@@ -564,7 +587,9 @@ export default function SubtestRunner({
       <main className="flex-1 max-w-4xl mx-auto px-6 py-8 w-full">
         <div className="brut-card mb-6" style={{ background: "#fff" }}>
           <div className="text-sm font-bold uppercase mb-2">{subtest.description}</div>
-          <div className="text-xl font-bold whitespace-pre-wrap">{q.prompt}</div>
+          <div className="text-xl font-bold whitespace-pre-wrap leading-relaxed break-words">
+            {cleanText(q.prompt)}
+          </div>
           {(q.imageUrl || q.imageUrl2) && (
             <div className="my-4 flex flex-wrap items-start gap-3">
               {q.imageUrl && (
@@ -949,7 +974,9 @@ function ExamplePreview({
           </span>
         )}
       </div>
-      <p className="font-bold whitespace-pre-wrap mb-2">{q.prompt || "—"}</p>
+      <p className="font-bold whitespace-pre-wrap leading-relaxed break-words mb-2">
+        {cleanText(q.prompt) || "—"}
+      </p>
       {(q.imageUrl || q.imageUrl2) && (
         <div className="my-2 flex flex-wrap items-start gap-2">
           {q.imageUrl && (
@@ -1098,8 +1125,8 @@ function ExamplePreview({
                         unoptimized
                       />
                     )}
-                    <p className="text-sm font-semibold whitespace-pre-wrap">
-                      {o.label || (o.imageUrl ? "(gambar)" : "—")}
+                    <p className="text-sm font-semibold whitespace-pre-wrap leading-relaxed break-words">
+                      {cleanText(o.label) || (o.imageUrl ? "(gambar)" : "—")}
                     </p>
                     {showKey && isCorrect && (
                       <span className="brut-tag mt-1 inline-block" style={{ background: "#000", color: "#fff" }}>

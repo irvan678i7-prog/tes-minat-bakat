@@ -4,13 +4,14 @@ import { useEffect, useRef, useState } from "react";
 
 export type ViolationType =
   | "tab_hidden"
-  | "blur"
   | "fullscreen_exit"
   | "copy"
   | "paste"
   | "cut"
   | "context_menu"
-  | "shortcut";
+  | "shortcut"
+  | "screenshot"
+  | "screen_record";
 
 export type AntiCheatState = {
   count: number;
@@ -29,47 +30,82 @@ const SUPPRESS_MS = 1200;
 // Pasangan event yang harus dianggap satu aksi. Kalau salah satu sudah
 // dilaporkan dalam SUPPRESS_MS terakhir, yang lain di-suppress.
 const SAME_ACTION_GROUPS: ViolationType[][] = [
-  ["tab_hidden", "blur"],
-  ["fullscreen_exit", "blur"],
   ["shortcut", "copy"],
   ["shortcut", "paste"],
   ["shortcut", "cut"],
+  ["shortcut", "screenshot"],
 ];
+
+// Tab harus tersembunyi minimal sebanyak ini supaya dianggap pelanggaran.
+// Visibility-change yang sangat singkat biasanya berasal dari OS overlay
+// (notifikasi, screenshot tool yang sekejap menutupi tab) — kita TIDAK
+// menghitungnya sebagai pindah tab. Untuk screenshot, ada deteksi terpisah
+// via keyboard shortcut.
+const TAB_HIDDEN_MIN_MS = 600;
 
 function inSameActionGroup(a: ViolationType, b: ViolationType): boolean {
   if (a === b) return true;
   return SAME_ACTION_GROUPS.some((g) => g.includes(a) && g.includes(b));
 }
 
-function isShortcutBlocked(e: KeyboardEvent): {
-  blocked: boolean;
-  // Apakah event ini perlu dilaporkan sebagai pelanggaran "shortcut". Untuk
-  // ctrl+c/v/x kita tetap preventDefault tapi TIDAK report lewat shortcut —
-  // event copy/paste/cut yang lebih spesifik sudah menangani report-nya.
-  report: boolean;
-} {
+type ShortcutKind = "none" | "copy_family" | "shortcut" | "screenshot";
+
+function classifyShortcut(e: KeyboardEvent): { blocked: boolean; kind: ShortcutKind } {
+  const k = e.key.toLowerCase();
+
+  // Screenshot detection — dapat di-trigger dari kombinasi tombol di OS
+  // utama. Walau preventDefault tidak menghalangi OS untuk mengambil
+  // screenshot, kita tetap mencatatnya sebagai pelanggaran.
+  // macOS: Cmd+Shift+3 (fullscreen), Cmd+Shift+4 (selection), Cmd+Shift+5
+  //        (Screenshot.app), Cmd+Shift+6 (Touch Bar)
+  // Windows: PrintScreen, Alt+PrintScreen, Win+Shift+S (Snipping Tool),
+  //          Win+PrintScreen
+  // Linux/ChromeOS: PrintScreen, Ctrl+Shift+PrintScreen, Ctrl+Show Windows
+  if (e.key === "PrintScreen" || k === "printscreen") {
+    return { blocked: true, kind: "screenshot" };
+  }
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && ["3", "4", "5", "6", "s"].includes(k)) {
+    return { blocked: true, kind: "screenshot" };
+  }
+
   if (e.metaKey || e.ctrlKey) {
-    const k = e.key.toLowerCase();
     // c/v/x ditangani oleh listener copy/paste/cut — jangan double-report.
-    if (["c", "v", "x"].includes(k)) return { blocked: true, report: false };
-    if (["a", "s", "p", "u", "f", "t", "n"].includes(k)) return { blocked: true, report: true };
+    if (["c", "v", "x"].includes(k)) return { blocked: true, kind: "copy_family" };
+    if (["a", "s", "p", "u", "f", "t", "n"].includes(k)) return { blocked: true, kind: "shortcut" };
   }
-  if (e.key === "F12") return { blocked: true, report: true };
+  if (e.key === "F12") return { blocked: true, kind: "shortcut" };
   if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
-    const k = e.key.toLowerCase();
-    if (["i", "j", "c"].includes(k)) return { blocked: true, report: true };
+    if (["i", "j"].includes(k)) return { blocked: true, kind: "shortcut" };
+    // shift+c via Ctrl+Shift+C = devtools inspector; sudah ditangkap di blok
+    // screenshot di atas untuk 's' (yang juga screenshot di mac), jadi kita
+    // pisah eksplisit di sini supaya 'c' tetap kena report shortcut.
+    if (k === "c") return { blocked: true, kind: "shortcut" };
   }
-  return { blocked: false, report: false };
+  return { blocked: false, kind: "none" };
 }
+
+// Type guard untuk Screen Wake Lock API yang masih experimental di beberapa
+// browser tapi sudah dukungan luas di Chromium/Safari iOS 16.4+.
+type WakeLockSentinel = { release: () => Promise<void> };
+type WakeLockNavigator = Navigator & {
+  wakeLock?: { request: (type: "screen") => Promise<WakeLockSentinel> };
+};
 
 /**
  * Tracks anti-cheat violations during an active test subtest:
- * tab switches, window blurs, exit fullscreen, copy/paste/cut, right click,
- * cheat shortcuts. Each event is POSTed to /api/student/test/violation so the
- * admin can review and the student is auto-flagged after `threshold` events.
+ * tab/app switches, exit fullscreen, copy/paste/cut, right click, screenshot
+ * shortcuts, screen recording, dan cheat shortcuts lain.
  *
- * The hook also exposes a `requestFullscreen()` helper so the UI can offer a
- * button to re-enter fullscreen if the student accidentally exits.
+ * Sengaja TIDAK menghitung:
+ *  - Window blur (terlalu noisy: pindah ke devtools, klik di luar, dsb.)
+ *  - Visibility-change sangat singkat (< 600ms) — biasanya overlay OS
+ *  - Layar mati / device sleep — kita aktifkan Screen Wake Lock supaya layar
+ *    tidak auto-lock selama tes. Kalau wake lock tidak didukung browser,
+ *    kita memang masih bisa salah hitung saat screen lock, tapi minimal
+ *    kasus tab-switch < 5 menit pasti tetap kena.
+ *
+ * Setiap event di-POST ke /api/student/test/violation supaya admin bisa
+ * review dan siswa auto-flagged setelah `threshold` event.
  */
 export function useAntiCheat(opts: {
   active: boolean;
@@ -93,6 +129,8 @@ export function useAntiCheat(opts: {
   const [fullscreenActive, setFullscreenActive] = useState<boolean>(() =>
     typeof document === "undefined" ? false : !!document.fullscreenElement,
   );
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  const hiddenSinceRef = useRef<number | null>(null);
 
   // Request fullscreen on activation. Safe to call repeatedly.
   const requestFullscreen = () => {
@@ -174,12 +212,40 @@ export function useAntiCheat(opts: {
       }
     };
 
-    const onVis = () => {
-      if (document.hidden) report("tab_hidden");
+    const requestWakeLock = async () => {
+      const nav = navigator as WakeLockNavigator;
+      if (!nav.wakeLock) return;
+      try {
+        wakeLockRef.current = await nav.wakeLock.request("screen");
+      } catch {
+        // Beberapa browser melempar saat tab tidak fokus / permission ditolak.
+        // Kita abaikan saja — wake lock bersifat best-effort.
+      }
     };
-    const onBlur = () => {
-      // Ignore blur when document is hidden (we already report tab_hidden).
-      if (!document.hidden) report("blur");
+
+    const onVis = () => {
+      if (document.hidden) {
+        hiddenSinceRef.current = Date.now();
+      } else {
+        const startedAt = hiddenSinceRef.current;
+        hiddenSinceRef.current = null;
+        if (startedAt != null) {
+          const duration = Date.now() - startedAt;
+          // Visibility change sangat singkat (mis. overlay OS, screenshot
+          // tool yang sekejap menutupi tab) atau sangat lama (mis. layar
+          // mati / device sleep berkepanjangan) TIDAK kita hitung sebagai
+          // pelanggaran. Hanya rentang "tab switch wajar" yang dihitung.
+          // Catatan: dengan Wake Lock aktif, screen-off seharusnya tidak
+          // terjadi otomatis, tapi user bisa tetap menekan tombol power
+          // — di kasus itu kita tetap permisif.
+          if (duration >= TAB_HIDDEN_MIN_MS && duration < 5 * 60_000) {
+            report("tab_hidden");
+          }
+        }
+        // Re-acquire wake lock saat tab kembali fokus (sentinel di-release
+        // otomatis oleh browser saat tab tersembunyi).
+        if (!wakeLockRef.current) requestWakeLock();
+      }
     };
     const onFs = () => {
       const fs = !!document.fullscreenElement;
@@ -203,21 +269,40 @@ export function useAntiCheat(opts: {
       report("context_menu");
     };
     const onKey = (e: KeyboardEvent) => {
-      const { blocked, report: shouldReport } = isShortcutBlocked(e);
+      const { blocked, kind } = classifyShortcut(e);
       if (blocked) {
         e.preventDefault();
-        if (shouldReport) report("shortcut");
+        if (kind === "screenshot") report("screenshot");
+        else if (kind === "shortcut") report("shortcut");
+        // copy_family ditangani oleh listener copy/paste/cut.
       }
     };
 
+    // ── Deteksi rekam layar via getDisplayMedia ──────────────────────────
+    // Monkey-patch navigator.mediaDevices.getDisplayMedia supaya panggilan
+    // dari ekstensi/recorder dalam tab yang sama bisa kita tangkap. Tidak
+    // bisa menangkap rekam layar OS-level (QuickTime, OBS) — itu di luar
+    // jangkauan browser.
+    const md = navigator.mediaDevices;
+    const origGetDisplayMedia = md?.getDisplayMedia?.bind(md);
+    if (md && origGetDisplayMedia) {
+      md.getDisplayMedia = (...args: Parameters<MediaDevices["getDisplayMedia"]>) => {
+        report("screen_record");
+        return origGetDisplayMedia(...args);
+      };
+    }
+
     document.addEventListener("visibilitychange", onVis);
-    window.addEventListener("blur", onBlur);
     document.addEventListener("fullscreenchange", onFs);
     document.addEventListener("copy", onCopy);
     document.addEventListener("paste", onPaste);
     document.addEventListener("cut", onCut);
     document.addEventListener("contextmenu", onCtx);
     document.addEventListener("keydown", onKey);
+
+    // Cegah layar auto-lock selama tes aktif. Sentinel akan di-release
+    // otomatis saat unmount (di cleanup).
+    requestWakeLock();
 
     // Sync fullscreen state once after activation in a microtask so we don't
     // setState synchronously inside the effect body.
@@ -228,13 +313,19 @@ export function useAntiCheat(opts: {
     return () => {
       mounted = false;
       document.removeEventListener("visibilitychange", onVis);
-      window.removeEventListener("blur", onBlur);
       document.removeEventListener("fullscreenchange", onFs);
       document.removeEventListener("copy", onCopy);
       document.removeEventListener("paste", onPaste);
       document.removeEventListener("cut", onCut);
       document.removeEventListener("contextmenu", onCtx);
       document.removeEventListener("keydown", onKey);
+      if (md && origGetDisplayMedia) {
+        md.getDisplayMedia = origGetDisplayMedia;
+      }
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => {});
+        wakeLockRef.current = null;
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, subtestCode]);

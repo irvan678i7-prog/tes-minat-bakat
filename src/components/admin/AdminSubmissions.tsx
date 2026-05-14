@@ -23,6 +23,33 @@ type Sub = {
 
 type ClassRow = { school: string; grade: string; testKind: "MINAT" | "BAKAT"; count: number };
 
+function violationLabel(t: string): string {
+  switch (t) {
+    case "tab_hidden":
+      return "Pindah tab / aplikasi";
+    case "blur":
+      return "Klik di luar tes (log lama)";
+    case "fullscreen_exit":
+      return "Keluar full-screen";
+    case "copy":
+      return "Salin teks";
+    case "paste":
+      return "Tempel teks";
+    case "cut":
+      return "Potong teks";
+    case "context_menu":
+      return "Klik kanan";
+    case "shortcut":
+      return "Pintasan terlarang";
+    case "screenshot":
+      return "Screenshot";
+    case "screen_record":
+      return "Rekam layar";
+    default:
+      return t;
+  }
+}
+
 function fmt(dt: string | null): string {
   if (!dt) return "—";
   return (
@@ -268,7 +295,7 @@ export default function AdminSubmissions() {
                                     <tr key={i}>
                                       <td className="font-mono">{fmt(v.at)}</td>
                                       <td className="font-mono">{v.subtestCode || "—"}</td>
-                                      <td className="font-bold">{v.type}</td>
+                                      <td className="font-bold">{violationLabel(v.type)}</td>
                                     </tr>
                                   ))}
                               </tbody>
