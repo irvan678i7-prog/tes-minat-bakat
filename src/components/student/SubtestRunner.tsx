@@ -149,12 +149,17 @@ export default function SubtestRunner({
   examples,
   existingAnswers,
   isCompleted = false,
+  serverStartedAt = null,
 }: {
   subtest: { code: string; name: string; description: string; instructions?: string; durationSec: number };
   questions: Question[];
   examples: ExampleQuestion[];
   existingAnswers: Record<string, unknown>;
   isCompleted?: boolean;
+  // Timestamp ISO dari server: kapan subtes ini dimulai pertama kali.
+  // Jadi sumber kebenaran timer, mengalahkan localStorage. Null kalau
+  // belum ada progress di DB.
+  serverStartedAt?: string | null;
 }) {
   const router = useRouter();
   const [answers, setAnswers] = useState<Record<string, string | string[]>>(() => {
@@ -182,31 +187,49 @@ export default function SubtestRunner({
   );
   const hydrated = typeof window !== "undefined";
   const [startedManual, setStartedManual] = useState(false);
-  const started = startedManual || startedFromStorage === "1";
+  // Kalau server sudah punya progress (timer sudah jalan), langsung anggap
+  // started — tidak perlu nunggu siswa klik MULAI lagi. Ini juga menjaga
+  // konsistensi: kalau siswa reload tab di tengah pengerjaan, dia langsung
+  // masuk ke layar soal, bukan intro.
+  const serverStartedEpoch = serverStartedAt ? Date.parse(serverStartedAt) : NaN;
+  const hasServerStart =
+    Number.isFinite(serverStartedEpoch) && serverStartedEpoch > 0;
+  const started =
+    startedManual || startedFromStorage === "1" || hasServerStart;
 
   const [idx, setIdx] = useState(() => {
     const firstUnanswered = questions.findIndex((q) => !existingAnswers[q.id]);
     return firstUnanswered === -1 ? 0 : firstUnanswered;
   });
 
-  // Timer: starts only after student clicks "Mulai".
+  // Timer: starts only after student clicks "Mulai" (atau langsung kalau
+  // server sudah punya startedAt). Sumber timer = serverStartedAt kalau ada,
+  // fallback ke localStorage. localStorage TIDAK menimpa server — kalau
+  // server bilang sudah mulai jam X, itu yang dipakai.
   const [tick, setTick] = useState<{ startedAt: number; now: number } | null>(null);
 
   useEffect(() => {
     if (!started || typeof window === "undefined") return;
-    const saved = window.localStorage.getItem(STORAGE_KEY(subtest.code));
     let s: number;
-    if (saved) {
-      s = parseInt(saved);
-    } else {
-      s = Date.now();
+    if (hasServerStart) {
+      s = serverStartedEpoch;
+      // Sinkronkan localStorage supaya kalau server tiba-tiba tidak kirim,
+      // tetap konsisten.
       window.localStorage.setItem(STORAGE_KEY(subtest.code), String(s));
+    } else {
+      const saved = window.localStorage.getItem(STORAGE_KEY(subtest.code));
+      if (saved) {
+        s = parseInt(saved);
+      } else {
+        s = Date.now();
+        window.localStorage.setItem(STORAGE_KEY(subtest.code), String(s));
+      }
     }
     const update = () => setTick({ startedAt: s, now: Date.now() });
     update();
     const id = setInterval(update, 1000);
     return () => clearInterval(id);
-  }, [started, subtest.code]);
+  }, [started, subtest.code, hasServerStart, serverStartedEpoch]);
 
   const elapsed = tick ? Math.floor((tick.now - tick.startedAt) / 1000) : 0;
   const remaining = subtest.durationSec - elapsed;
@@ -343,31 +366,55 @@ export default function SubtestRunner({
 
   const goNext = () => setIdx((i) => Math.min(i + 1, questions.length - 1));
   const goPrev = () => setIdx((i) => Math.max(i - 1, 0));
-  const finishSub = async () => {
-    // Make sure typing buffer + queued answers are flushed before leaving.
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem(STORAGE_KEY(subtest.code));
-      window.localStorage.removeItem(STARTED_KEY(subtest.code));
-    }
+
+  // Cegah double-call kalau siswa cepat-cepat klik selesai dan timer
+  // habis bersamaan, atau klik SELESAI berulang kali.
+  const [locking, setLocking] = useState(false);
+  const finishSub = async (reason: "MANUAL" | "TIME_UP" = "MANUAL") => {
+    if (locking) return;
+    setLocking(true);
+    // Flush jawaban yang masih dalam buffer ke server SEBELUM kunci
+    // subtes — supaya server tidak menolak dengan 409 "sudah dikunci".
     try {
       await sync.flush();
     } catch {
       // ignore — retries will continue in background on next page
     }
-    toast.success("Subtes selesai. Kembali ke daftar.");
+    // Kunci subtes di server. Idempoten; aman dipanggil >1 kali.
+    try {
+      await fetch("/api/student/test/subtest-finish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subtestCode: subtest.code, reason }),
+      });
+    } catch {
+      // Best-effort; lazy-lock di /test akan tetap mengunci kalau timer
+      // sudah lewat. Kita lanjut redirect.
+    }
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(STORAGE_KEY(subtest.code));
+      window.localStorage.removeItem(STARTED_KEY(subtest.code));
+    }
+    toast.success(
+      reason === "TIME_UP"
+        ? "Waktu habis. Subtes terkunci, kembali ke daftar."
+        : "Subtes selesai. Kembali ke daftar.",
+    );
     router.push("/test");
   };
 
-  // Saat waktu habis: jangan langsung pindah ke /test — cukup tampilkan toast
-  // peringatan sekali. Siswa boleh menyelesaikan/menyimpan jawaban yang masih
-  // dalam pengetikan, lalu klik "SELESAI SUBTES" sendiri. Ini mencegah siswa
-  // ter-yanked keluar sebelum sempat menyimpan jawaban.
+  // Saat waktu habis: AUTO LOCK subtes (server-side) lalu redirect. Sebelum
+  // redirect, kita tetap sempatkan flush jawaban yang masih dalam buffer.
+  // Siswa TIDAK BISA lagi mengerjakan setelah waktu habis (server akan
+  // tolak request answer dengan 409).
   const [timeUpNotified, setTimeUpNotified] = useState(false);
   useEffect(() => {
     if (timeUp && !timeUpNotified) {
       setTimeUpNotified(true);
-      toast("Waktu untuk subtes ini sudah habis. Klik SELESAI SUBTES untuk lanjut.");
+      toast("Waktu subtes habis. Mengunci & kembali ke daftar…");
+      void finishSub("TIME_UP");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeUp, timeUpNotified]);
 
   const handleStart = () => {
@@ -544,6 +591,23 @@ export default function SubtestRunner({
             >
               {fmtTime(remaining)}
             </span>
+            {!timeUp && (
+              <button
+                onClick={() => {
+                  const msg =
+                    answeredCount < questions.length
+                      ? `Selesaikan subtes ini? Masih ada ${questions.length - answeredCount} soal yang belum dijawab dan TIDAK BISA dibuka lagi.`
+                      : "Selesaikan subtes ini? Subtes akan dikunci dan TIDAK BISA dibuka lagi.";
+                  if (!confirm(msg)) return;
+                  void finishSub("MANUAL");
+                }}
+                disabled={locking}
+                className="brut-btn brut-btn-pink text-xs"
+                title="Akhiri subtes ini sekarang. Subtes terkunci permanen."
+              >
+                {locking ? "MENGUNCI…" : "SELESAIKAN SUBTES"}
+              </button>
+            )}
           </div>
         </div>
         {ac.state.lastAt > 0 && ac.state.lastAt > ackedAt && (
@@ -840,16 +904,31 @@ export default function SubtestRunner({
           </button>
           <span className="text-sm font-bold">Terjawab: {answeredCount}/{questions.length}</span>
           {timeUp ? (
-            <button onClick={finishSub} className="brut-btn brut-btn-pink">
-              SELESAI SUBTES (WAKTU HABIS)
+            <button
+              onClick={() => finishSub("TIME_UP")}
+              disabled={locking}
+              className="brut-btn brut-btn-pink"
+            >
+              {locking ? "MENGUNCI…" : "SELESAI SUBTES (WAKTU HABIS)"}
             </button>
           ) : idx < questions.length - 1 ? (
             <button onClick={goNext} className="brut-btn brut-btn-black">
               SELANJUTNYA →
             </button>
           ) : (
-            <button onClick={finishSub} className="brut-btn brut-btn-pink">
-              SIMPAN &amp; KEMBALI
+            <button
+              onClick={() => {
+                const msg =
+                  answeredCount < questions.length
+                    ? `Selesaikan subtes ini? Masih ada ${questions.length - answeredCount} soal yang belum dijawab dan TIDAK BISA dibuka lagi.`
+                    : "Selesaikan subtes ini? Subtes akan dikunci dan TIDAK BISA dibuka lagi.";
+                if (!confirm(msg)) return;
+                void finishSub("MANUAL");
+              }}
+              disabled={locking}
+              className="brut-btn brut-btn-pink"
+            >
+              {locking ? "MENGUNCI…" : "SELESAIKAN SUBTES ✓"}
             </button>
           )}
         </div>

@@ -14,6 +14,8 @@ type Sub = {
   durationSec: number;
   total: number;
   answered: number;
+  locked: boolean;
+  finishReason: string | null;
 };
 
 // Try the finish call up to a few times with exponential backoff so a flaky
@@ -52,9 +54,15 @@ export default function TestHub({
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // "Semua subtes sudah dijalani" — boleh tombol SELESAIKAN TES aktif kalau
+  // tiap subtes ATAU sudah dikunci (waktu habis / siswa klik selesai) ATAU
+  // sudah dijawab penuh. Dengan kata lain: siswa tidak perlu menjawab semua
+  // soal di subtes yang waktunya habis sebelum boleh submit total.
   const allDone =
     subtests.length > 0 &&
-    subtests.every((s) => s.total === 0 || s.answered >= s.total);
+    subtests.every(
+      (s) => s.total === 0 || s.locked || s.answered >= s.total,
+    );
 
   // Tampilkan aturan tes sekali per submission. Setelah siswa klik
   // "Saya Mengerti", flag disimpan di localStorage supaya reload tidak
@@ -161,35 +169,82 @@ export default function TestHub({
         </p>
         <ol className="space-y-3">
           {subtests.map((s, idx) => {
-            const done = s.total > 0 && s.answered >= s.total;
             const empty = s.total === 0;
+            const done = !empty && s.answered >= s.total;
+            // Subtes terkunci: TIDAK BISA dibuka lagi. Warna abu, badge
+            // SELESAI, tombol mati total (bukan <Link>).
+            const locked = s.locked;
+            const reasonLabel =
+              s.finishReason === "TIME_UP"
+                ? "WAKTU HABIS"
+                : s.finishReason === "MANUAL"
+                ? "DISELESAIKAN"
+                : "SELESAI";
+            let bg: string;
+            if (empty) bg = "#fff";
+            else if (locked) bg = "#d4d4d8"; // abu (zinc-300)
+            else if (done) bg = "#a3e635"; // hijau (lime-400)
+            else bg = "#22d3ee"; // cyan-400
             return (
               <li
                 key={s.id}
                 className="brut-card flex items-center justify-between gap-4"
-                style={{ background: empty ? "#fff" : done ? "#a3e635" : "#22d3ee" }}
+                style={{ background: bg }}
               >
                 <div className="flex-1">
                   <div className="text-sm font-bold opacity-70">SUBTES {idx + 1}</div>
                   <div className="text-xl font-black uppercase">{s.name}</div>
                   <div className="text-sm font-semibold">{s.description}</div>
-                  <div className="text-xs font-bold mt-1">
-                    {s.total === 0 ? (
-                      <span className="brut-tag" style={{ background: "#ff4d8d" }}>BELUM ADA SOAL</span>
+                  <div className="text-xs font-bold mt-1 flex flex-wrap gap-2 items-center">
+                    {empty ? (
+                      <span className="brut-tag" style={{ background: "#ff4d8d" }}>
+                        BELUM ADA SOAL
+                      </span>
                     ) : (
                       <>
-                        {s.answered}/{s.total} terjawab •{" "}
-                        Waktu {Math.round(s.durationSec / 60)} menit
+                        <span>
+                          {s.answered}/{s.total} terjawab •{" "}
+                          Waktu {Math.round(s.durationSec / 60)} menit
+                        </span>
+                        {locked && (
+                          <span
+                            className="brut-tag"
+                            style={{ background: "#000", color: "#fff" }}
+                            title={
+                              s.finishReason === "TIME_UP"
+                                ? "Waktu subtes habis — subtes terkunci otomatis."
+                                : "Siswa sudah klik tombol Selesai di subtes ini."
+                            }
+                          >
+                            {reasonLabel}
+                          </span>
+                        )}
                       </>
                     )}
                   </div>
                 </div>
-                <Link
-                  href={`/test/${s.code}`}
-                  className={`brut-btn ${done ? "brut-btn-black" : ""} ${empty ? "opacity-50 pointer-events-none" : ""}`}
-                >
-                  {done ? "REVIEW" : s.answered > 0 ? "LANJUT" : "MULAI"}
-                </Link>
+                {locked ? (
+                  <span
+                    className="brut-btn"
+                    style={{
+                      background: "#71717a",
+                      color: "#fff",
+                      cursor: "not-allowed",
+                      opacity: 0.7,
+                    }}
+                    aria-disabled="true"
+                    title="Subtes ini sudah selesai dan tidak bisa dibuka lagi."
+                  >
+                    SELESAI
+                  </span>
+                ) : (
+                  <Link
+                    href={`/test/${s.code}`}
+                    className={`brut-btn ${done ? "brut-btn-black" : ""} ${empty ? "opacity-50 pointer-events-none" : ""}`}
+                  >
+                    {done ? "REVIEW" : s.answered > 0 ? "LANJUT" : "MULAI"}
+                  </Link>
+                )}
               </li>
             );
           })}

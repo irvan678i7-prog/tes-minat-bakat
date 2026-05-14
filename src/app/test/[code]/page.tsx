@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { shuffle } from "@/lib/random";
 import SubtestRunner from "@/components/student/SubtestRunner";
 import { BAKAT_SUBTESTS, MINAT_SUBTESTS } from "@/lib/test-config";
+import { ensureSubtestStarted, computeSubtestLock } from "@/lib/subtestLock";
 
 export default async function SubtestPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
@@ -24,6 +25,18 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
     .filter((q) => q.isExample)
     .sort((a, b) => a.questionNo - b.questionNo);
   if (realQuestions.length === 0) redirect("/test");
+
+  // Kalau subtes sudah dikunci (waktu habis atau siswa klik selesai
+  // sebelumnya), langsung redirect balik ke daftar subtes. computeSubtestLock
+  // juga akan auto-finish kalau timer sudah lewat tapi belum diset.
+  const lockState = await computeSubtestLock({
+    submissionId: sub.id,
+    subtestId: subtest.id,
+    durationSec: subtest.durationSec,
+  });
+  if (lockState.locked) {
+    redirect("/test");
+  }
 
   const seedCfg = [...BAKAT_SUBTESTS, ...MINAT_SUBTESTS].find(
     (x) => x.code === subtest.code,
@@ -78,6 +91,14 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
   const isCompleted =
     realQuestions.length > 0 && existing.length >= realQuestions.length;
 
+  // Pastikan timer subtes mulai (server-authoritative). Kalau sudah ada
+  // entri sebelumnya, ensureSubtestStarted tidak mengubah startedAt-nya.
+  const startInfo = await ensureSubtestStarted({
+    submissionId: sub.id,
+    subtestId: subtest.id,
+    durationSec: subtest.durationSec,
+  });
+
   return (
     <SubtestRunner
       subtest={{
@@ -91,6 +112,7 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
       examples={examples}
       existingAnswers={existingMap}
       isCompleted={isCompleted}
+      serverStartedAt={startInfo.startedAt ? startInfo.startedAt.toISOString() : null}
     />
   );
 }
