@@ -15,14 +15,18 @@ export async function POST(req: NextRequest) {
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ error: "Invalid input" }, { status: 400 });
 
-  const sub = await prisma.submission.findUnique({ where: { id: student.sub } });
+  // Fetch submission + question in parallel — they are independent.
+  // Saves one DB round-trip per save (terasa di /test saat siswa mengetik
+  // / klik jawaban karena setiap kali queueAnswer fire-and-forget ke sini).
+  const [sub, q] = await Promise.all([
+    prisma.submission.findUnique({ where: { id: student.sub } }),
+    prisma.question.findUnique({
+      where: { id: parsed.data.questionId },
+      include: { subtest: true },
+    }),
+  ]);
   if (!sub) return NextResponse.json({ error: "Submission tidak ditemukan" }, { status: 404 });
   if (sub.finishedAt) return NextResponse.json({ error: "Tes sudah selesai" }, { status: 400 });
-
-  const q = await prisma.question.findUnique({
-    where: { id: parsed.data.questionId },
-    include: { subtest: true },
-  });
   if (!q) return NextResponse.json({ error: "Soal tidak ditemukan" }, { status: 404 });
 
   // Tolak kalau subtes sudah dikunci (waktu habis atau siswa klik Selesai).

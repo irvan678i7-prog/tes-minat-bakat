@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import toast from "react-hot-toast";
 import { useAntiCheat } from "./useAntiCheat";
 import { useAnswerSync } from "./useAnswerSync";
+import { useBrutConfirm } from "@/components/BrutConfirm";
 
 type OptionItem = { key: string; label: string; imageUrl?: string };
 type Question = {
@@ -162,6 +163,7 @@ export default function SubtestRunner({
   serverStartedAt?: string | null;
 }) {
   const router = useRouter();
+  const { confirm: brutConfirm, ConfirmModal } = useBrutConfirm();
   const [answers, setAnswers] = useState<Record<string, string | string[]>>(() => {
     const init: Record<string, string | string[]> = {};
     for (const q of questions) {
@@ -355,11 +357,15 @@ export default function SubtestRunner({
     });
   };
 
-  // Auto-commit text answers 600ms after last keystroke for the current question
+  // Auto-commit text answers 350ms after last keystroke for the current
+  // question. Sebelumnya 600ms — terasa lambat untuk siswa yang mengetik cepat,
+  // karena badge baru berubah ke "MENYIMPAN…" setengah detik setelah berhenti.
+  // Dengan keepalive di sendOne, perubahan TEXT terakhir tetap tersimpan
+  // walau langsung klik SELANJUTNYA.
   useEffect(() => {
     if (!q) return;
     if (typingBuf[q.id] == null) return;
-    const id = setTimeout(() => commitText(), 600);
+    const id = setTimeout(() => commitText(), 350);
     return () => clearTimeout(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [typingBuf, q?.id]);
@@ -565,6 +571,7 @@ export default function SubtestRunner({
 
   return (
     <div className="min-h-screen flex flex-col">
+      {ConfirmModal}
       <header className="border-b-4 border-black bg-yellow-300 sticky top-0 z-20">
         <div className="max-w-4xl mx-auto px-6 py-3 flex items-center justify-between gap-4 flex-wrap">
           <div>
@@ -593,12 +600,20 @@ export default function SubtestRunner({
             </span>
             {!timeUp && (
               <button
-                onClick={() => {
-                  const msg =
-                    answeredCount < questions.length
-                      ? `Selesaikan subtes ini? Masih ada ${questions.length - answeredCount} soal yang belum dijawab dan TIDAK BISA dibuka lagi.`
-                      : "Selesaikan subtes ini? Subtes akan dikunci dan TIDAK BISA dibuka lagi.";
-                  if (!confirm(msg)) return;
+                onClick={async () => {
+                  const unanswered = questions.length - answeredCount;
+                  const ok = await brutConfirm({
+                    title: "Selesaikan Subtes?",
+                    tone: "danger",
+                    icon: "🔒",
+                    message:
+                      unanswered > 0
+                        ? `Masih ada ${unanswered} soal yang belum dijawab.\n\nSubtes akan DIKUNCI dan TIDAK BISA dibuka lagi setelah ini.`
+                        : "Semua soal sudah dijawab. Subtes akan DIKUNCI dan TIDAK BISA dibuka lagi setelah ini.",
+                    confirmLabel: "YA, KUNCI SUBTES",
+                    cancelLabel: "Lanjut Mengerjakan",
+                  });
+                  if (!ok) return;
                   void finishSub("MANUAL");
                 }}
                 disabled={locking}
@@ -917,12 +932,20 @@ export default function SubtestRunner({
             </button>
           ) : (
             <button
-              onClick={() => {
-                const msg =
-                  answeredCount < questions.length
-                    ? `Selesaikan subtes ini? Masih ada ${questions.length - answeredCount} soal yang belum dijawab dan TIDAK BISA dibuka lagi.`
-                    : "Selesaikan subtes ini? Subtes akan dikunci dan TIDAK BISA dibuka lagi.";
-                if (!confirm(msg)) return;
+              onClick={async () => {
+                const unanswered = questions.length - answeredCount;
+                const ok = await brutConfirm({
+                  title: "Selesaikan Subtes?",
+                  tone: "danger",
+                  icon: "🔒",
+                  message:
+                    unanswered > 0
+                      ? `Masih ada ${unanswered} soal yang belum dijawab.\n\nSubtes akan DIKUNCI dan TIDAK BISA dibuka lagi setelah ini.`
+                      : "Semua soal sudah dijawab. Subtes akan DIKUNCI dan TIDAK BISA dibuka lagi setelah ini.",
+                  confirmLabel: "YA, KUNCI SUBTES",
+                  cancelLabel: "Lanjut Mengerjakan",
+                });
+                if (!ok) return;
                 void finishSub("MANUAL");
               }}
               disabled={locking}

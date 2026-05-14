@@ -59,7 +59,9 @@ export function useAnswerSync() {
     updateCount();
   }, [updateCount]);
 
-  // Send one item, returns true if successful.
+  // Send one item, returns true if successful. `keepalive: true` membuat
+  // request tetap dikirim meski user keburu klik tombol navigasi — penting
+  // supaya jawaban terakhir sebelum pindah soal/subtes tidak hilang.
   const sendOne = async (
     questionId: string,
     selected: string | string[],
@@ -69,6 +71,7 @@ export function useAnswerSync() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ questionId, selected }),
+        keepalive: true,
       });
       // 4xx other than 401 means the row is bad — drop it so we don't retry
       // forever. 401/network errors are kept for retry.
@@ -100,9 +103,14 @@ export function useAnswerSync() {
     flushingRef.current = true;
     setStatus("syncing");
     let anyFailed = false;
-    for (const qid of ids) {
+    // Kirim semua pending answers PARALEL. Sebelumnya sequential (for...of)
+    // sehingga 5 jawaban di antrian = 5×latency. Server upsert per
+    // (submissionId,questionId) sehingga aman dikirim bersamaan tanpa
+    // conflict. Mempercepat catch-up setelah offline atau saat siswa cepat
+    // mengubah banyak jawaban berurutan.
+    const work = ids.map(async (qid) => {
       const item = pendingRef.current[qid];
-      if (!item) continue;
+      if (!item) return;
       const ok = await sendOne(qid, item.selected);
       if (ok) {
         // Only drop if the value hasn't been bumped during this attempt.
@@ -112,7 +120,8 @@ export function useAnswerSync() {
       } else {
         anyFailed = true;
       }
-    }
+    });
+    await Promise.all(work);
     persist();
     flushingRef.current = false;
     if (anyFailed) {

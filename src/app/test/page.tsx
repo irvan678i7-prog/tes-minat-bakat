@@ -12,42 +12,50 @@ export default async function TestHome() {
   if (!sub.fullName) redirect("/test/profile");
   if (sub.finishedAt) redirect("/test/done");
 
-  const subtests = await prisma.subtest.findMany({
-    where: { testKind: sub.testKind },
-    orderBy: { orderIndex: "asc" },
-    // Total soal harus mengecualikan soal contoh (isExample=true) supaya status
-    // "DONE/REVIEW" muncul saat siswa menjawab semua soal real, bukan saat
-    // jumlah jawaban menyentuh total termasuk contoh (yang tidak dijawab).
-    include: {
-      _count: { select: { questions: { where: { isExample: false } } } },
-    },
-  });
-
-  // Hanya hitung jawaban untuk soal REAL (bukan contoh). Soal contoh tidak
-  // pernah disimpan sebagai Answer, tapi defensif: filter eksplisit di sini.
-  const answered = await prisma.answer.findMany({
-    where: { submissionId: sub.id, question: { isExample: false } },
-    select: { question: { select: { subtestId: true } } },
-  });
+  // Fetch subtest list + answered counts in parallel — independent reads.
+  const [subtests, answered] = await Promise.all([
+    prisma.subtest.findMany({
+      where: { testKind: sub.testKind },
+      orderBy: { orderIndex: "asc" },
+      // Total soal harus mengecualikan soal contoh (isExample=true) supaya status
+      // "DONE/REVIEW" muncul saat siswa menjawab semua soal real, bukan saat
+      // jumlah jawaban menyentuh total termasuk contoh (yang tidak dijawab).
+      include: {
+        _count: { select: { questions: { where: { isExample: false } } } },
+      },
+    }),
+    // Hanya hitung jawaban untuk soal REAL (bukan contoh). Soal contoh tidak
+    // pernah disimpan sebagai Answer, tapi defensif: filter eksplisit di sini.
+    prisma.answer.findMany({
+      where: { submissionId: sub.id, question: { isExample: false } },
+      select: { question: { select: { subtestId: true } } },
+    }),
+  ]);
   const counts: Record<string, number> = {};
   for (const a of answered) counts[a.question.subtestId] = (counts[a.question.subtestId] || 0) + 1;
 
-  // Hitung lock per subtes (sekaligus auto-finish kalau timer sudah lewat).
+  // Hitung lock per subtes secara paralel (sekaligus auto-finish kalau timer
+  // sudah lewat). Sebelumnya dijalankan sequential dalam for-loop — dengan
+  // 9 subtes & latency Supabase ~80ms, ini menghemat ~600-700ms TTFB di /test.
+  const lockResults = await Promise.all(
+    subtests.map((s) =>
+      computeSubtestLock({
+        submissionId: sub.id,
+        subtestId: s.id,
+        durationSec: s.durationSec,
+      }),
+    ),
+  );
   const lockBySubtest = new Map<
     string,
     { locked: boolean; finishReason: string | null }
   >();
-  for (const s of subtests) {
-    const lock = await computeSubtestLock({
-      submissionId: sub.id,
-      subtestId: s.id,
-      durationSec: s.durationSec,
-    });
+  subtests.forEach((s, i) => {
     lockBySubtest.set(s.id, {
-      locked: lock.locked,
-      finishReason: lock.finishReason,
+      locked: lockResults[i].locked,
+      finishReason: lockResults[i].finishReason,
     });
-  }
+  });
 
   return (
     <TestHub

@@ -19,15 +19,16 @@ export async function POST(req: NextRequest) {
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ error: "Invalid input" }, { status: 400 });
 
-  const sub = await prisma.submission.findUnique({ where: { id: student.sub } });
+  // Submission + subtest reads are independent — Promise.all to shave one
+  // round-trip when siswa klik "SELESAIKAN SUBTES".
+  const [sub, subtest] = await Promise.all([
+    prisma.submission.findUnique({ where: { id: student.sub } }),
+    prisma.subtest.findUnique({ where: { code: parsed.data.subtestCode } }),
+  ]);
   if (!sub) return NextResponse.json({ error: "Submission tidak ditemukan" }, { status: 404 });
   if (sub.finishedAt) {
     return NextResponse.json({ ok: true, locked: true, alreadyFinished: true });
   }
-
-  const subtest = await prisma.subtest.findUnique({
-    where: { code: parsed.data.subtestCode },
-  });
   if (!subtest || subtest.testKind !== sub.testKind) {
     return NextResponse.json({ error: "Subtest tidak valid" }, { status: 400 });
   }

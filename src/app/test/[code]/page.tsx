@@ -4,20 +4,23 @@ import { prisma } from "@/lib/db";
 import { shuffle } from "@/lib/random";
 import SubtestRunner from "@/components/student/SubtestRunner";
 import { BAKAT_SUBTESTS, MINAT_SUBTESTS } from "@/lib/test-config";
-import { ensureSubtestStarted, computeSubtestLock } from "@/lib/subtestLock";
+import { ensureSubtestStarted } from "@/lib/subtestLock";
 
 export default async function SubtestPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
   const me = await getStudentFromCookies();
   if (!me) redirect("/");
-  const sub = await prisma.submission.findUnique({ where: { id: me.sub } });
+
+  // Submission + subtest reads are independent — fire them in parallel.
+  const [sub, subtest] = await Promise.all([
+    prisma.submission.findUnique({ where: { id: me.sub } }),
+    prisma.subtest.findUnique({
+      where: { code },
+      include: { questions: true },
+    }),
+  ]);
   if (!sub || sub.finishedAt) redirect("/test/done");
   if (!sub.fullName) redirect("/test/profile");
-
-  const subtest = await prisma.subtest.findUnique({
-    where: { code },
-    include: { questions: true },
-  });
   if (!subtest || subtest.testKind !== sub.testKind) redirect("/test");
 
   const realQuestions = subtest.questions.filter((q) => !q.isExample);
@@ -25,18 +28,6 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
     .filter((q) => q.isExample)
     .sort((a, b) => a.questionNo - b.questionNo);
   if (realQuestions.length === 0) redirect("/test");
-
-  // Kalau subtes sudah dikunci (waktu habis atau siswa klik selesai
-  // sebelumnya), langsung redirect balik ke daftar subtes. computeSubtestLock
-  // juga akan auto-finish kalau timer sudah lewat tapi belum diset.
-  const lockState = await computeSubtestLock({
-    submissionId: sub.id,
-    subtestId: subtest.id,
-    durationSec: subtest.durationSec,
-  });
-  if (lockState.locked) {
-    redirect("/test");
-  }
 
   const seedCfg = [...BAKAT_SUBTESTS, ...MINAT_SUBTESTS].find(
     (x) => x.code === subtest.code,
@@ -80,9 +71,22 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
     partLabels: resolvePartLabels(q),
   }));
 
-  const existing = await prisma.answer.findMany({
-    where: { submissionId: sub.id, questionId: { in: realQuestions.map((q) => q.id) } },
-  });
+  // ensureSubtestStarted ALSO does the lock check (auto-TIME_UP kalau deadline
+  // lewat). Sebelumnya dipanggil terpisah dari computeSubtestLock — sekarang
+  // satu panggilan saja, dan dijalankan paralel dengan pengambilan jawaban
+  // yang sudah ada. Menghemat 1–2 round-trip ke DB saat siswa klik MULAI.
+  const [startInfo, existing] = await Promise.all([
+    ensureSubtestStarted({
+      submissionId: sub.id,
+      subtestId: subtest.id,
+      durationSec: subtest.durationSec,
+    }),
+    prisma.answer.findMany({
+      where: { submissionId: sub.id, questionId: { in: realQuestions.map((q) => q.id) } },
+    }),
+  ]);
+  if (startInfo.locked) redirect("/test");
+
   const existingMap: Record<string, unknown> = {};
   for (const a of existing) existingMap[a.questionId] = a.selected;
 
@@ -90,14 +94,6 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
   // selesai, runner masuk mode read-only (tidak bisa diubah / ngulang).
   const isCompleted =
     realQuestions.length > 0 && existing.length >= realQuestions.length;
-
-  // Pastikan timer subtes mulai (server-authoritative). Kalau sudah ada
-  // entri sebelumnya, ensureSubtestStarted tidak mengubah startedAt-nya.
-  const startInfo = await ensureSubtestStarted({
-    submissionId: sub.id,
-    subtestId: subtest.id,
-    durationSec: subtest.durationSec,
-  });
 
   return (
     <SubtestRunner
