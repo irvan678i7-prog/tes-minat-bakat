@@ -950,16 +950,32 @@ function ExamplePreview({
         )}
       </div>
       <p className="font-bold whitespace-pre-wrap mb-2">{q.prompt || "—"}</p>
-      {q.imageUrl && (
-        <div className="my-2 inline-block border-2 border-black p-1 bg-white">
-          <Image
-            src={q.imageUrl}
-            alt={`Contoh ${q.questionNo}`}
-            width={400}
-            height={260}
-            className="max-w-full h-auto"
-            unoptimized
-          />
+      {(q.imageUrl || q.imageUrl2) && (
+        <div className="my-2 flex flex-wrap items-start gap-2">
+          {q.imageUrl && (
+            <div className="border-2 border-black p-1 bg-white">
+              <Image
+                src={q.imageUrl}
+                alt={`Contoh ${q.questionNo}`}
+                width={400}
+                height={260}
+                className="max-w-full h-auto"
+                unoptimized
+              />
+            </div>
+          )}
+          {q.imageUrl2 && (
+            <div className="border-2 border-black p-1 bg-white">
+              <Image
+                src={q.imageUrl2}
+                alt={`Contoh ${q.questionNo} (gambar 2)`}
+                width={400}
+                height={260}
+                className="max-w-full h-auto"
+                unoptimized
+              />
+            </div>
+          )}
         </div>
       )}
       {partImages.length > 0 && (
