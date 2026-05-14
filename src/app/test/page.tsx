@@ -14,11 +14,18 @@ export default async function TestHome() {
   const subtests = await prisma.subtest.findMany({
     where: { testKind: sub.testKind },
     orderBy: { orderIndex: "asc" },
-    include: { _count: { select: { questions: true } } },
+    // Total soal harus mengecualikan soal contoh (isExample=true) supaya status
+    // "DONE/REVIEW" muncul saat siswa menjawab semua soal real, bukan saat
+    // jumlah jawaban menyentuh total termasuk contoh (yang tidak dijawab).
+    include: {
+      _count: { select: { questions: { where: { isExample: false } } } },
+    },
   });
 
+  // Hanya hitung jawaban untuk soal REAL (bukan contoh). Soal contoh tidak
+  // pernah disimpan sebagai Answer, tapi defensif: filter eksplisit di sini.
   const answered = await prisma.answer.findMany({
-    where: { submissionId: sub.id },
+    where: { submissionId: sub.id, question: { isExample: false } },
     select: { question: { select: { subtestId: true } } },
   });
   const counts: Record<string, number> = {};

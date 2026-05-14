@@ -346,6 +346,14 @@ function InstructionsModal({
 
 function PreviewModal({ subtest, onClose }: { subtest: Subtest; onClose: () => void }) {
   const [questions, setQuestions] = useState<Question[] | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const reload = () => {
+    fetch(`/api/admin/subtests/${subtest.id}/questions`)
+      .then((r) => r.json())
+      .then((d) => setQuestions(d.questions || []))
+      .catch(() => setQuestions([]));
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -362,9 +370,46 @@ function PreviewModal({ subtest, onClose }: { subtest: Subtest; onClose: () => v
     };
   }, [subtest.id]);
 
+  const handleDelete = async (q: Question) => {
+    if (!confirm(`Hapus soal ${q.isExample ? "contoh " : ""}#${q.questionNo}? Aksi tidak bisa dibatalkan.`)) return;
+    const res = await fetch(
+      `/api/admin/subtests/${subtest.id}/questions/${q.id}`,
+      { method: "DELETE" },
+    );
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast.error(d.error || "Gagal menghapus soal");
+      return;
+    }
+    toast.success("Soal dihapus");
+    if (editingId === q.id) setEditingId(null);
+    reload();
+  };
+
   const loading = questions === null;
   const examples = (questions || []).filter((q) => q.isExample);
   const real = (questions || []).filter((q) => !q.isExample);
+
+  const renderItem = (q: Question) =>
+    editingId === q.id ? (
+      <QuestionEditor
+        key={q.id}
+        q={q}
+        subtestId={subtest.id}
+        onCancel={() => setEditingId(null)}
+        onSaved={() => {
+          setEditingId(null);
+          reload();
+        }}
+      />
+    ) : (
+      <QuestionPreview
+        key={q.id}
+        q={q}
+        onEdit={() => setEditingId(q.id)}
+        onDelete={() => handleDelete(q)}
+      />
+    );
 
   return (
     <div
@@ -395,21 +440,13 @@ function PreviewModal({ subtest, onClose }: { subtest: Subtest; onClose: () => v
             {examples.length > 0 && (
               <div>
                 <h4 className="text-lg font-black uppercase mb-2">Contoh Soal ({examples.length})</h4>
-                <div className="space-y-3">
-                  {examples.map((q) => (
-                    <QuestionPreview key={q.id} q={q} />
-                  ))}
-                </div>
+                <div className="space-y-3">{examples.map(renderItem)}</div>
               </div>
             )}
             {real.length > 0 && (
               <div>
                 <h4 className="text-lg font-black uppercase mb-2">Soal ({real.length})</h4>
-                <div className="space-y-3">
-                  {real.map((q) => (
-                    <QuestionPreview key={q.id} q={q} />
-                  ))}
-                </div>
+                <div className="space-y-3">{real.map(renderItem)}</div>
               </div>
             )}
           </div>
@@ -419,7 +456,15 @@ function PreviewModal({ subtest, onClose }: { subtest: Subtest; onClose: () => v
   );
 }
 
-function QuestionPreview({ q }: { q: Question }) {
+function QuestionPreview({
+  q,
+  onEdit,
+  onDelete,
+}: {
+  q: Question;
+  onEdit?: () => void;
+  onDelete?: () => void;
+}) {
   const opts = (Array.isArray(q.options) ? (q.options as OptionItem[]) : []).filter(
     (o) => o && typeof o === "object",
   );
@@ -466,6 +511,30 @@ function QuestionPreview({ q }: { q: Question }) {
           <span className="brut-tag" style={{ background: "#a3e635" }}>
             {q.scoringTag}
           </span>
+        )}
+        {(onEdit || onDelete) && (
+          <div className="ml-auto flex gap-2">
+            {onEdit && (
+              <button
+                type="button"
+                onClick={onEdit}
+                className="brut-btn text-xs"
+                title="Edit soal & jawaban"
+              >
+                EDIT
+              </button>
+            )}
+            {onDelete && (
+              <button
+                type="button"
+                onClick={onDelete}
+                className="brut-btn brut-btn-pink text-xs"
+                title="Hapus soal"
+              >
+                HAPUS
+              </button>
+            )}
+          </div>
         )}
       </div>
       <p className="font-bold whitespace-pre-wrap mb-2">{q.prompt || "—"}</p>
@@ -559,6 +628,452 @@ function QuestionPreview({ q }: { q: Question }) {
           })}
         </ul>
       )}
+    </div>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Editor Soal Individu (dipakai di Preview Bank Soal admin)
+// ───────────────────────────────────────────────────────────────────────────────
+
+const DEFAULT_OPTION_KEYS = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
+
+function readOptions(raw: unknown): { items: OptionItem[]; rest: Record<string, unknown> } {
+  if (Array.isArray(raw)) {
+    const items = raw
+      .filter((o): o is Record<string, unknown> => !!o && typeof o === "object" && !Array.isArray(o))
+      .map((o, i) => ({
+        key: typeof o.key === "string" && o.key ? o.key : DEFAULT_OPTION_KEYS[i] ?? String(i + 1),
+        label: typeof o.label === "string" ? o.label : "",
+        imageUrl: typeof o.imageUrl === "string" ? o.imageUrl : "",
+      }));
+    return { items, rest: {} };
+  }
+  if (raw && typeof raw === "object") {
+    // Bentuk { partImages: [...] } dst. — simpan apa adanya.
+    return { items: [], rest: raw as Record<string, unknown> };
+  }
+  return { items: [], rest: {} };
+}
+
+function correctArrayFor(raw: unknown, parts: number): string[] {
+  if (Array.isArray(raw)) {
+    const arr = raw.map((v) => (v == null ? "" : String(v)));
+    while (arr.length < parts) arr.push("");
+    return arr.slice(0, parts);
+  }
+  if (raw == null) return Array.from({ length: parts }, () => "");
+  // Single value (parts<=1)
+  return parts > 1
+    ? Array.from({ length: parts }, (_, i) => (i === 0 ? String(raw) : ""))
+    : [String(raw)];
+}
+
+function QuestionEditor({
+  q,
+  subtestId,
+  onSaved,
+  onCancel,
+}: {
+  q: Question;
+  subtestId: string;
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const initialMode: "CHOICE" | "TEXT" = q.inputMode === "TEXT" ? "TEXT" : "CHOICE";
+  const { items: initialOptions, rest: optionsRest } = readOptions(q.options);
+  // Kalau options bentuknya non-array (mis. { partImages }), kita tidak izinkan
+  // edit opsi via UI ini — admin tetap bisa edit prompt/gambar/kunci/parts.
+  const hasNonArrayOptions = !Array.isArray(q.options) && q.options != null;
+
+  const [prompt, setPrompt] = useState(q.prompt || "");
+  const [imageUrl, setImageUrl] = useState(q.imageUrl || "");
+  const [imageUrl2, setImageUrl2] = useState(q.imageUrl2 || "");
+  const [parts, setParts] = useState(q.parts || 1);
+  const [isExample, setIsExample] = useState(!!q.isExample);
+  const [inputMode, setInputMode] = useState<"CHOICE" | "TEXT">(initialMode);
+  const [questionNo, setQuestionNo] = useState(q.questionNo);
+  const [scoringTag, setScoringTag] = useState(q.scoringTag || "");
+  const [options, setOptions] = useState<OptionItem[]>(
+    initialOptions.length > 0
+      ? initialOptions
+      : initialMode === "CHOICE" && !hasNonArrayOptions
+        ? [
+            { key: "A", label: "", imageUrl: "" },
+            { key: "B", label: "", imageUrl: "" },
+            { key: "C", label: "", imageUrl: "" },
+            { key: "D", label: "", imageUrl: "" },
+          ]
+        : [],
+  );
+  const [correct, setCorrect] = useState<string[]>(correctArrayFor(q.correct, q.parts || 1));
+  const [saving, setSaving] = useState(false);
+
+  // Resize correct array bersamaan dengan ubah parts supaya jumlah input
+  // kunci selalu sinkron dengan jumlah bagian.
+  const updateParts = (next: number) => {
+    const clamped = Math.max(1, Math.min(24, Math.floor(next) || 1));
+    setParts(clamped);
+    setCorrect((cur) => {
+      if (cur.length === clamped) return cur;
+      const arr = cur.slice(0, clamped);
+      while (arr.length < clamped) arr.push("");
+      return arr;
+    });
+  };
+
+  const addOption = () => {
+    setOptions((cur) => {
+      if (cur.length >= DEFAULT_OPTION_KEYS.length) return cur;
+      const key = DEFAULT_OPTION_KEYS[cur.length] ?? String(cur.length + 1);
+      return [...cur, { key, label: "", imageUrl: "" }];
+    });
+  };
+
+  const removeOption = (idx: number) => {
+    setOptions((cur) => {
+      const removed = cur[idx];
+      const next = cur.slice(0, idx).concat(cur.slice(idx + 1));
+      // Bersihkan kunci yang mengarah ke opsi yang dihapus.
+      if (removed) {
+        setCorrect((curC) =>
+          curC.map((v) => (v.toUpperCase() === removed.key.toUpperCase() ? "" : v)),
+        );
+      }
+      return next;
+    });
+  };
+
+  const setOpt = (idx: number, patch: Partial<OptionItem>) => {
+    setOptions((cur) => cur.map((o, i) => (i === idx ? { ...o, ...patch } : o)));
+  };
+
+  const onSave = async () => {
+    if (!prompt.trim() && !imageUrl.trim() && !imageUrl2.trim()) {
+      toast.error("Soal harus punya prompt atau minimal 1 gambar.");
+      return;
+    }
+    if (inputMode === "CHOICE" && !hasNonArrayOptions) {
+      if (options.length < 2) {
+        toast.error("Soal pilihan ganda butuh minimal 2 opsi.");
+        return;
+      }
+      const keys = new Set<string>();
+      for (const o of options) {
+        const k = (o.key || "").trim().toUpperCase();
+        if (!k) {
+          toast.error("Setiap opsi harus punya kunci huruf (A/B/C/...).");
+          return;
+        }
+        if (keys.has(k)) {
+          toast.error(`Kunci opsi duplikat: ${k}`);
+          return;
+        }
+        keys.add(k);
+      }
+      const correctKeys = correct
+        .map((v) => (v || "").trim().toUpperCase())
+        .filter((v) => v.length > 0);
+      for (const k of correctKeys) {
+        if (!keys.has(k)) {
+          toast.error(`Kunci jawaban "${k}" tidak ada di daftar opsi.`);
+          return;
+        }
+      }
+    }
+
+    setSaving(true);
+    try {
+      const body: Record<string, unknown> = {
+        prompt,
+        imageUrl: imageUrl || null,
+        imageUrl2: imageUrl2 || null,
+        parts,
+        isExample,
+        inputMode,
+        questionNo,
+        scoringTag: scoringTag || null,
+      };
+      if (inputMode === "CHOICE") {
+        if (!hasNonArrayOptions) {
+          body.options = options.map((o) => ({
+            key: o.key.trim().toUpperCase(),
+            label: o.label || "",
+            imageUrl: o.imageUrl || "",
+          }));
+        } else {
+          // Pertahankan bentuk options asli (mis. partImages).
+          body.options = optionsRest;
+        }
+      } else {
+        body.options = [];
+      }
+      // correct: untuk parts<=1 simpan single string, kalau >1 simpan array.
+      const trimmedCorrect = correct.map((v) => (v ?? "").trim());
+      body.correct = parts > 1 ? trimmedCorrect : trimmedCorrect[0] ?? "";
+
+      const res = await fetch(
+        `/api/admin/subtests/${subtestId}/questions/${q.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(d.error || "Gagal menyimpan soal");
+        return;
+      }
+      toast.success("Soal disimpan");
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="brut-card border-4"
+      style={{ background: "#fef9c3", borderColor: "#000" }}
+    >
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+        <div className="flex items-baseline gap-2 flex-wrap">
+          <span
+            className="brut-tag"
+            style={{ background: "#000", color: "#fff" }}
+          >
+            EDIT {isExample ? "CONTOH" : "SOAL"} #{questionNo}
+          </span>
+          <label className="text-xs font-black uppercase flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={isExample}
+              onChange={(e) => setIsExample(e.target.checked)}
+            />
+            Contoh
+          </label>
+          <label className="text-xs font-black uppercase flex items-center gap-1">
+            Tipe:
+            <select
+              value={inputMode}
+              onChange={(e) => setInputMode(e.target.value as "CHOICE" | "TEXT")}
+              className="brut-input text-xs"
+            >
+              <option value="CHOICE">Pilihan</option>
+              <option value="TEXT">Isian</option>
+            </select>
+          </label>
+          <label className="text-xs font-black uppercase flex items-center gap-1">
+            No:
+            <input
+              type="number"
+              min={1}
+              value={questionNo}
+              onChange={(e) =>
+                setQuestionNo(Math.max(1, parseInt(e.target.value || "1", 10) || 1))
+              }
+              className="brut-input w-20 text-xs"
+            />
+          </label>
+          <label className="text-xs font-black uppercase flex items-center gap-1">
+            Parts:
+            <input
+              type="number"
+              min={1}
+              max={24}
+              value={parts}
+              onChange={(e) => updateParts(parseInt(e.target.value || "1", 10) || 1)}
+              className="brut-input w-16 text-xs"
+            />
+          </label>
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className="brut-btn text-xs"
+            onClick={onCancel}
+            disabled={saving}
+          >
+            BATAL
+          </button>
+          <button
+            type="button"
+            className="brut-btn brut-btn-pink text-xs"
+            onClick={onSave}
+            disabled={saving}
+          >
+            {saving ? "MENYIMPAN..." : "SIMPAN"}
+          </button>
+        </div>
+      </div>
+
+      <label className="text-xs font-black uppercase block mb-1">Prompt / Pertanyaan</label>
+      <textarea
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        rows={3}
+        className="brut-input w-full font-semibold mb-3"
+        placeholder="Tulis pertanyaan di sini (kosongkan kalau soal hanya gambar)"
+      />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+        <div>
+          <label className="text-xs font-black uppercase block mb-1">URL Gambar 1</label>
+          <input
+            type="text"
+            value={imageUrl}
+            onChange={(e) => setImageUrl(e.target.value)}
+            placeholder="https://... (opsional)"
+            className="brut-input w-full text-sm font-mono"
+          />
+          {imageUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={imageUrl}
+              alt="Preview gambar 1"
+              className="mt-1 border-2 border-black max-h-40"
+            />
+          )}
+        </div>
+        <div>
+          <label className="text-xs font-black uppercase block mb-1">URL Gambar 2</label>
+          <input
+            type="text"
+            value={imageUrl2}
+            onChange={(e) => setImageUrl2(e.target.value)}
+            placeholder="https://... (opsional, untuk soal 2 gambar)"
+            className="brut-input w-full text-sm font-mono"
+          />
+          {imageUrl2 && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={imageUrl2}
+              alt="Preview gambar 2"
+              className="mt-1 border-2 border-black max-h-40"
+            />
+          )}
+        </div>
+      </div>
+
+      {inputMode === "CHOICE" && !hasNonArrayOptions && (
+        <div className="mb-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-black uppercase">Opsi Jawaban</span>
+            <button
+              type="button"
+              className="brut-btn text-xs"
+              onClick={addOption}
+              disabled={options.length >= DEFAULT_OPTION_KEYS.length}
+            >
+              + TAMBAH OPSI
+            </button>
+          </div>
+          <div className="space-y-2">
+            {options.map((o, idx) => (
+              <div
+                key={idx}
+                className="border-2 border-black p-2 bg-white flex gap-2 items-start flex-wrap"
+              >
+                <input
+                  type="text"
+                  value={o.key}
+                  maxLength={2}
+                  onChange={(e) => setOpt(idx, { key: e.target.value.toUpperCase() })}
+                  className="brut-input w-12 text-center font-black uppercase"
+                  title="Kunci opsi (A/B/C/...)"
+                />
+                <textarea
+                  value={o.label}
+                  onChange={(e) => setOpt(idx, { label: e.target.value })}
+                  rows={1}
+                  placeholder="Label opsi (boleh kosong kalau pakai gambar)"
+                  className="brut-input flex-1 min-w-[200px] text-sm"
+                />
+                <input
+                  type="text"
+                  value={o.imageUrl ?? ""}
+                  onChange={(e) => setOpt(idx, { imageUrl: e.target.value })}
+                  placeholder="URL gambar opsi (opsional)"
+                  className="brut-input w-44 text-xs font-mono"
+                />
+                <button
+                  type="button"
+                  className="brut-btn brut-btn-pink text-xs"
+                  onClick={() => removeOption(idx)}
+                  title="Hapus opsi"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            {options.length === 0 && (
+              <p className="text-xs font-bold opacity-70">
+                Belum ada opsi. Klik <em>+ TAMBAH OPSI</em>.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {inputMode === "CHOICE" && hasNonArrayOptions && (
+        <div className="mb-3 border-2 border-black p-2 bg-white text-xs font-semibold">
+          Soal ini menyimpan opsi dalam format khusus (mis. <code>partImages</code>).
+          Edit opsi tidak didukung di sini — gunakan upload massal untuk mengubahnya.
+          Anda tetap bisa mengubah prompt, gambar utama, kunci jawaban, parts, dan
+          status contoh.
+        </div>
+      )}
+
+      <div>
+        <label className="text-xs font-black uppercase block mb-1">
+          Kunci Jawaban {parts > 1 ? `(${parts} bagian)` : ""}
+        </label>
+        {parts <= 1 ? (
+          <input
+            type="text"
+            value={correct[0] ?? ""}
+            onChange={(e) =>
+              setCorrect((cur) => [e.target.value, ...cur.slice(1)])
+            }
+            placeholder={inputMode === "CHOICE" ? "Mis. A" : "Mis. jawaban teks"}
+            className="brut-input w-full text-sm font-bold"
+          />
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+            {Array.from({ length: parts }).map((_, i) => (
+              <input
+                key={i}
+                type="text"
+                value={correct[i] ?? ""}
+                onChange={(e) =>
+                  setCorrect((cur) => {
+                    const next = cur.slice();
+                    while (next.length <= i) next.push("");
+                    next[i] = e.target.value;
+                    return next;
+                  })
+                }
+                placeholder={`Bagian ${i + 1}`}
+                className="brut-input text-sm text-center font-bold"
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-3">
+        <label className="text-xs font-black uppercase block mb-1">
+          Scoring Tag (opsional)
+        </label>
+        <input
+          type="text"
+          value={scoringTag}
+          onChange={(e) => setScoringTag(e.target.value)}
+          placeholder="Tag untuk grouping skor (mis. nama bidang minat)"
+          className="brut-input w-full text-sm font-mono"
+        />
+      </div>
     </div>
   );
 }
