@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, useSyncExternalStore } from "react";
 import toast from "react-hot-toast";
 import TestRules from "@/components/student/TestRules";
+import { useBrutConfirm } from "@/components/BrutConfirm";
 
 type Sub = {
   id: string;
@@ -52,6 +53,7 @@ export default function TestHub({
   subtests: Sub[];
 }) {
   const router = useRouter();
+  const { confirm, ConfirmModal } = useBrutConfirm();
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   // "Semua subtes sudah dijalani" — boleh tombol SELESAIKAN TES aktif kalau
@@ -98,7 +100,20 @@ export default function TestHub({
   };
 
   const finish = async () => {
-    if (!confirm("Selesaikan tes? Anda tidak dapat mengubah jawaban setelah dikirim.")) return;
+    const answeredSubs = subtests.filter((s) => s.total > 0 && s.answered > 0).length;
+    const totalSubs = subtests.filter((s) => s.total > 0).length;
+    const ok = await confirm({
+      title: "Selesaikan Tes?",
+      tone: "danger",
+      icon: "\uD83C\uDFC1",
+      message:
+        `Kamu sudah mengerjakan ${answeredSubs} dari ${totalSubs} subtes.\n\n` +
+        "Setelah dikirim, jawaban TIDAK BISA diubah dan hasil akan langsung diproses. " +
+        "Pastikan semua subtes sudah kamu kerjakan sebaik mungkin.",
+      confirmLabel: "YA, SELESAIKAN",
+      cancelLabel: "Lanjutkan Mengerjakan",
+    });
+    if (!ok) return;
     setSubmitting(true);
     setSubmitError(null);
     const r = await attemptFinish();
@@ -126,6 +141,7 @@ export default function TestHub({
 
   return (
     <div className="min-h-screen flex flex-col">
+      {ConfirmModal}
       {showRules && (
         <TestRules
           testKind={testKind}
