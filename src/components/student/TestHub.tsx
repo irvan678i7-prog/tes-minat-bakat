@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import toast from "react-hot-toast";
+import TestRules from "@/components/student/TestRules";
 
 type Sub = {
   id: string;
@@ -55,6 +56,39 @@ export default function TestHub({
     subtests.length > 0 &&
     subtests.every((s) => s.total === 0 || s.answered >= s.total);
 
+  // Tampilkan aturan tes sekali per submission. Setelah siswa klik
+  // "Saya Mengerti", flag disimpan di localStorage supaya reload tidak
+  // memunculkan aturan lagi. Siswa tetap bisa membuka kembali dari
+  // tombol di header.
+  const RULES_KEY = `test_rules_ack_${testKind}`;
+  // Pakai useSyncExternalStore supaya tidak ada setState-in-effect dan
+  // tidak ada hydration flicker. SSR default = belum di-ack (tampilkan
+  // modal) supaya kalau JS sempat delay, modal sudah terlihat dari HTML.
+  const ackFromStorage = useSyncExternalStore(
+    () => () => {},
+    () => {
+      try {
+        return window.localStorage.getItem(RULES_KEY) === "1" ? "1" : "0";
+      } catch {
+        return "0";
+      }
+    },
+    () => "0",
+  );
+  const [manuallyShown, setManuallyShown] = useState(false);
+  const [acked, setAcked] = useState(false);
+  const showRules = manuallyShown || (!acked && ackFromStorage !== "1");
+
+  const acknowledgeRules = () => {
+    try {
+      window.localStorage.setItem(RULES_KEY, "1");
+    } catch {
+      // Abaikan, modal akan tertutup tetap.
+    }
+    setAcked(true);
+    setManuallyShown(false);
+  };
+
   const finish = async () => {
     if (!confirm("Selesaikan tes? Anda tidak dapat mengubah jawaban setelah dikirim.")) return;
     setSubmitting(true);
@@ -84,17 +118,40 @@ export default function TestHub({
 
   return (
     <div className="min-h-screen flex flex-col">
+      {showRules && (
+        <TestRules
+          testKind={testKind}
+          onAcknowledge={acknowledgeRules}
+          onClose={
+            // Modal dapat ditutup hanya kalau dibuka manual via tombol di
+            // header (siswa sudah pernah setuju sebelumnya).
+            manuallyShown && ackFromStorage === "1"
+              ? () => setManuallyShown(false)
+              : undefined
+          }
+        />
+      )}
       <header className="border-b-4 border-black bg-yellow-300">
-        <div className="max-w-4xl mx-auto px-6 py-5 flex items-center justify-between">
+        <div className="max-w-4xl mx-auto px-6 py-5 flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-2xl md:text-3xl font-black uppercase">
               Tes {testKind}
             </h1>
             <p className="font-semibold">Peserta: {studentName}</p>
           </div>
-          <span className="brut-tag" style={{ background: "#000", color: "#fff" }}>
-            {subtests.length} SUBTES
-          </span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setManuallyShown(true)}
+              className="brut-btn brut-btn-white text-xs"
+              title="Lihat aturan tes"
+            >
+              ⚑ ATURAN TES
+            </button>
+            <span className="brut-tag" style={{ background: "#000", color: "#fff" }}>
+              {subtests.length} SUBTES
+            </span>
+          </div>
         </div>
       </header>
       <main className="flex-1 max-w-4xl mx-auto px-6 py-8 w-full space-y-4">
