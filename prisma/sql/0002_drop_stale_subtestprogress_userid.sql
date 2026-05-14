@@ -1,0 +1,31 @@
+-- =====================================================================
+-- HOTFIX: Drop stale `userId` column from `SubtestProgress`
+-- =====================================================================
+-- Issue:
+--   PrismaClientKnownRequestError (P2011):
+--   Null constraint violation on the fields: (`userId`)
+--   pada prisma.subtestProgress.upsert()
+--
+-- Cause:
+--   Database production punya kolom `userId` NOT NULL di tabel
+--   `SubtestProgress`, peninggalan dari iterasi schema sebelumnya.
+--   Schema Prisma saat ini TIDAK lagi punya field `userId` (relasi ke
+--   user dilakukan via `submissionId → Submission`). Karena `db push`
+--   tidak menghapus kolom yang sudah tidak ada di schema, kolom itu
+--   tetap tersisa di DB dengan constraint NOT NULL — sehingga setiap
+--   INSERT/UPSERT baru gagal karena Prisma tidak mengisi `userId`.
+--
+-- Fix:
+--   Drop kolom `userId` dari tabel `SubtestProgress`. `DROP COLUMN`
+--   otomatis menghapus foreign key/constraint yang terikat ke kolom itu.
+--   Idempotent — aman dijalankan ulang.
+--
+-- Cara apply:
+--   Buka Supabase Dashboard → SQL Editor → paste isi file ini → Run.
+--   Atau via psql:
+--     psql "$DATABASE_URL" -f prisma/sql/0002_drop_stale_subtestprogress_userid.sql
+--
+-- =====================================================================
+
+ALTER TABLE "SubtestProgress"
+  DROP COLUMN IF EXISTS "userId";
