@@ -1,7 +1,14 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import type { Metadata } from "next";
 import { getAdminFromCookies } from "@/lib/auth";
 import LogoutButton from "@/components/LogoutButton";
+
+export const metadata: Metadata = {
+  // Belt & suspenders: header X-Robots-Tag di next.config.ts sudah set noindex,
+  // tapi metadata ini juga menambah <meta name="robots"> di HTML head.
+  robots: { index: false, follow: false, nocache: true },
+};
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const me = await getAdminFromCookies();

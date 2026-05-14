@@ -4,9 +4,13 @@ import {
   CATEGORY_LABEL,
   MINAT_BIDANG_TO_PROGRAM,
   categorize,
-  estimateIQ,
-  iqInterpretation,
 } from "./test-config";
+import {
+  computeProBakat,
+  type CompositeIndex,
+  type FSIQResult,
+  type ProSubtestScore,
+} from "./scoring-pro";
 
 type Letter = string;
 
@@ -20,10 +24,19 @@ export type ScoringPayload = {
       max: number;
       categoryCode?: string;
       categoryLabel?: string;
+      // Skoring profesional (Wechsler-style). Optional supaya tetap kompatibel
+      // dengan payload lama yang tersimpan di DB (Result.payload Json).
+      zScore?: number;
+      tScore?: number;
+      percentile?: number;
+      stanine?: number;
     }
   >;
   bakat?: {
     topProfiles: { name: string; description: string; majors: string[]; careers: string[]; matchScore: number }[];
+    composites?: CompositeIndex[];
+    fsiq?: FSIQResult;
+    narrative?: string;
   };
   minat?: {
     bidangScores: Record<Letter, number>;
@@ -130,11 +143,29 @@ function scoreBakat(sub: SubWithAnswers): ScoringPayload {
     }
   }
 
-  // Categorize
+  // Skoring profesional: hitung z, T, percentile, stanine + komposit + FSIQ.
+  const subtestArr = Object.entries(perSubtest).map(([code, v]) => ({
+    code,
+    name: v.name,
+    raw: v.raw,
+    max: v.max,
+  }));
+  const pro = computeProBakat(subtestArr, categorize, CATEGORY_LABEL);
+  const proByCode = new Map<string, ProSubtestScore>(pro.subtests.map((s) => [s.code, s]));
+
+  // Merge: pakai categoryCode/Label dari pro (yang juga lewat `categorize`).
   const out: ScoringPayload["perSubtest"] = {};
   for (const [code, v] of Object.entries(perSubtest)) {
-    const cat = categorize(code, v.raw);
-    out[code] = { ...v, categoryCode: cat, categoryLabel: CATEGORY_LABEL[cat] };
+    const p = proByCode.get(code);
+    out[code] = {
+      ...v,
+      categoryCode: p?.categoryCode,
+      categoryLabel: p?.categoryLabel,
+      zScore: p?.zScore,
+      tScore: p?.tScore,
+      percentile: p?.percentile,
+      stanine: p?.stanine,
+    };
   }
 
   // Top 3 subtests by raw score (per buku: pilih 3 subtes tertinggi → cocokan profil)
@@ -152,8 +183,13 @@ function scoreBakat(sub: SubWithAnswers): ScoringPayload {
     .sort((a, b) => b.matchScore - a.matchScore)
     .slice(0, 5);
 
-  const iq = estimateIQ(perSubtest);
-  const interp = iqInterpretation(iq);
+  // IQ yang ditampilkan di seluruh app (admin list, PDF, dst) sekarang pakai
+  // FSIQ Wechsler-style dari scoring-pro — mean 100, SD 15, dengan CI ±5.
+  const iq = pro.fsiq.score;
+  const interp = {
+    band: pro.fsiq.band.label,
+    description: pro.fsiq.band.descId,
+  };
 
   const majors = Array.from(new Set(profileMatches.flatMap((p) => p.majors))).slice(0, 8);
   const careers = Array.from(new Set(profileMatches.flatMap((p) => p.careers))).slice(0, 8);
@@ -169,6 +205,9 @@ function scoreBakat(sub: SubWithAnswers): ScoringPayload {
         careers: p.careers,
         matchScore: p.matchScore,
       })),
+      composites: pro.composites,
+      fsiq: pro.fsiq,
+      narrative: pro.narrative,
     },
     iqEstimate: iq,
     iqInterpretation: interp,

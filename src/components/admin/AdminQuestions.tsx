@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
+import { useBrutConfirm } from "@/components/BrutConfirm";
 
 type Subtest = {
   id: string;
@@ -347,6 +348,7 @@ function InstructionsModal({
 function PreviewModal({ subtest, onClose }: { subtest: Subtest; onClose: () => void }) {
   const [questions, setQuestions] = useState<Question[] | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const { confirm, ConfirmModal } = useBrutConfirm();
 
   const reload = () => {
     fetch(`/api/admin/subtests/${subtest.id}/questions`)
@@ -371,7 +373,14 @@ function PreviewModal({ subtest, onClose }: { subtest: Subtest; onClose: () => v
   }, [subtest.id]);
 
   const handleDelete = async (q: Question) => {
-    if (!confirm(`Hapus soal ${q.isExample ? "contoh " : ""}#${q.questionNo}? Aksi tidak bisa dibatalkan.`)) return;
+    const ok = await confirm({
+      title: "Hapus Soal",
+      message: `Hapus soal ${q.isExample ? "contoh " : ""}#${q.questionNo}?\nAksi tidak bisa dibatalkan.`,
+      confirmLabel: "HAPUS",
+      cancelLabel: "Batal",
+      tone: "danger",
+    });
+    if (!ok) return;
     const res = await fetch(
       `/api/admin/subtests/${subtest.id}/questions/${q.id}`,
       { method: "DELETE" },
@@ -416,6 +425,7 @@ function PreviewModal({ subtest, onClose }: { subtest: Subtest; onClose: () => v
       className="fixed inset-0 z-50 bg-black/60 flex items-start md:items-center justify-center p-2 md:p-6 overflow-y-auto"
       onClick={onClose}
     >
+      {ConfirmModal}
       <div
         className="brut-card bg-white w-full max-w-4xl my-4"
         style={{ background: "#fff" }}

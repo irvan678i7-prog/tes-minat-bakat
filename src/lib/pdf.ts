@@ -149,12 +149,16 @@ export function buildReportPDF(submission: SubmissionInfo, payload: ScoringPaylo
     y = drawMinatSection(doc, payload, margin, y, pageW);
   }
 
-  // ── REKOMENDASI ──────────────────────────────────────────────────────
+  // ── REKOMENDASI ───────────────────────────────────────
   y = ensureSpace(doc, y, 140, margin);
   y = sectionTitle(doc, "Rekomendasi Jurusan & Pekerjaan", margin, y, pageW);
   drawRecommendations(doc, payload, margin, y, pageW);
+  y = nextY(doc, y) + 24;
 
-  // ── FOOTER & PAGE NUMBERS ────────────────────────────────────────────
+  // ── DISCLAIMER ──────────────────────────────────────────
+  drawDisclaimer(doc, margin, pageW);
+
+  // ── FOOTER & PAGE NUMBERS ────────────────────────────────
   drawFooters(doc, margin, pageW);
 
   return Buffer.from(doc.output("arraybuffer"));
@@ -315,14 +319,21 @@ function drawBakatSection(
   setTextHex(doc, WHITE);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
-  doc.text("ESTIMASI IQ", margin + 14, y + 28);
+  doc.text("SKOR IQ PROFIL", margin + 14, y + 28);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(44);
-  doc.text(String(payload.iqEstimate ?? "—"), margin + 14, y + 76);
+  const iqScore = payload.bakat?.fsiq?.score ?? payload.iqEstimate ?? null;
+  doc.text(iqScore != null ? String(iqScore) : "—", margin + 14, y + 76);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
-  doc.text("Berbasis 9 subtes Bakat.", margin + 14, y + 96);
-  doc.text("Bukan IQ klinis.", margin + 14, y + 106);
+  if (payload.bakat?.fsiq) {
+    const f = payload.bakat.fsiq;
+    doc.text(`CI 95%: ${f.ci95Low}–${f.ci95High}`, margin + 14, y + 92);
+    doc.text(`Percentile: ${f.percentile}`, margin + 14, y + 102);
+  } else {
+    doc.text("Berbasis 9 subtes Bakat.", margin + 14, y + 96);
+    doc.text("Bukan IQ klinis.", margin + 14, y + 106);
+  }
 
   // Right: band + description
   const rightX = margin + iqW + 16;
@@ -330,11 +341,11 @@ function drawBakatSection(
   setTextHex(doc, INK);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(14);
-  doc.text(payload.iqInterpretation?.band ?? "—", rightX, y + 32);
+  doc.text(payload.bakat?.fsiq?.band.label ?? payload.iqInterpretation?.band ?? "—", rightX, y + 32);
   doc.setFont("helvetica", "normal");
   setTextHex(doc, SOFT_INK);
   doc.setFontSize(10);
-  const desc = payload.iqInterpretation?.description ?? "";
+  const desc = payload.bakat?.fsiq?.band.descId ?? payload.iqInterpretation?.description ?? "";
   const descLines = doc.splitTextToSize(desc, rightW);
   doc.text(descLines, rightX, y + 50);
 
@@ -369,65 +380,125 @@ function drawBakatSection(
   }
   y += cardH + 24;
 
+  // ── Indeks Komposit (Wechsler-style) ────────────────────────────────
+  const composites = payload.bakat?.composites ?? [];
+  if (composites.length > 0) {
+    y = ensureSpace(doc, y, 150, margin);
+    y = sectionTitle(doc, "Indeks Komposit", margin, y, pageW);
+    const compRows = composites.map((c) => [
+      `${c.name} (${c.short})`,
+      String(c.scaled),
+      String(c.percentile),
+      c.band.label,
+    ]);
+    autoTable(doc, {
+      startY: y,
+      head: [["Indeks", "Skor (M=100)", "Percentile", "Kategori"]],
+      body: compRows,
+      theme: "plain",
+      styles: {
+        font: "helvetica",
+        fontSize: 9.8,
+        lineWidth: 0.3,
+        lineColor: hexToRGB(HAIRLINE),
+        textColor: hexToRGB(INK),
+        cellPadding: { top: 7, bottom: 7, left: 10, right: 10 },
+      },
+      headStyles: {
+        fillColor: hexToRGB(INK),
+        textColor: hexToRGB(WHITE),
+        fontStyle: "bold",
+        fontSize: 9,
+      },
+      columnStyles: {
+        0: { cellWidth: "auto", fontStyle: "bold" },
+        1: { cellWidth: 90, halign: "center" },
+        2: { cellWidth: 80, halign: "center" },
+        3: { cellWidth: 130, halign: "left" },
+      },
+      alternateRowStyles: { fillColor: hexToRGB(STRIPE) },
+      margin: { left: margin, right: margin },
+    });
+    y = nextY(doc, y) + 22;
+  }
+
   // ── Skor per Subtes (table) ────────────────────────────────────────
   y = ensureSpace(doc, y, 160, margin);
-  y = sectionTitle(doc, "Skor Per Subtes", margin, y, pageW);
+  y = sectionTitle(doc, "Skor Per Subtes (Norma Standar)", margin, y, pageW);
+  // Header tabel berisi raw, percent, percentile rank (PR), T-score, stanine,
+  // kategori — standar laporan psikometrik profesional.
   const tableRows = items.map(([, v]) => [
     v.name,
     `${v.raw} / ${v.max}`,
     `${Math.round((v.raw / Math.max(1, v.max)) * 100)}%`,
+    v.percentile != null ? String(v.percentile) : "—",
+    v.tScore != null ? String(v.tScore) : "—",
+    v.stanine != null ? String(v.stanine) : "—",
     v.categoryLabel ?? "—",
     v.categoryCode ?? "",
   ]);
   autoTable(doc, {
     startY: y,
-    head: [["Subtes", "Skor", "%", "Kategori", ""]],
+    head: [["Subtes", "Skor", "%", "PR", "T", "St", "Kategori", ""]],
     body: tableRows,
     theme: "plain",
     styles: {
       font: "helvetica",
-      fontSize: 9.8,
+      fontSize: 9.5,
       lineWidth: 0.3,
       lineColor: hexToRGB(HAIRLINE),
       textColor: hexToRGB(INK),
-      cellPadding: { top: 7, bottom: 7, left: 10, right: 10 },
+      cellPadding: { top: 6, bottom: 6, left: 8, right: 8 },
     },
     headStyles: {
       fillColor: hexToRGB(INK),
       textColor: hexToRGB(WHITE),
       fontStyle: "bold",
-      fontSize: 9,
+      fontSize: 8.5,
     },
     columnStyles: {
       0: { cellWidth: "auto", fontStyle: "bold" },
-      1: { cellWidth: 70, halign: "center" },
-      2: { cellWidth: 50, halign: "center" },
-      3: { cellWidth: 110, halign: "left" },
-      4: { cellWidth: 30, halign: "center" },
+      1: { cellWidth: 56, halign: "center" },
+      2: { cellWidth: 38, halign: "center" },
+      3: { cellWidth: 32, halign: "center" },
+      4: { cellWidth: 32, halign: "center" },
+      5: { cellWidth: 28, halign: "center" },
+      6: { cellWidth: 100, halign: "left" },
+      7: { cellWidth: 26, halign: "center" },
     },
     alternateRowStyles: { fillColor: hexToRGB(STRIPE) },
     margin: { left: margin, right: margin },
     didDrawCell: (data) => {
       if (data.section !== "body") return;
-      if (data.column.index !== 4) return;
-      const code = String(tableRows[data.row.index][4] || "");
+      if (data.column.index !== 7) return;
+      const code = String(tableRows[data.row.index][7] || "");
       if (!code) return;
       const color = TIER_COLORS[code] ?? SOFT_INK;
-      const cx = data.cell.x + 6;
+      const cx = data.cell.x + 4;
       const cy = data.cell.y + 6;
-      const cw = data.cell.width - 12;
+      const cw = data.cell.width - 8;
       const ch = data.cell.height - 12;
       setFillHex(doc, color);
       doc.rect(cx, cy, cw, ch, "F");
       setTextHex(doc, WHITE);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(9);
+      doc.setFontSize(8.5);
       const tw = doc.getTextWidth(code);
       doc.text(code, cx + (cw - tw) / 2, cy + ch / 2 + 3);
       setTextHex(doc, INK);
     },
   });
-  y = nextY(doc, y) + 22;
+  y = nextY(doc, y) + 8;
+  // Legenda kolom — jelaskan singkatan supaya pembaca awam paham.
+  setTextHex(doc, SOFT_INK);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.text(
+    "Keterangan: PR = Percentile Rank (1–99, makin tinggi makin baik). T = T-Score (M=50, SD=10). St = Stanine (1–9, M=5).",
+    margin,
+    y + 4,
+  );
+  y += 22;
 
   // ── Visualisasi bar chart ──────────────────────────────────────────
   const chartH = items.length * 20 + 16;
@@ -436,7 +507,19 @@ function drawBakatSection(
   drawBarChart(doc, items, margin, y, pageW);
   y += chartH + 18;
 
-  // ── Profil bakat teratas ───────────────────────────────────────────
+  // ── Narasi Interpretasi ─────────────────────────────────────────────
+  if (payload.bakat?.narrative) {
+    y = ensureSpace(doc, y, 120, margin);
+    y = sectionTitle(doc, "Narasi Interpretasi", margin, y, pageW);
+    setTextHex(doc, INK);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    const lines = doc.splitTextToSize(payload.bakat.narrative, pageW - margin * 2);
+    doc.text(lines, margin, y + 4);
+    y += lines.length * 13 + 18;
+  }
+
+  // ── Profil bakat teratas ─────────────────────────────
   const topProfiles = payload.bakat?.topProfiles ?? [];
   if (topProfiles.length > 0) {
     y = ensureSpace(doc, y, 80, margin);
@@ -766,6 +849,42 @@ function drawPillsHeight(doc: jsPDF, items: string[], maxW: number): number {
     }
   }
   return lines;
+}
+
+// Disclaimer di akhir laporan — wajib ada untuk laporan psikometrik supaya
+// hasil tidak disalahgunakan sebagai diagnosis klinis / dasar keputusan
+// medis-legal.
+function drawDisclaimer(doc: jsPDF, margin: number, pageW: number): void {
+  const pageH = doc.internal.pageSize.getHeight();
+  // Hitung tinggi yang dibutuhkan; kalau halaman sekarang sudah penuh,
+  // tambahkan halaman baru.
+  const text =
+    "Disclaimer: Laporan ini bersifat skrining minat dan bakat berbasis profil performa pada 9 subtes Bakat, BUKAN evaluasi klinis atau diagnostik psikologis formal. Skor IQ yang ditampilkan adalah estimasi profil (mean 100, SD 15) yang dihitung melalui norma equipercentile dari rentang kategori internal — bukan IQ klinis Wechsler yang membutuhkan standardisasi populasi rujukan. Confidence interval 95% (CI ±5) memberi gambaran ketelitian estimasi. Hasil ini sebaiknya digunakan bersama pertimbangan akademik, minat pribadi, dan masukan guru/orangtua. Untuk keperluan diagnostik klinis, konsultasikan dengan psikolog berlisensi.";
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.5);
+  const lines = doc.splitTextToSize(text, pageW - margin * 2 - 24);
+  const boxH = lines.length * 11 + 24;
+  let y = nextY(doc, 0);
+  if (y === 0) y = pageH - boxH - 56;
+  if (y + boxH > pageH - 50) {
+    doc.addPage();
+    y = margin + 18;
+  }
+  setFillHex(doc, "#FEF3C7"); // amber-100
+  doc.rect(margin, y, pageW - margin * 2, boxH, "F");
+  setDrawHex(doc, ACCENT_DEEP);
+  doc.setLineWidth(0.6);
+  doc.rect(margin, y, pageW - margin * 2, boxH);
+  setFillHex(doc, ACCENT_DEEP);
+  doc.rect(margin, y, 4, boxH, "F");
+  setTextHex(doc, "#78350F"); // amber-900
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text("DISCLAIMER", margin + 12, y + 14);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.5);
+  setTextHex(doc, INK);
+  doc.text(lines, margin + 12, y + 26);
 }
 
 function drawPills(

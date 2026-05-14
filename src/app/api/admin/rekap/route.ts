@@ -5,6 +5,13 @@ import { getAdminFromRequest } from "@/lib/auth";
 import { buildRekapPDF } from "@/lib/pdf-rekap";
 import { scoreSubmission, type ScoringPayload } from "@/lib/scoring";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+// Vercel Hobby plan max 10 detik. Untuk rekap besar (>50 peserta) bisa kena
+// limit ini \u2014 kalau perlu, batasi jumlah peserta per rekap atau pertimbangkan
+// upgrade plan. Sebagian besar payload sudah di-cache di tabel Result.
+export const maxDuration = 10;
+
 export async function GET(req: NextRequest) {
   const admin = getAdminFromRequest(req);
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

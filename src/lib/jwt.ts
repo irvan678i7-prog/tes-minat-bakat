@@ -1,6 +1,7 @@
 import jwt, { type SignOptions } from "jsonwebtoken";
+import { ADMIN_JWT_EXPIRES_IN, JWT_SECRET, STUDENT_JWT_EXPIRES_IN } from "./env";
 
-const SECRET = process.env.JWT_SECRET || "dev-only-insecure-secret-change-me";
+const SECRET = JWT_SECRET;
 
 export type AdminPayload = { sub: string; role: "admin"; email: string };
 export type StudentPayload = {
@@ -10,14 +11,20 @@ export type StudentPayload = {
   tokenId: string;
 };
 
-export function signAdminToken(p: AdminPayload, expiresIn: SignOptions["expiresIn"] = "12h"): string {
+export function signAdminToken(
+  p: AdminPayload,
+  expiresIn: SignOptions["expiresIn"] = ADMIN_JWT_EXPIRES_IN as SignOptions["expiresIn"],
+): string {
   return jwt.sign(p, SECRET, { expiresIn });
 }
 
-// Sesi siswa diberi masa berlaku panjang (12 jam) supaya "waktu token" tidak
-// memutus sesi di tengah pengerjaan. Batas waktu tes diatur via durationSec
-// per subtes — bukan dari masa berlaku JWT.
-export function signStudentToken(p: StudentPayload, expiresIn: SignOptions["expiresIn"] = "12h"): string {
+// Sesi siswa diberi masa berlaku menengah (3 jam) — cukup untuk semua subtes
+// BAKAT (max ~64 menit) + buffer kalau ada gangguan jaringan. Sebelumnya 12
+// jam terlalu panjang dari sisi keamanan.
+export function signStudentToken(
+  p: StudentPayload,
+  expiresIn: SignOptions["expiresIn"] = STUDENT_JWT_EXPIRES_IN as SignOptions["expiresIn"],
+): string {
   return jwt.sign(p, SECRET, { expiresIn });
 }
 

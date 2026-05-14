@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useState } from "react";
 import toast from "react-hot-toast";
+import { useBrutConfirm } from "@/components/BrutConfirm";
 
 type ViolationEntry = { type: string; subtestCode?: string | null; at: string };
 
@@ -64,6 +65,31 @@ function fmt(dt: string | null): string {
   );
 }
 
+// Helper untuk download PDF via fetch+blob — supaya error bisa ditangkap
+// dan ditampilkan ke user lewat toast brutalism (tidak silent fail seperti
+// pakai <a target="_blank">).
+async function downloadPdf(url: string, fallbackFilename: string): Promise<void> {
+  const res = await fetch(url, { credentials: "same-origin" });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { error?: string }).error || `Gagal mengunduh PDF (${res.status}).`);
+  }
+  // Ambil filename dari Content-Disposition kalau ada.
+  const cd = res.headers.get("Content-Disposition") || "";
+  const m = /filename="?([^";]+)"?/i.exec(cd);
+  const filename = m?.[1] || fallbackFilename;
+  const blob = await res.blob();
+  const objUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Bebaskan memori setelah browser sempat baca URL-nya.
+  setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
+}
+
 export default function AdminSubmissions() {
   const [items, setItems] = useState<Sub[]>([]);
   const [classes, setClasses] = useState<ClassRow[]>([]);
@@ -73,6 +99,9 @@ export default function AdminSubmissions() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [onlyFlagged, setOnlyFlagged] = useState(false);
   const [openLogId, setOpenLogId] = useState<string | null>(null);
+  const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
+  const [rekapBusy, setRekapBusy] = useState(false);
+  const { confirm, ConfirmModal } = useBrutConfirm();
 
   const refresh = () => {
     fetch("/api/admin/submissions")
@@ -93,7 +122,14 @@ export default function AdminSubmissions() {
 
   const onDelete = async (s: Sub) => {
     const label = s.fullName || s.tokenCode;
-    if (!confirm(`Hapus data peserta "${label}" (${s.testKind})? Tindakan ini permanen dan tidak bisa dibatalkan.`)) return;
+    const ok = await confirm({
+      title: "Hapus Peserta",
+      message: `Hapus data peserta "${label}" (${s.testKind})?\nTindakan ini permanen dan tidak bisa dibatalkan.`,
+      confirmLabel: "HAPUS",
+      cancelLabel: "Batal",
+      tone: "danger",
+    });
+    if (!ok) return;
     setDeleting(s.id);
     try {
       const res = await fetch(`/api/admin/submissions/${s.id}`, { method: "DELETE" });
@@ -106,6 +142,46 @@ export default function AdminSubmissions() {
       setItems((prev) => prev.filter((it) => it.id !== s.id));
     } finally {
       setDeleting(null);
+    }
+  };
+
+  const onDownloadPdf = async (s: Sub) => {
+    if (pdfBusyId) return;
+    setPdfBusyId(s.id);
+    try {
+      const safe = (s.fullName || s.id).replace(/[^A-Za-z0-9]+/g, "_").slice(0, 40);
+      await downloadPdf(
+        `/api/admin/submissions/${s.id}/pdf`,
+        `laporan-${s.testKind}-${safe}.pdf`,
+      );
+      toast.success("PDF berhasil diunduh");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Gagal mengunduh PDF");
+    } finally {
+      setPdfBusyId(null);
+    }
+  };
+
+  const onDownloadRekap = async () => {
+    if (!filterKind || rekapBusy) return;
+    setRekapBusy(true);
+    try {
+      const params = new URLSearchParams({
+        testKind: filterKind,
+        school: filterSchool,
+        grade: filterGrade,
+      });
+      const safe = (filterSchool || "semua").replace(/[^A-Za-z0-9]+/g, "_").slice(0, 30);
+      const safeGrade = (filterGrade || "semua").replace(/[^A-Za-z0-9]+/g, "_").slice(0, 20);
+      await downloadPdf(
+        `/api/admin/rekap?${params.toString()}`,
+        `rekap-${filterKind}-${safe}-${safeGrade}.pdf`,
+      );
+      toast.success("Rekap PDF berhasil diunduh");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Gagal mengunduh Rekap PDF");
+    } finally {
+      setRekapBusy(false);
     }
   };
 
@@ -125,6 +201,7 @@ export default function AdminSubmissions() {
 
   return (
     <div className="space-y-6">
+      {ConfirmModal}
       <div className="brut-card" style={{ background: "#a3e635" }}>
         <h3 className="text-xl font-black uppercase mb-3">Rekap per Kelas / Sekolah</h3>
         <p className="text-sm font-semibold mb-3">
@@ -157,14 +234,14 @@ export default function AdminSubmissions() {
               <option value="MINAT">MINAT</option>
             </select>
           </div>
-          <a
-            className={`brut-btn brut-btn-black text-center ${filterKind ? "" : "pointer-events-none opacity-50"}`}
-            href={`/api/admin/rekap?testKind=${filterKind}&school=${encodeURIComponent(filterSchool)}&grade=${encodeURIComponent(filterGrade)}`}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            type="button"
+            className="brut-btn brut-btn-black text-center"
+            disabled={!filterKind || rekapBusy}
+            onClick={onDownloadRekap}
           >
-            UNDUH REKAP PDF
-          </a>
+            {rekapBusy ? "MEMPROSES..." : "UNDUH REKAP PDF"}
+          </button>
         </div>
       </div>
 
@@ -247,14 +324,15 @@ export default function AdminSubmissions() {
                     <td>
                       <div className="flex items-center gap-2">
                         {s.finishedAt ? (
-                          <a
-                            href={`/api/admin/submissions/${s.id}/pdf`}
+                          <button
+                            type="button"
                             className="brut-btn brut-btn-pink text-xs"
-                            target="_blank"
-                            rel="noreferrer"
+                            onClick={() => onDownloadPdf(s)}
+                            disabled={pdfBusyId === s.id}
+                            title="Unduh laporan PDF peserta ini"
                           >
-                            PDF
-                          </a>
+                            {pdfBusyId === s.id ? "..." : "PDF"}
+                          </button>
                         ) : (
                           <span className="brut-tag" style={{ background: "#facc15" }}>BERLANGSUNG</span>
                         )}
