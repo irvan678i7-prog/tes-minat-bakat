@@ -38,13 +38,25 @@ export async function GET(req: NextRequest) {
   const admin = getAdminFromRequest(req);
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { searchParams } = new URL(req.url);
-  const includeRedeemed = searchParams.get("all") === "1";
+  // Class/broadcast token: 1 token = banyak siswa. Filter default = sembunyikan
+  // token yang sudah kadaluarsa DAN tidak punya submission (token mati total).
+  // `?all=1` → tampilkan semua termasuk yang sudah kadaluarsa kosongan.
+  const includeAll = searchParams.get("all") === "1";
+  const now = new Date();
   const tokens = await prisma.accessToken.findMany({
-    where: includeRedeemed ? {} : { redeemedAt: null },
+    where: includeAll
+      ? {}
+      : {
+          OR: [
+            { expiresAt: { gte: now } },
+            { submissions: { some: {} } },
+          ],
+        },
     orderBy: { createdAt: "desc" },
     take: 200,
     include: {
-      submission: {
+      submissions: {
+        orderBy: { startedAt: "asc" },
         select: {
           id: true,
           fullName: true,
@@ -60,9 +72,7 @@ export async function GET(req: NextRequest) {
   });
 
   // Compute progress per submission: which subtests are complete / in-progress.
-  const submissionIds = tokens
-    .map((t) => t.submission?.id)
-    .filter((x): x is string => !!x);
+  const submissionIds = tokens.flatMap((t) => t.submissions.map((s) => s.id));
 
   type SubtestMeta = { id: string; code: string; name: string; orderIndex: number; total: number };
   const subtestsByKind: Record<"MINAT" | "BAKAT", SubtestMeta[]> = { MINAT: [], BAKAT: [] };
@@ -118,16 +128,9 @@ export async function GET(req: NextRequest) {
   }
 
   const withProgress = tokens.map((t) => {
-    let progress: {
-      completed: number;
-      total: number;
-      currentSubtest: string | null;
-      lastActivityAt: string | null;
-      perSubtest: { code: string; name: string; total: number; answered: number; done: boolean }[];
-    } | null = null;
-    if (t.submission) {
-      const meta = subtestsByKind[t.testKind];
-      const ans = perSubmission.get(t.submission.id) ?? new Map<string, AnsAgg>();
+    const meta = subtestsByKind[t.testKind];
+    const submissions = t.submissions.map((s) => {
+      const ans = perSubmission.get(s.id) ?? new Map<string, AnsAgg>();
       const perSubtest = meta.map((m) => {
         const a = ans.get(m.id);
         const answered = a?.count ?? 0;
@@ -141,44 +144,74 @@ export async function GET(req: NextRequest) {
       });
       const completed = perSubtest.filter((p) => p.done).length;
       const total = perSubtest.length;
-      // Current subtest = first not-done subtest by order (admin-friendly proxy).
       const current = perSubtest.find((p) => !p.done) ?? null;
-      const lastActivity = lastActivityBySubmission.get(t.submission.id) ?? null;
-      progress = {
-        completed,
-        total,
-        currentSubtest: t.submission.finishedAt ? null : current?.name ?? null,
-        lastActivityAt: lastActivity ? lastActivity.toISOString() : null,
-        perSubtest,
+      const lastActivity = lastActivityBySubmission.get(s.id) ?? null;
+      return {
+        ...s,
+        startedAt: s.startedAt.toISOString(),
+        finishedAt: s.finishedAt ? s.finishedAt.toISOString() : null,
+        progress: {
+          completed,
+          total,
+          currentSubtest: s.finishedAt ? null : current?.name ?? null,
+          lastActivityAt: lastActivity ? lastActivity.toISOString() : null,
+          perSubtest,
+        },
       };
+    });
+
+    // Agregat per-token untuk kolom Peserta / Status di tabel daftar token.
+    const participantCount = submissions.length;
+    const selesaiCount = submissions.filter((s) => s.finishedAt).length;
+    const mengerjakanCount = participantCount - selesaiCount;
+    const flaggedCount = submissions.filter(
+      (s) => s.flaggedCheating || s.violationCount >= 5,
+    ).length;
+    // Last activity = max(lastActivityAt subset, startedAt). Dipakai untuk
+    // sort & tampilan "Update: x detik lalu" di UI admin.
+    let tokenLastActivity: Date | null = null;
+    for (const s of submissions) {
+      const cand = s.progress.lastActivityAt
+        ? new Date(s.progress.lastActivityAt)
+        : new Date(s.startedAt);
+      if (!tokenLastActivity || cand > tokenLastActivity) tokenLastActivity = cand;
     }
+
     return {
-      ...t,
-      submission: t.submission
-        ? {
-            ...t.submission,
-            startedAt: t.submission.startedAt.toISOString(),
-            finishedAt: t.submission.finishedAt ? t.submission.finishedAt.toISOString() : null,
-            progress,
-          }
-        : null,
+      id: t.id,
+      code: t.code,
+      testKind: t.testKind,
+      expiresAt: t.expiresAt,
+      createdAt: t.createdAt,
+      createdById: t.createdById,
+      redeemedAt: t.redeemedAt,
+      submissions,
+      participantCount,
+      selesaiCount,
+      mengerjakanCount,
+      flaggedCount,
+      lastActivityAt: tokenLastActivity ? tokenLastActivity.toISOString() : null,
     };
   });
 
-  // Tally counters: belum mulai (token aktif, belum redeem), mengerjakan, selesai.
-  const now = Date.now();
+  // Tally counters across SEMUA submission (peserta), bukan token. Ini lebih
+  // berguna di header dashboard sekarang karena 1 token bisa N peserta.
   const counts = {
-    belumMulai: 0,
-    mengerjakan: 0,
-    selesai: 0,
-    expired: 0,
-    total: withProgress.length,
+    belumMulai: 0, // token aktif yang BELUM ada submission sama sekali
+    mengerjakan: 0, // total peserta yang sedang mengerjakan
+    selesai: 0, // total peserta yang sudah selesai
+    expired: 0, // token kadaluarsa & tanpa submission
+    totalToken: withProgress.length,
+    totalPeserta: 0,
   };
   for (const t of withProgress) {
-    if (t.submission?.finishedAt) counts.selesai += 1;
-    else if (t.submission) counts.mengerjakan += 1;
-    else if (+new Date(t.expiresAt) < now) counts.expired += 1;
-    else counts.belumMulai += 1;
+    counts.mengerjakan += t.mengerjakanCount;
+    counts.selesai += t.selesaiCount;
+    counts.totalPeserta += t.participantCount;
+    if (t.participantCount === 0) {
+      if (+new Date(t.expiresAt) < +now) counts.expired += 1;
+      else counts.belumMulai += 1;
+    }
   }
 
   return NextResponse.json({ tokens: withProgress, counts });

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { randomUUID } from "crypto";
 import { prisma } from "@/lib/db";
 import { signStudentToken } from "@/lib/jwt";
-import { STUDENT_COOKIE } from "@/lib/auth";
+import { STUDENT_COOKIE, getStudentFromRequest } from "@/lib/auth";
 import { getClientIp, rateLimit } from "@/lib/rate-limit";
 import { STUDENT_JWT_EXPIRES_IN } from "@/lib/env";
 
@@ -53,14 +53,25 @@ export async function POST(req: NextRequest) {
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ error: "Invalid input" }, { status: 400 });
   const code = parsed.data.code.trim().toUpperCase();
-  const tok = await prisma.accessToken.findUnique({ where: { code }, include: { submission: true } });
+  const tok = await prisma.accessToken.findUnique({ where: { code } });
   if (!tok) return NextResponse.json({ error: "Token tidak ditemukan" }, { status: 404 });
-  if (tok.expiresAt < new Date() && !tok.submission) {
-    return NextResponse.json({ error: "Token sudah kadaluarsa" }, { status: 410 });
-  }
 
-  let submission = tok.submission;
+  // Class/broadcast token: 1 token = banyak siswa. Tiap browser baru → submission
+  // baru. Browser yang sama (refresh) → resume submission lama lewat cookie
+  // student JWT (sub = submissionId). Token expired hanya melarang submission
+  // BARU; resume submission lama yang sudah jalan tetap diizinkan.
+  const existing = getStudentFromRequest(req);
+  let submission =
+    existing && existing.tokenId === tok.id
+      ? await prisma.submission.findUnique({ where: { id: existing.sub } })
+      : null;
+  // Cookie kadaluarsa / submission dihapus / token beda → buat baru.
+  if (submission && submission.tokenId !== tok.id) submission = null;
+
   if (!submission) {
+    if (tok.expiresAt < new Date()) {
+      return NextResponse.json({ error: "Token sudah kadaluarsa" }, { status: 410 });
+    }
     submission = await prisma.submission.create({
       data: {
         tokenId: tok.id,
@@ -68,10 +79,15 @@ export async function POST(req: NextRequest) {
         randomSeed: randomUUID(),
       },
     });
-    await prisma.accessToken.update({
-      where: { id: tok.id },
-      data: { redeemedAt: new Date() },
-    });
+    // Tandai waktu redeem pertama kali (sekedar informasi untuk admin —
+    // tidak meng-lock token). updateMany dengan filter redeemedAt=null
+    // memastikan idempoten kalau token sudah pernah dipakai siswa lain.
+    if (!tok.redeemedAt) {
+      await prisma.accessToken.updateMany({
+        where: { id: tok.id, redeemedAt: null },
+        data: { redeemedAt: new Date() },
+      });
+    }
   }
 
   const jwtTok = signStudentToken({
