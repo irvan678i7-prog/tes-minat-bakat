@@ -464,11 +464,15 @@ export function estimateIQ(perSubtest: Record<string, { raw: number; max: number
   return Math.max(70, Math.min(145, Math.round(iq)));
 }
 
+// Kategori IQ mengikuti tabel "Penggolongan IQ berdasarkan skala David
+// Wechsler" (Suryani dkk., SNIMed 2019): 7 kategori dengan batas
+// ≥130, 120–129, 110–119, 90–109, 80–89, 70–79, ≤69.
 export function iqInterpretation(iq: number): { band: string; description: string } {
-  if (iq >= 130) return { band: "Sangat Superior", description: "Kemampuan kognitif jauh di atas rata-rata." };
-  if (iq >= 120) return { band: "Superior", description: "Kemampuan kognitif di atas rata-rata." };
-  if (iq >= 110) return { band: "Di Atas Rata-rata", description: "Kemampuan kognitif sedikit di atas rata-rata." };
-  if (iq >= 90) return { band: "Rata-rata", description: "Kemampuan kognitif setara dengan rata-rata populasi." };
-  if (iq >= 80) return { band: "Di Bawah Rata-rata", description: "Kemampuan kognitif sedikit di bawah rata-rata." };
-  return { band: "Rendah", description: "Kemampuan kognitif perlu pendampingan tambahan." };
+  if (iq >= 130) return { band: "Sangat Superior", description: "IQ ≥ 130 — kemampuan kognitif jauh di atas rata-rata." };
+  if (iq >= 120) return { band: "Superior", description: "IQ 120–129 — kemampuan kognitif di atas rata-rata." };
+  if (iq >= 110) return { band: "Di Atas Rata-rata", description: "IQ 110–119 — kemampuan kognitif sedikit di atas rata-rata." };
+  if (iq >= 90) return { band: "Rata-rata", description: "IQ 90–109 — kemampuan kognitif setara dengan rata-rata populasi." };
+  if (iq >= 80) return { band: "Di Bawah Rata-rata", description: "IQ 80–89 — kemampuan kognitif sedikit di bawah rata-rata." };
+  if (iq >= 70) return { band: "Lambat Belajar", description: "IQ 70–79 — cukup di bawah rata-rata, perlu pendampingan belajar." };
+  return { band: "Keterbelakangan Mental", description: "IQ ≤ 69 — jauh di bawah rata-rata, perlu evaluasi profesional." };
 }

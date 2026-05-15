@@ -254,14 +254,17 @@ export type WechslerBand =
   | "Borderline"
   | "Extremely Low";
 
+// Pita kategori IQ mengikuti tabel "Penggolongan IQ berdasarkan skala David
+// Wechsler" (Suryani dkk., SNIMed 2019). Batas IQ: ≥130, 120–129, 110–119,
+// 90–109, 80–89, 70–79, ≤69.
 export function wechslerBand(score: number): WechslerBandInfo {
-  if (score >= 130) return { code: "Very Superior", label: "Sangat Superior", descId: "Jauh di atas rata-rata populasi (top ~2%)." };
-  if (score >= 120) return { code: "Superior", label: "Superior", descId: "Di atas rata-rata populasi (top ~9%)." };
-  if (score >= 110) return { code: "High Average", label: "Di Atas Rata-rata", descId: "Sedikit di atas rata-rata populasi." };
-  if (score >= 90) return { code: "Average", label: "Rata-rata", descId: "Sebanding dengan rata-rata populasi seusia." };
-  if (score >= 80) return { code: "Low Average", label: "Di Bawah Rata-rata", descId: "Sedikit di bawah rata-rata populasi." };
-  if (score >= 70) return { code: "Borderline", label: "Borderline", descId: "Cukup di bawah rata-rata populasi." };
-  return { code: "Extremely Low", label: "Sangat Rendah", descId: "Jauh di bawah rata-rata populasi (bawah ~2%)." };
+  if (score >= 130) return { code: "Very Superior", label: "Sangat Superior", descId: "IQ ≥ 130 — jauh di atas rata-rata populasi." };
+  if (score >= 120) return { code: "Superior", label: "Superior", descId: "IQ 120–129 — di atas rata-rata populasi." };
+  if (score >= 110) return { code: "High Average", label: "Di Atas Rata-rata", descId: "IQ 110–119 — sedikit di atas rata-rata populasi." };
+  if (score >= 90) return { code: "Average", label: "Rata-rata", descId: "IQ 90–109 — sebanding dengan rata-rata populasi seusia." };
+  if (score >= 80) return { code: "Low Average", label: "Di Bawah Rata-rata", descId: "IQ 80–89 — sedikit di bawah rata-rata populasi." };
+  if (score >= 70) return { code: "Borderline", label: "Lambat Belajar", descId: "IQ 70–79 — cukup di bawah rata-rata, perlu pendampingan belajar." };
+  return { code: "Extremely Low", label: "Keterbelakangan Mental", descId: "IQ ≤ 69 — jauh di bawah rata-rata, perlu evaluasi profesional." };
 }
 
 // ── Full Scale IQ ─────────────────────────────────────────────────────────
