@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition, Fragment } from "react";
+import { useEffect, useMemo, useState, useTransition, Fragment } from "react";
 import toast from "react-hot-toast";
 
 type PerSubtest = {
@@ -28,7 +28,7 @@ type Submission = {
   finishedAt: string | null;
   violationCount: number;
   flaggedCheating: boolean;
-  progress: Progress | null;
+  progress: Progress;
 };
 
 type Token = {
@@ -38,7 +38,12 @@ type Token = {
   expiresAt: string;
   createdAt: string;
   redeemedAt: string | null;
-  submission: Submission | null;
+  submissions: Submission[];
+  participantCount: number;
+  selesaiCount: number;
+  mengerjakanCount: number;
+  flaggedCount: number;
+  lastActivityAt: string | null;
 };
 
 type Counts = {
@@ -46,7 +51,8 @@ type Counts = {
   mengerjakan: number;
   selesai: number;
   expired: number;
-  total: number;
+  totalToken: number;
+  totalPeserta: number;
 };
 
 // Render selalu di zona Asia/Jakarta (WIB) supaya konsisten dengan waktu
@@ -130,6 +136,11 @@ function ViolationBadge({ count, flagged }: { count: number; flagged: boolean })
   );
 }
 
+// Interval auto-refresh untuk fetch ke server (peserta baru, progres, dst.)
+// 2 detik = cukup real-time tanpa membebani server. Tick UI (countdown, "x
+// detik lalu") tetap di 1 detik supaya angka bergerak halus.
+const RELOAD_INTERVAL_MS = 2000;
+
 export default function AdminTokens() {
   const [tokens, setTokens] = useState<Token[]>([]);
   const [counts, setCounts] = useState<Counts>({
@@ -137,7 +148,8 @@ export default function AdminTokens() {
     mengerjakan: 0,
     selesai: 0,
     expired: 0,
-    total: 0,
+    totalToken: 0,
+    totalPeserta: 0,
   });
   const [testKind, setTestKind] = useState<"MINAT" | "BAKAT">("BAKAT");
   const [count, setCount] = useState(1);
@@ -145,22 +157,30 @@ export default function AdminTokens() {
   const [includeRedeemed, setIncludeRedeemed] = useState(false);
   const [pending, startTransition] = useTransition();
   const [, setTick] = useState(0);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedToken, setExpandedToken] = useState<string | null>(null);
+  const [lastSync, setLastSync] = useState<number>(0);
+  // window.location.origin di-baca lazy saat user klik tombol SALIN LINK,
+  // bukan disimpan ke state — supaya tidak memicu re-render dari useEffect.
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
 
   const load = () =>
-    fetch(`/api/admin/tokens${includeRedeemed ? "?all=1" : ""}`)
+    fetch(`/api/admin/tokens${includeRedeemed ? "?all=1" : ""}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => {
         setTokens(d.tokens || []);
         if (d.counts) setCounts(d.counts);
+        setLastSync(Date.now());
+      })
+      .catch(() => {
+        /* swallow: polling akan retry siklus berikutnya */
       });
 
   useEffect(() => {
     load();
     const tickId = setInterval(() => setTick((n) => n + 1), 1000);
-    // Reload tiap 3 detik supaya presentase "sedang mengerjakan", "selesai",
-    // dst. terus up-to-date tanpa harus refresh manual.
-    const reloadId = setInterval(load, 3000);
+    // Reload tiap 2 detik supaya peserta baru, progres, dan status selesai
+    // tampil mendekati real-time tanpa admin harus refresh manual.
+    const reloadId = setInterval(load, RELOAD_INTERVAL_MS);
     return () => {
       clearInterval(tickId);
       clearInterval(reloadId);
@@ -184,25 +204,45 @@ export default function AdminTokens() {
       load();
     });
 
-  // Status pengerjaan = semua submission (sedang mengerjakan + selesai),
-  // urut: belum selesai dulu, lalu paling baru aktif.
-  const statusRows = tokens
-    .filter((t) => !!t.submission)
-    .sort((a, b) => {
-      const aDone = !!a.submission?.finishedAt;
-      const bDone = !!b.submission?.finishedAt;
+  // Status pengerjaan: flatten semua submission dari semua token ke 1 list.
+  // Urut: belum selesai dulu, lalu paling baru aktif. Tiap baris = 1 peserta.
+  type Row = { token: Token; sub: Submission };
+  const statusRows: Row[] = useMemo(() => {
+    const rows: Row[] = [];
+    for (const t of tokens) {
+      for (const s of t.submissions) rows.push({ token: t, sub: s });
+    }
+    rows.sort((a, b) => {
+      const aDone = !!a.sub.finishedAt;
+      const bDone = !!b.sub.finishedAt;
       if (aDone !== bDone) return aDone ? 1 : -1;
-      const aLast =
-        a.submission?.progress?.lastActivityAt || a.submission?.startedAt || a.createdAt;
-      const bLast =
-        b.submission?.progress?.lastActivityAt || b.submission?.startedAt || b.createdAt;
+      const aLast = a.sub.progress.lastActivityAt || a.sub.startedAt;
+      const bLast = b.sub.progress.lastActivityAt || b.sub.startedAt;
       return +new Date(bLast) - +new Date(aLast);
     });
+    return rows;
+  }, [tokens]);
+
+  const copyLink = async (code: string) => {
+    const link = `${origin || ""}/k/${code}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      toast.success("Link kelas disalin");
+    } catch {
+      toast.error("Gagal menyalin — copy manual: " + link);
+    }
+  };
+
+  const lastSyncLabel = lastSync ? timeAgo(new Date(lastSync).toISOString()) : "—";
 
   return (
     <div className="space-y-6">
       <div className="brut-card" style={{ background: "#a3e635" }}>
-        <h2 className="text-2xl font-black uppercase mb-3">Generate Token</h2>
+        <h2 className="text-2xl font-black uppercase mb-3">Generate Token Kelas</h2>
+        <p className="text-xs font-bold mb-3 opacity-80">
+          Satu token bisa dipakai BANYAK siswa selama belum kadaluarsa. Share 1 link/kode ke grup
+          kelas — semua peserta otomatis terdaftar dengan submission masing-masing.
+        </p>
         <div className="grid md:grid-cols-4 gap-3 items-end">
           <div>
             <label className="text-xs font-black uppercase block mb-1">Jenis Tes</label>
@@ -216,7 +256,7 @@ export default function AdminTokens() {
             </select>
           </div>
           <div>
-            <label className="text-xs font-black uppercase block mb-1">Jumlah</label>
+            <label className="text-xs font-black uppercase block mb-1">Jumlah Token</label>
             <input
               type="number"
               min={1}
@@ -236,7 +276,7 @@ export default function AdminTokens() {
               value={ttlSec}
               onChange={(e) => setTtlSec(parseInt(e.target.value || "300"))}
             />
-            <p className="text-xs font-bold mt-1">Default 300s = 5 menit</p>
+            <p className="text-xs font-bold mt-1">Default 300s = 5 menit · max 1 jam</p>
           </div>
           <button onClick={generate} disabled={pending} className="brut-btn brut-btn-black">
             {pending ? "BUAT..." : "BUAT TOKEN"}
@@ -244,35 +284,68 @@ export default function AdminTokens() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <div className="brut-card" style={{ background: "#fde047" }}>
-          <p className="text-xs font-black uppercase">Belum Mulai</p>
+          <p className="text-xs font-black uppercase">Token Kosong</p>
           <p className="text-3xl font-black">{counts.belumMulai}</p>
+          <p className="text-xs font-bold opacity-70">aktif · belum ada peserta</p>
         </div>
         <div className="brut-card" style={{ background: "#fb923c" }}>
           <p className="text-xs font-black uppercase">Sedang Mengerjakan</p>
           <p className="text-3xl font-black">{counts.mengerjakan}</p>
+          <p className="text-xs font-bold opacity-70">peserta aktif</p>
         </div>
         <div className="brut-card" style={{ background: "#a3e635" }}>
           <p className="text-xs font-black uppercase">Selesai</p>
           <p className="text-3xl font-black">{counts.selesai}</p>
+          <p className="text-xs font-bold opacity-70">peserta tuntas</p>
         </div>
         <div className="brut-card" style={{ background: "#fca5a5" }}>
-          <p className="text-xs font-black uppercase">Expired (Belum Dipakai)</p>
+          <p className="text-xs font-black uppercase">Expired Kosong</p>
           <p className="text-3xl font-black">{counts.expired}</p>
+          <p className="text-xs font-bold opacity-70">token mati, tanpa peserta</p>
+        </div>
+        <div className="brut-card" style={{ background: "#22d3ee" }}>
+          <p className="text-xs font-black uppercase">Total Peserta</p>
+          <p className="text-3xl font-black">{counts.totalPeserta}</p>
+          <p className="text-xs font-bold opacity-70">di {counts.totalToken} token</p>
         </div>
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h3 className="text-2xl font-black uppercase">Daftar Token</h3>
-        <label className="brut-checkbox">
-          <input
-            type="checkbox"
-            checked={includeRedeemed}
-            onChange={(e) => setIncludeRedeemed(e.target.checked)}
-          />
-          Tampilkan yang sudah dipakai
-        </label>
+        <div className="flex items-center gap-4">
+          <span
+            className="text-xs font-bold"
+            style={{
+              padding: "4px 8px",
+              border: "2px solid #000",
+              background: "#fff",
+            }}
+            title={`Polling tiap ${RELOAD_INTERVAL_MS / 1000} detik`}
+          >
+            <span
+              style={{
+                display: "inline-block",
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: "#22c55e",
+                marginRight: 6,
+                verticalAlign: "middle",
+              }}
+            />
+            LIVE · sync {lastSyncLabel}
+          </span>
+          <label className="brut-checkbox">
+            <input
+              type="checkbox"
+              checked={includeRedeemed}
+              onChange={(e) => setIncludeRedeemed(e.target.checked)}
+            />
+            Tampilkan token kadaluarsa (kosong)
+          </label>
+        </div>
       </div>
 
       <div className="overflow-x-auto">
@@ -286,12 +359,13 @@ export default function AdminTokens() {
               <th>Status</th>
               <th>Peserta</th>
               <th>Pelanggaran</th>
+              <th>Aksi</th>
             </tr>
           </thead>
           <tbody>
             {tokens.length === 0 && (
               <tr>
-                <td colSpan={7} className="text-center font-bold py-6">
+                <td colSpan={8} className="text-center font-bold py-6">
                   Belum ada token aktif.
                 </td>
               </tr>
@@ -299,46 +373,163 @@ export default function AdminTokens() {
             {tokens.map((t) => {
               const tl = timeLeft(t.expiresAt);
               const expired = tl === "EXPIRED";
-              const used = !!t.redeemedAt;
-              const sub = t.submission;
-              const done = !!sub?.finishedAt;
-              const prog = sub?.progress;
+              const hasParticipants = t.participantCount > 0;
+              const allDone = hasParticipants && t.mengerjakanCount === 0;
+              const expanded = expandedToken === t.id;
               return (
-                <tr key={t.id}>
-                  <td className="font-mono font-black">{t.code}</td>
-                  <td>{t.testKind}</td>
-                  <td className={expired ? "text-red-600 font-black" : "font-mono font-bold"}>{tl}</td>
-                  <td>{fmt(t.createdAt)}</td>
-                  <td>
-                    {done ? (
-                      <span className="brut-tag" style={{ background: "#a3e635" }}>SELESAI</span>
-                    ) : sub ? (
-                      <span className="brut-tag" style={{ background: "#fb923c" }}>MENGERJAKAN</span>
-                    ) : expired ? (
-                      <span className="brut-tag" style={{ background: "#ff4d8d" }}>EXPIRED</span>
-                    ) : used ? (
-                      <span className="brut-tag" style={{ background: "#22d3ee" }}>DIPAKAI</span>
-                    ) : (
-                      <span className="brut-tag">AKTIF</span>
-                    )}
-                  </td>
-                  <td>
-                    {sub ? (
+                <Fragment key={t.id}>
+                  <tr>
+                    <td className="font-mono font-black">{t.code}</td>
+                    <td>{t.testKind}</td>
+                    <td className={expired ? "text-red-600 font-black" : "font-mono font-bold"}>
+                      {tl}
+                    </td>
+                    <td className="text-xs">{fmt(t.createdAt)}</td>
+                    <td>
+                      {!hasParticipants && expired ? (
+                        <span className="brut-tag" style={{ background: "#ff4d8d" }}>
+                          EXPIRED
+                        </span>
+                      ) : !hasParticipants ? (
+                        <span className="brut-tag">AKTIF</span>
+                      ) : allDone ? (
+                        <span className="brut-tag" style={{ background: "#a3e635" }}>
+                          SELESAI · {t.selesaiCount}
+                        </span>
+                      ) : (
+                        <span className="brut-tag" style={{ background: "#fb923c" }}>
+                          MENGERJAKAN · {t.mengerjakanCount}
+                        </span>
+                      )}
+                    </td>
+                    <td>
                       <div className="flex flex-col gap-1">
-                        <span className="font-bold">{sub.fullName || "(belum isi nama)"}</span>
-                        {prog && (
+                        <span className="font-black text-lg leading-tight">
+                          {t.participantCount} orang
+                        </span>
+                        {hasParticipants && (
                           <span className="text-xs font-mono opacity-80">
-                            {prog.completed}/{prog.total} subtes
-                            {!done && prog.currentSubtest ? ` · ${prog.currentSubtest}` : ""}
+                            {t.selesaiCount} selesai · {t.mengerjakanCount} mengerjakan
                           </span>
                         )}
                       </div>
-                    ) : (
-                      <span className="opacity-50">—</span>
-                    )}
-                  </td>
-                  <td>{sub ? <ViolationBadge count={sub.violationCount} flagged={sub.flaggedCheating} /> : <span className="opacity-50">—</span>}</td>
-                </tr>
+                    </td>
+                    <td>
+                      {t.flaggedCount > 0 ? (
+                        <span
+                          className="brut-tag"
+                          style={{ background: "#ef4444", color: "#fff" }}
+                          title={`${t.flaggedCount} peserta terdeteksi melanggar / di-flag`}
+                        >
+                          ⚠ {t.flaggedCount}
+                        </span>
+                      ) : (
+                        <span className="brut-tag" style={{ background: "#a3e635" }}>
+                          0
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      <div className="flex flex-col gap-1">
+                        <button
+                          className="brut-btn"
+                          style={{ padding: "4px 8px", fontSize: 11 }}
+                          onClick={() => copyLink(t.code)}
+                          disabled={expired && !hasParticipants}
+                          title="Salin link kelas untuk dibagikan ke grup"
+                        >
+                          SALIN LINK
+                        </button>
+                        {hasParticipants && (
+                          <button
+                            className="brut-btn"
+                            style={{ padding: "4px 8px", fontSize: 11 }}
+                            onClick={() => setExpandedToken(expanded ? null : t.id)}
+                          >
+                            {expanded ? "TUTUP" : `DETAIL (${t.participantCount})`}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                  {expanded && hasParticipants && (
+                    <tr>
+                      <td colSpan={8} style={{ background: "#f5f5f5" }}>
+                        <div className="p-3 space-y-2">
+                          <p className="text-xs font-black uppercase">
+                            Daftar Peserta · {t.participantCount} orang
+                          </p>
+                          <table className="brut-table" style={{ background: "#fff" }}>
+                            <thead>
+                              <tr>
+                                <th>Nama</th>
+                                <th>Kelas / Sekolah</th>
+                                <th>Progres</th>
+                                <th>Mulai</th>
+                                <th>Selesai</th>
+                                <th>Pelanggaran</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {t.submissions.map((s) => {
+                                const prog = s.progress;
+                                const done = !!s.finishedAt;
+                                const percent =
+                                  prog.total > 0
+                                    ? Math.round((prog.completed / prog.total) * 100)
+                                    : 0;
+                                return (
+                                  <tr key={s.id}>
+                                    <td className="font-bold">{s.fullName || "(belum isi nama)"}</td>
+                                    <td className="text-xs">
+                                      {[s.grade, s.school].filter(Boolean).join(" · ") || "—"}
+                                    </td>
+                                    <td style={{ minWidth: 160 }}>
+                                      <div className="flex items-center gap-2">
+                                        <div
+                                          style={{
+                                            flex: 1,
+                                            height: 10,
+                                            border: "2px solid #000",
+                                            background: "#fff",
+                                          }}
+                                        >
+                                          <div
+                                            style={{
+                                              width: `${percent}%`,
+                                              height: "100%",
+                                              background: done ? "#a3e635" : "#fb923c",
+                                            }}
+                                          />
+                                        </div>
+                                        <span className="text-xs font-mono font-bold whitespace-nowrap">
+                                          {prog.completed}/{prog.total}
+                                        </span>
+                                      </div>
+                                      {!done && prog.currentSubtest && (
+                                        <span className="text-xs opacity-70">
+                                          {prog.currentSubtest}
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="text-xs">{fmtShort(s.startedAt)}</td>
+                                    <td className="text-xs">{fmtShort(s.finishedAt)}</td>
+                                    <td>
+                                      <ViolationBadge
+                                        count={s.violationCount}
+                                        flagged={s.flaggedCheating}
+                                      />
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
           </tbody>
@@ -346,8 +537,10 @@ export default function AdminTokens() {
       </div>
 
       <div className="flex items-center justify-between mt-8">
-        <h3 className="text-2xl font-black uppercase">Status Pengerjaan</h3>
-        <span className="text-xs font-bold opacity-70">Auto-refresh tiap 8 detik</span>
+        <h3 className="text-2xl font-black uppercase">Status Pengerjaan (Per Peserta)</h3>
+        <span className="text-xs font-bold opacity-70">
+          Auto-refresh tiap {RELOAD_INTERVAL_MS / 1000} detik · sync {lastSyncLabel}
+        </span>
       </div>
 
       <div className="overflow-x-auto">
@@ -364,130 +557,75 @@ export default function AdminTokens() {
               <th>Mulai</th>
               <th>Selesai</th>
               <th>Pelanggaran</th>
-              <th></th>
             </tr>
           </thead>
           <tbody>
             {statusRows.length === 0 && (
               <tr>
-                <td colSpan={11} className="text-center font-bold py-6">
+                <td colSpan={10} className="text-center font-bold py-6">
                   Belum ada siswa yang mengerjakan.
                 </td>
               </tr>
             )}
-            {statusRows.map((t) => {
-              const sub = t.submission!;
+            {statusRows.map(({ token: t, sub }) => {
               const prog = sub.progress;
               const done = !!sub.finishedAt;
               const percent =
-                prog && prog.total > 0 ? Math.round((prog.completed / prog.total) * 100) : 0;
-              const isOpen = expandedId === t.id;
+                prog.total > 0 ? Math.round((prog.completed / prog.total) * 100) : 0;
               return (
-                <Fragment key={t.id}>
-                  <tr>
-                    <td className="font-bold">{sub.fullName || "(belum isi nama)"}</td>
-                    <td>
-                      {sub.grade || sub.school ? (
-                        <span className="text-xs">
-                          {[sub.grade, sub.school].filter(Boolean).join(" · ")}
-                        </span>
-                      ) : (
-                        <span className="opacity-50">—</span>
-                      )}
-                    </td>
-                    <td className="font-mono">{t.code}</td>
-                    <td>{t.testKind}</td>
-                    <td style={{ minWidth: 160 }}>
-                      <div className="flex items-center gap-2">
+                <tr key={sub.id}>
+                  <td className="font-bold">{sub.fullName || "(belum isi nama)"}</td>
+                  <td>
+                    {sub.grade || sub.school ? (
+                      <span className="text-xs">
+                        {[sub.grade, sub.school].filter(Boolean).join(" · ")}
+                      </span>
+                    ) : (
+                      <span className="opacity-50">—</span>
+                    )}
+                  </td>
+                  <td className="font-mono">{t.code}</td>
+                  <td>{t.testKind}</td>
+                  <td style={{ minWidth: 160 }}>
+                    <div className="flex items-center gap-2">
+                      <div
+                        style={{
+                          flex: 1,
+                          height: 12,
+                          border: "2px solid #000",
+                          background: "#fff",
+                          position: "relative",
+                        }}
+                      >
                         <div
                           style={{
-                            flex: 1,
-                            height: 12,
-                            border: "2px solid #000",
-                            background: "#fff",
-                            position: "relative",
+                            width: `${percent}%`,
+                            height: "100%",
+                            background: done ? "#a3e635" : "#fb923c",
                           }}
-                        >
-                          <div
-                            style={{
-                              width: `${percent}%`,
-                              height: "100%",
-                              background: done ? "#a3e635" : "#fb923c",
-                            }}
-                          />
-                        </div>
-                        <span className="text-xs font-mono font-bold whitespace-nowrap">
-                          {prog?.completed ?? 0}/{prog?.total ?? 0}
-                        </span>
+                        />
                       </div>
-                    </td>
-                    <td>
-                      {done ? (
-                        <span className="brut-tag" style={{ background: "#a3e635" }}>SELESAI</span>
-                      ) : (
-                        <span className="text-xs">{prog?.currentSubtest || "—"}</span>
-                      )}
-                    </td>
-                    <td className="text-xs">{timeAgo(prog?.lastActivityAt ?? null)}</td>
-                    <td className="text-xs">{fmtShort(sub.startedAt)}</td>
-                    <td className="text-xs">{fmtShort(sub.finishedAt)}</td>
-                    <td><ViolationBadge count={sub.violationCount} flagged={sub.flaggedCheating} /></td>
-                    <td>
-                      <button
-                        className="brut-btn"
-                        style={{ padding: "4px 8px", fontSize: 11 }}
-                        onClick={() => setExpandedId(isOpen ? null : t.id)}
-                      >
-                        {isOpen ? "TUTUP" : "DETAIL"}
-                      </button>
-                    </td>
-                  </tr>
-                  {isOpen && prog && (
-                    <tr>
-                      <td colSpan={11} style={{ background: "#f5f5f5" }}>
-                        <div className="p-3">
-                          <p className="text-xs font-black uppercase mb-2">Per Subtes</p>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                            {prog.perSubtest.map((p) => {
-                              const sp =
-                                p.total > 0 ? Math.round((p.answered / p.total) * 100) : 0;
-                              return (
-                                <div
-                                  key={p.code}
-                                  className="flex items-center gap-2 p-2"
-                                  style={{ border: "2px solid #000", background: "#fff" }}
-                                >
-                                  <div style={{ flex: 1 }}>
-                                    <p className="text-xs font-bold leading-tight">{p.name}</p>
-                                    <div
-                                      style={{
-                                        height: 8,
-                                        border: "1.5px solid #000",
-                                        background: "#fff",
-                                        marginTop: 4,
-                                      }}
-                                    >
-                                      <div
-                                        style={{
-                                          width: `${sp}%`,
-                                          height: "100%",
-                                          background: p.done ? "#a3e635" : "#fb923c",
-                                        }}
-                                      />
-                                    </div>
-                                  </div>
-                                  <span className="text-xs font-mono font-bold">
-                                    {p.answered}/{p.total}
-                                  </span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
+                      <span className="text-xs font-mono font-bold whitespace-nowrap">
+                        {prog.completed}/{prog.total}
+                      </span>
+                    </div>
+                  </td>
+                  <td>
+                    {done ? (
+                      <span className="brut-tag" style={{ background: "#a3e635" }}>
+                        SELESAI
+                      </span>
+                    ) : (
+                      <span className="text-xs">{prog.currentSubtest || "—"}</span>
+                    )}
+                  </td>
+                  <td className="text-xs">{timeAgo(prog.lastActivityAt)}</td>
+                  <td className="text-xs">{fmtShort(sub.startedAt)}</td>
+                  <td className="text-xs">{fmtShort(sub.finishedAt)}</td>
+                  <td>
+                    <ViolationBadge count={sub.violationCount} flagged={sub.flaggedCheating} />
+                  </td>
+                </tr>
               );
             })}
           </tbody>

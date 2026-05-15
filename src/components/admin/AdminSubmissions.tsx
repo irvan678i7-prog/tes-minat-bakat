@@ -51,6 +51,19 @@ function violationLabel(t: string): string {
   }
 }
 
+function syncLabel(ts: number): string {
+  if (!ts) return "—";
+  const ms = Date.now() - ts;
+  if (ms < 0) return "—";
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}d lalu`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m lalu`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}j lalu`;
+  return new Date(ts).toLocaleString("id-ID");
+}
+
 function fmt(dt: string | null): string {
   if (!dt) return "—";
   return (
@@ -90,6 +103,11 @@ async function downloadPdf(url: string, fallbackFilename: string): Promise<void>
   setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
 }
 
+// Polling refresh tiap 3 detik supaya dasbor peserta tampak mendekati
+// real-time tanpa membebani server. UI tick di 1 detik supaya label
+// "sync x detik lalu" bergerak halus.
+const REFRESH_INTERVAL_MS = 3000;
+
 export default function AdminSubmissions() {
   const [items, setItems] = useState<Sub[]>([]);
   const [classes, setClasses] = useState<ClassRow[]>([]);
@@ -101,23 +119,32 @@ export default function AdminSubmissions() {
   const [openLogId, setOpenLogId] = useState<string | null>(null);
   const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
   const [rekapBusy, setRekapBusy] = useState(false);
+  const [lastSync, setLastSync] = useState<number>(0);
+  const [, setTick] = useState(0);
   const { confirm, ConfirmModal } = useBrutConfirm();
 
   const refresh = () => {
-    fetch("/api/admin/submissions")
-      .then((r) => r.json())
-      .then((d) => setItems(d.submissions || []));
-    fetch("/api/admin/classes")
-      .then((r) => r.json())
-      .then((d) => setClasses(d.classes || []));
+    // cache: no-store supaya CDN/Browser tidak nge-cache hasil polling —
+    // dasbor admin harus selalu lihat data terbaru tiap siklus.
+    Promise.allSettled([
+      fetch("/api/admin/submissions", { cache: "no-store" })
+        .then((r) => r.json())
+        .then((d) => setItems(d.submissions || [])),
+      fetch("/api/admin/classes", { cache: "no-store" })
+        .then((r) => r.json())
+        .then((d) => setClasses(d.classes || [])),
+    ]).finally(() => setLastSync(Date.now()));
   };
 
   useEffect(() => {
     refresh();
-    // Auto-refresh tiap 5 detik supaya daftar peserta real-time — admin tidak
-    // perlu refresh manual untuk melihat siapa yang baru saja selesai.
-    const id = setInterval(refresh, 5000);
-    return () => clearInterval(id);
+    // Auto-refresh data peserta + tick 1 detik untuk label "x detik lalu".
+    const refreshId = setInterval(refresh, REFRESH_INTERVAL_MS);
+    const tickId = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => {
+      clearInterval(refreshId);
+      clearInterval(tickId);
+    };
   }, []);
 
   const onDelete = async (s: Sub) => {
@@ -247,16 +274,36 @@ export default function AdminSubmissions() {
 
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h3 className="text-2xl font-black uppercase">Daftar Peserta</h3>
-        <label className="brut-checkbox" title="Tampilkan hanya peserta dengan minimal 5 pelanggaran (terdeteksi curang)">
-          <input
-            type="checkbox"
-            checked={onlyFlagged}
-            onChange={(e) => setOnlyFlagged(e.target.checked)}
-          />
-          <span>
-            Hanya tampilkan yang dicurigai ({flaggedCount})
+        <div className="flex items-center gap-3 flex-wrap">
+          <span
+            className="text-xs font-bold"
+            style={{ padding: "4px 8px", border: "2px solid #000", background: "#fff" }}
+            title={`Auto-refresh tiap ${REFRESH_INTERVAL_MS / 1000} detik`}
+          >
+            <span
+              style={{
+                display: "inline-block",
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: "#22c55e",
+                marginRight: 6,
+                verticalAlign: "middle",
+              }}
+            />
+            LIVE · sync {syncLabel(lastSync)}
           </span>
-        </label>
+          <label className="brut-checkbox" title="Tampilkan hanya peserta dengan minimal 5 pelanggaran (terdeteksi curang)">
+            <input
+              type="checkbox"
+              checked={onlyFlagged}
+              onChange={(e) => setOnlyFlagged(e.target.checked)}
+            />
+            <span>
+              Hanya tampilkan yang dicurigai ({flaggedCount})
+            </span>
+          </label>
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="brut-table">

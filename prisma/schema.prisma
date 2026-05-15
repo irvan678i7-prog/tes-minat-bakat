@@ -27,8 +27,11 @@ model AdminUser {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// 5-minute access tokens for students. Token is single-use; once redeemed,
-// a Submission row is created and the token is marked used.
+// Class/broadcast access tokens. SATU token bisa di-redeem oleh BANYAK siswa
+// selama belum kadaluarsa — admin cukup share 1 link/kode ke grup kelas.
+// Refresh di browser yang sama → tetap resume submission lama (lewat cookie).
+// Browser baru / siswa lain → buat Submission baru untuk token yang sama.
+// `redeemedAt` = waktu redeem pertama kali (informasi saja, tidak meng-lock).
 // ───────────────────────────────────────────────────────────────────────────
 model AccessToken {
   id          String      @id @default(cuid())
@@ -39,7 +42,7 @@ model AccessToken {
   createdById String?
   createdBy   AdminUser?  @relation(fields: [createdById], references: [id])
   redeemedAt  DateTime?
-  submission  Submission?
+  submissions Submission[]
 
   @@index([testKind])
 }
@@ -95,7 +98,7 @@ model Question {
 // ───────────────────────────────────────────────────────────────────────────
 model Submission {
   id            String       @id @default(cuid())
-  tokenId       String       @unique
+  tokenId       String
   token         AccessToken  @relation(fields: [tokenId], references: [id])
   testKind      TestKind
   fullName      String?
@@ -117,6 +120,9 @@ model Submission {
   answers       Answer[]
   result        Result?
   subtestProgress SubtestProgress[]
+
+  @@index([tokenId])
+  @@index([finishedAt])
 }
 
 // Per-subtest lock state. Created when student first opens a subtest.
