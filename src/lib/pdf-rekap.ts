@@ -238,13 +238,15 @@ function drawIqDistribution(
 ): number {
   const iqs = rows.map((r) => r.iqEstimate).filter((n): n is number => typeof n === "number");
   if (iqs.length === 0) return yIn;
+  // 7 kategori IQ Wechsler (Suryani dkk., SNIMed 2019).
   const buckets = [
-    { label: "Sangat Rendah (<80)", min: 0, max: 79 },
-    { label: "Rendah (80–89)", min: 80, max: 89 },
+    { label: "Sangat Superior (≥130)", min: 130, max: 999 },
+    { label: "Superior (120–129)", min: 120, max: 129 },
+    { label: "Di Atas Rata-rata (110–119)", min: 110, max: 119 },
     { label: "Rata-rata (90–109)", min: 90, max: 109 },
-    { label: "Atas Rata-rata (110–119)", min: 110, max: 119 },
-    { label: "Tinggi (120–129)", min: 120, max: 129 },
-    { label: "Sangat Tinggi (≥130)", min: 130, max: 999 },
+    { label: "Di Bawah Rata-rata (80–89)", min: 80, max: 89 },
+    { label: "Lambat Belajar (70–79)", min: 70, max: 79 },
+    { label: "Keterbelakangan Mental (≤69)", min: 0, max: 69 },
   ];
   let y = ensureSpace(doc, yIn, 180, margin, doc.internal.pageSize.getHeight());
   doc.setFillColor(BLACK);
