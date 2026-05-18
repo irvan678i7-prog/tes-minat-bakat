@@ -12,6 +12,10 @@ import {
   type IqCategoryScore,
   type ProSubtestScore,
 } from "./scoring-pro";
+import {
+  hitungPenjurusan,
+  type PenjurusanResult,
+} from "./penjurusan";
 
 type Letter = string;
 
@@ -48,6 +52,7 @@ export type ScoringPayload = {
   iqEstimate?: number;
   iqInterpretation?: { band: string; description: string };
   recommendations: { majors: string[]; careers: string[] };
+  penjurusan?: PenjurusanResult & { minatSource: "cross-link" | null };
 };
 
 type AnswerRow = {
@@ -72,6 +77,12 @@ function normalizeText(v: unknown): string {
 type SubWithAnswers = {
   testKind: "BAKAT" | "MINAT";
   answers: AnswerRow[];
+  // Identitas peserta (opsional) — kalau ada dan ini BAKAT, dipakai untuk
+  // cross-link ke submission MINAT milik orang yang sama supaya skor minat
+  // bisa mengoreksi penjurusan IPA / IPS.
+  fullName?: string | null;
+  school?: string | null;
+  grade?: string | null;
 };
 
 /**
@@ -117,19 +128,95 @@ export async function scoreSubmission(submissionId: string): Promise<ScoringPayl
       answers: { include: { question: { include: { subtest: true } } } },
     },
   });
-  return computeScoringPayload(sub);
+  if (sub.testKind === "BAKAT") {
+    const minatBidang = await findMatchingMinatBidangScores({
+      fullName: sub.fullName,
+      school: sub.school,
+      grade: sub.grade,
+    });
+    return computeScoringPayload(
+      {
+        testKind: sub.testKind,
+        answers: sub.answers,
+        fullName: sub.fullName,
+        school: sub.school,
+        grade: sub.grade,
+      },
+      minatBidang,
+    );
+  }
+  return computeScoringPayload({
+    testKind: sub.testKind,
+    answers: sub.answers,
+  });
+}
+
+// Cross-link: cari submission MINAT milik peserta yang sama (fullName +
+// school + grade, case-insensitive). Bila ada, ambil distribusi bidang
+// minat-nya untuk dijadikan koreksi pada penjurusan IPA / IPS.
+export async function findMatchingMinatBidangScores(idents: {
+  fullName: string | null;
+  school: string | null;
+  grade: string | null;
+}): Promise<Record<string, number> | null> {
+  if (!idents.fullName || !idents.school) return null;
+  const where: {
+    testKind: "MINAT";
+    finishedAt: { not: null };
+    fullName: { equals: string; mode: "insensitive" };
+    school: { equals: string; mode: "insensitive" };
+    grade?: { equals: string; mode: "insensitive" };
+  } = {
+    testKind: "MINAT",
+    finishedAt: { not: null },
+    fullName: { equals: idents.fullName, mode: "insensitive" },
+    school: { equals: idents.school, mode: "insensitive" },
+  };
+  if (idents.grade) where.grade = { equals: idents.grade, mode: "insensitive" };
+
+  const candidates = await prisma.submission.findMany({
+    where,
+    include: {
+      result: true,
+      answers: { include: { question: { include: { subtest: true } } } },
+    },
+    orderBy: { finishedAt: "desc" },
+    take: 1,
+  });
+  if (candidates.length === 0) return null;
+  const m = candidates[0];
+  const stored = m.result?.payload as ScoringPayload | null | undefined;
+  if (stored?.minat?.bidangScores) return stored.minat.bidangScores;
+  // Fallback: recompute bidang scores from raw answers.
+  const scores: Record<string, number> = {};
+  for (const ans of m.answers) {
+    if (ans.question.subtest.code !== "MINAT_BIDANG") continue;
+    const raw = ans.selected;
+    const sel = String(Array.isArray(raw) ? (raw[0] as string) : raw).trim().toUpperCase();
+    if (sel) scores[sel] = (scores[sel] || 0) + 1;
+  }
+  return Object.keys(scores).length > 0 ? scores : null;
 }
 
 /**
  * Compute the full scoring payload from a pre-loaded submission. No DB calls.
  * Use this from the finish endpoint to avoid an extra round-trip.
+ * `minatBidang` (opsional) memuat skor bidang MINAT peserta yang sama untuk
+ * mengoreksi penjurusan IPA / IPS — caller wajib menyiapkannya bila ingin
+ * cross-link (mis. via `findMatchingMinatBidangScores`).
  */
-export function computeScoringPayload(sub: SubWithAnswers): ScoringPayload {
-  if (sub.testKind === "BAKAT") return scoreBakat(sub);
+export function computeScoringPayload(
+  sub: SubWithAnswers,
+  minatBidang: Record<string, number> | null = null,
+): ScoringPayload {
+  if (sub.testKind === "BAKAT") return scoreBakat(sub, minatBidang);
   return scoreMinat(sub);
 }
 
-function scoreBakat(sub: SubWithAnswers): ScoringPayload {
+function scoreBakat(
+  sub: SubWithAnswers,
+  minatBidang: Record<string, number> | null,
+): ScoringPayload {
   const grades = gradeAnswerRows(sub.answers);
   const perSubtest: Record<string, { name: string; raw: number; max: number }> = {};
   for (let i = 0; i < sub.answers.length; i++) {
@@ -196,6 +283,8 @@ function scoreBakat(sub: SubWithAnswers): ScoringPayload {
   const majors = Array.from(new Set(profileMatches.flatMap((p) => p.majors))).slice(0, 8);
   const careers = Array.from(new Set(profileMatches.flatMap((p) => p.careers))).slice(0, 8);
 
+  const penjurusan = hitungPenjurusan(perSubtest, minatBidang);
+
   return {
     testKind: "BAKAT",
     perSubtest: out,
@@ -215,6 +304,10 @@ function scoreBakat(sub: SubWithAnswers): ScoringPayload {
     iqEstimate: iq,
     iqInterpretation: interp,
     recommendations: { majors, careers },
+    penjurusan: {
+      ...penjurusan,
+      minatSource: minatBidang ? "cross-link" : null,
+    },
   };
 }
 

@@ -22,6 +22,12 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { ScoringPayload } from "./scoring";
+import {
+  BOBOT_IPA_PCT,
+  BOBOT_IPS_PCT,
+  KOMPONEN_LABEL,
+  type KomponenKode,
+} from "./penjurusan";
 
 type SubmissionInfo = {
   id: string;
@@ -291,16 +297,21 @@ function drawBakatBody(
   // 3) Skor per subtes
   y = drawSubtestTable(doc, payload, margin, y);
 
-  // 4) Rekomendasi (2 kolom)
+  // 4) Penjurusan IPA / IPS (untuk SMA — pada SMK ditampilkan sebagai info pendukung)
+  if (payload.penjurusan) {
+    y = drawPenjurusanBakat(doc, payload, margin, y, pageW);
+  }
+
+  // 5) Rekomendasi (2 kolom)
   y = drawRecommendations(doc, payload, margin, y, pageW);
 
-  // 5) Narasi singkat
+  // 6) Narasi singkat
   const narrative = payload.bakat?.narrative;
   if (narrative) {
     y = drawNarrative(doc, narrative, margin, y, pageW);
   }
 
-  // 6) Disclaimer ringkas
+  // 7) Disclaimer ringkas
   drawDisclaimerOneLine(doc, margin, pageW, pageH);
   return y;
 }
@@ -551,6 +562,141 @@ function drawSubtestTable(
     y,
   );
   return y + 8;
+}
+
+// ── PENJURUSAN IPA / IPS ────────────────────────────────────────────────
+const IPA_FILL = PRIMARY;     // biru langit
+const IPS_FILL = "#EC4899";   // pink-500
+
+function drawPenjurusanBakat(
+  doc: jsPDF,
+  payload: ScoringPayload,
+  margin: number,
+  yIn: number,
+  pageW: number,
+): number {
+  const pj = payload.penjurusan;
+  if (!pj) return yIn;
+  setTextHex(doc, INK);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text("PENJURUSAN IPA / IPS (SMA)", margin, yIn);
+
+  // Tabel komponen + bobot + skor (kompak, 7 baris).
+  const order: KomponenKode[] = ["KUA", "PEN", "SPA", "MEK", "VER", "BHS", "KLE"];
+  const compRows = order.map((k) => [
+    KOMPONEN_LABEL[k],
+    pj.components[k].toFixed(1),
+    BOBOT_IPA_PCT[k] > 0 ? `${BOBOT_IPA_PCT[k]}%` : "—",
+    BOBOT_IPS_PCT[k] > 0 ? `${BOBOT_IPS_PCT[k]}%` : "—",
+  ]);
+  autoTable(doc, {
+    startY: yIn + 4,
+    head: [["Komponen", "Skor (0–100)", "Bobot IPA", "Bobot IPS"]],
+    body: compRows,
+    theme: "plain",
+    styles: {
+      font: "helvetica",
+      fontSize: 8.2,
+      lineWidth: 0.3,
+      lineColor: hexToRGB(HAIRLINE),
+      textColor: hexToRGB(INK),
+      cellPadding: { top: 2.5, bottom: 2.5, left: 8, right: 8 },
+    },
+    headStyles: {
+      fillColor: hexToRGB(INK),
+      textColor: hexToRGB(WHITE),
+      fontStyle: "bold",
+      fontSize: 7.8,
+    },
+    columnStyles: {
+      0: { cellWidth: "auto", fontStyle: "bold" },
+      1: { cellWidth: 70, halign: "center" },
+      2: { cellWidth: 60, halign: "center" },
+      3: { cellWidth: 60, halign: "center" },
+    },
+    alternateRowStyles: { fillColor: hexToRGB(STRIPE) },
+    margin: { left: margin, right: margin },
+  });
+  let y = nextY(doc, yIn + 4) + 8;
+
+  // Dua box skor final IPA & IPS, sejajar.
+  const innerW = pageW - margin * 2;
+  const boxW = (innerW - 12) / 2;
+  drawPenjurusanScoreBox(doc, margin, y, boxW, "SKOR FINAL IPA", pj.finalIPA, pj.kategoriIPA.label, IPA_FILL);
+  drawPenjurusanScoreBox(doc, margin + boxW + 12, y, boxW, "SKOR FINAL IPS", pj.finalIPS, pj.kategoriIPS.label, IPS_FILL);
+  y += 56;
+
+  // Detail bakat + minat.
+  setTextHex(doc, SOFT_INK);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.6);
+  doc.text(
+    `Skor bakat: IPA ${pj.bakatIPA.toFixed(1)}  •  IPS ${pj.bakatIPS.toFixed(1)}.`,
+    margin,
+    y,
+  );
+  y += 10;
+  const minatLine = pj.minat
+    ? `Skor minat (cross-link Tes Minat): IPA ${pj.minat.scoreIPA.toFixed(1)}  •  IPS ${pj.minat.scoreIPS.toFixed(1)}. Skor final = 70% bakat + 30% minat.`
+    : "Data Tes Minat tidak ditemukan untuk peserta ini, skor final memakai 100% skor bakat.";
+  const minatLines = doc.splitTextToSize(minatLine, innerW);
+  doc.text(minatLines, margin, y);
+  y += minatLines.length * 9 + 4;
+
+  // Box rekomendasi.
+  const recH = 32;
+  setFillHex(doc, ACCENT);
+  doc.rect(margin, y, innerW, recH, "F");
+  setDrawHex(doc, INK);
+  doc.setLineWidth(0.6);
+  doc.rect(margin, y, innerW, recH);
+  setTextHex(doc, INK);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.text(`REKOMENDASI: ${pj.rekomendasiLabel.toUpperCase()}`, margin + 8, y + 13);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.6);
+  doc.text(
+    `Selisih (IPA − IPS): ${pj.selisih.toFixed(1)} poin.`,
+    margin + 8,
+    y + 24,
+  );
+  y += recH + 6;
+  setTextHex(doc, SOFT_INK);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.6);
+  const catatanLines = doc.splitTextToSize(pj.catatan, innerW);
+  doc.text(catatanLines, margin, y);
+  y += catatanLines.length * 9 + 8;
+  return y;
+}
+
+function drawPenjurusanScoreBox(
+  doc: jsPDF,
+  x: number,
+  y: number,
+  w: number,
+  label: string,
+  score: number,
+  kategori: string,
+  fill: string,
+): void {
+  setFillHex(doc, fill);
+  doc.rect(x, y, w, 50, "F");
+  setDrawHex(doc, INK);
+  doc.setLineWidth(0.6);
+  doc.rect(x, y, w, 50);
+  setTextHex(doc, WHITE);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7.6);
+  doc.text(label, x + 8, y + 12);
+  doc.setFontSize(22);
+  doc.text(score.toFixed(1), x + 8, y + 34);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.6);
+  const lines = doc.splitTextToSize(kategori, w - 16);
+  doc.text(lines, x + 8, y + 44);
 }
 
 // ── REKOMENDASI (2 kolom) ────────────────────────────────────────────────

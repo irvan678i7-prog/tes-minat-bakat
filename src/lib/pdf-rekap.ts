@@ -67,6 +67,7 @@ export function buildRekapPDF(
     y = drawBakatTable(doc, rows, margin, y);
     y = drawCategoryDistribution(doc, rows, margin, y, pageW);
     y = drawIqDistribution(doc, rows, margin, y, pageW);
+    y = drawPenjurusanDistribution(doc, rows, margin, y, pageW);
   } else {
     y = drawMinatTable(doc, rows, margin, y);
     y = drawBidangDistribution(doc, rows, margin, y, pageW);
@@ -111,7 +112,11 @@ function drawBakatTable(doc: jsPDF, rows: SubmissionRow[], margin: number, yIn: 
     BAKAT_9_FIGURAL: "Fig",
   };
   const head = [
-    ["No", "Nama", "Kelas", "JK", "Usia", "IQ", ...subtestCodes.map((c) => subShort[c] || c), "Top Profil"],
+    [
+      "No", "Nama", "Kelas", "JK", "Usia", "IQ",
+      ...subtestCodes.map((c) => subShort[c] || c),
+      "Top Profil", "IPA", "IPS", "Penjurusan",
+    ],
   ];
   const body = rows.map((r, i) => {
     const subs = subtestCodes.map((c) => {
@@ -119,6 +124,10 @@ function drawBakatTable(doc: jsPDF, rows: SubmissionRow[], margin: number, yIn: 
       return s ? `${s.raw}/${s.max} ${s.categoryCode || ""}` : "—";
     });
     const top = r.payload?.bakat?.topProfiles?.[0]?.name || "—";
+    const pj = r.payload?.penjurusan;
+    const ipa = pj ? pj.finalIPA.toFixed(0) : "—";
+    const ips = pj ? pj.finalIPS.toFixed(0) : "—";
+    const rek = pj ? pj.rekomendasiLabel : "—";
     return [
       String(i + 1),
       r.fullName || "—",
@@ -128,6 +137,9 @@ function drawBakatTable(doc: jsPDF, rows: SubmissionRow[], margin: number, yIn: 
       r.iqEstimate != null ? String(r.iqEstimate) : "—",
       ...subs,
       top,
+      ipa,
+      ips,
+      rek,
     ];
   });
   autoTable(doc, {
@@ -310,6 +322,75 @@ function drawBidangDistribution(
     l,
     String(counts[l] || 0),
     pct(counts[l] || 0, total),
+  ]);
+  autoTable(doc, {
+    startY: y,
+    head,
+    body,
+    theme: "grid",
+    styles: { fontSize: 10, lineWidth: 0.8, lineColor: BLACK, textColor: BLACK, cellPadding: 4 },
+    headStyles: { fillColor: PINK, textColor: BLACK, fontStyle: "bold", lineWidth: 1.2 },
+    margin: { left: margin, right: margin },
+  });
+  // @ts-expect-error - jspdf-autotable extends jsPDF
+  return (doc.lastAutoTable?.finalY ?? y) + 16;
+}
+
+function drawPenjurusanDistribution(
+  doc: jsPDF,
+  rows: SubmissionRow[],
+  margin: number,
+  yIn: number,
+  pageW: number,
+): number {
+  const counts: Record<string, number> = {
+    IPA: 0, IPS: 0, ZONA_FLEKSIBEL: 0, WAWANCARA_BK: 0, PERTIMBANGAN_IPA: 0,
+  };
+  const label: Record<string, string> = {
+    IPA: "IPA",
+    IPS: "IPS",
+    ZONA_FLEKSIBEL: "Zona Fleksibel / Konseling",
+    WAWANCARA_BK: "Wawancara BK",
+    PERTIMBANGAN_IPA: "Pertimbangan IPA",
+  };
+  let total = 0;
+  let sumIPA = 0;
+  let sumIPS = 0;
+  let nScore = 0;
+  for (const r of rows) {
+    const pj = r.payload?.penjurusan;
+    if (!pj) continue;
+    const k = pj.rekomendasiKode;
+    if (k in counts) counts[k] = (counts[k] || 0) + 1;
+    total += 1;
+    sumIPA += pj.finalIPA;
+    sumIPS += pj.finalIPS;
+    nScore += 1;
+  }
+  if (total === 0) return yIn;
+  let y = ensureSpace(doc, yIn, 220, margin, doc.internal.pageSize.getHeight());
+  doc.setFillColor(BLACK);
+  doc.rect(margin, y, pageW - margin * 2, 18, "F");
+  doc.setTextColor(WHITE);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("DISTRIBUSI PENJURUSAN IPA / IPS (PERSENTASE)", margin + 6, y + 13);
+  doc.setTextColor(BLACK);
+  y += 26;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  if (nScore > 0) {
+    doc.text(
+      `Rata-rata skor: IPA ${(sumIPA / nScore).toFixed(1)}    •    IPS ${(sumIPS / nScore).toFixed(1)}    •    n = ${nScore}`,
+      margin, y,
+    );
+  }
+  y += 14;
+  const head = [["Rekomendasi", "Jumlah", "%"]];
+  const body = (Object.keys(counts) as string[]).map((k) => [
+    label[k] || k,
+    String(counts[k] || 0),
+    pct(counts[k] || 0, total),
   ]);
   autoTable(doc, {
     startY: y,
