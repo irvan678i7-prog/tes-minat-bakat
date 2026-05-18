@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getStudentFromRequest, STUDENT_COOKIE } from "@/lib/auth";
-import { computeScoringPayload } from "@/lib/scoring";
+import { computeScoringPayload, findMatchingMinatBidangScores } from "@/lib/scoring";
 
 export async function POST(req: NextRequest) {
   const student = getStudentFromRequest(req);
@@ -24,20 +24,37 @@ export async function POST(req: NextRequest) {
     return res;
   }
 
+  // Cross-link MINAT bidang scores for BAKAT submissions so that the
+  // computed payload includes penjurusan IPA / IPS with the minat correction.
+  const minatBidang =
+    sub.testKind === "BAKAT"
+      ? await findMatchingMinatBidangScores({
+          fullName: sub.fullName,
+          school: sub.school,
+          grade: sub.grade,
+        })
+      : null;
+
   // Compute scoring entirely in memory — no DB round-trips per answer.
-  const payload = computeScoringPayload({
-    testKind: sub.testKind,
-    answers: sub.answers.map((a) => ({
-      selected: a.selected,
-      question: {
-        subtestId: a.question.subtestId,
-        subtest: { code: a.question.subtest.code, name: a.question.subtest.name },
-        parts: a.question.parts,
-        correct: a.question.correct,
-        scoringTag: a.question.scoringTag,
-      },
-    })),
-  });
+  const payload = computeScoringPayload(
+    {
+      testKind: sub.testKind,
+      answers: sub.answers.map((a) => ({
+        selected: a.selected,
+        question: {
+          subtestId: a.question.subtestId,
+          subtest: { code: a.question.subtest.code, name: a.question.subtest.name },
+          parts: a.question.parts,
+          correct: a.question.correct,
+          scoringTag: a.question.scoringTag,
+        },
+      })),
+      fullName: sub.fullName,
+      school: sub.school,
+      grade: sub.grade,
+    },
+    minatBidang,
+  );
   const topProfiles = payload.bakat?.topProfiles.map((p) => p.name);
   const topPrograms = payload.minat?.programs.map((p) => p.bidang);
 
