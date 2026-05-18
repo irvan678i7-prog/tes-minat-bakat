@@ -7,6 +7,10 @@ import {
   estimateIQ,
   iqInterpretation,
 } from "./test-config";
+import {
+  hitungPenjurusan,
+  type PenjurusanResult,
+} from "./penjurusan";
 
 type Letter = string;
 
@@ -33,6 +37,7 @@ export type ScoringPayload = {
   iqEstimate?: number;
   iqInterpretation?: { band: string; description: string };
   recommendations: { majors: string[]; careers: string[] };
+  penjurusan?: PenjurusanResult & { minatSource: "cross-link" | null };
 };
 
 export async function scoreSubmission(submissionId: string): Promise<ScoringPayload> {
@@ -43,15 +48,72 @@ export async function scoreSubmission(submissionId: string): Promise<ScoringPayl
     },
   });
 
-  if (sub.testKind === "BAKAT") return scoreBakat(sub);
+  if (sub.testKind === "BAKAT") {
+    const minatBidang = await findMatchingMinatBidangScores({
+      fullName: sub.fullName,
+      school: sub.school,
+      grade: sub.grade,
+    });
+    return scoreBakat(sub, minatBidang);
+  }
   return scoreMinat(sub);
+}
+
+// Cross-link: cari submission MINAT milik peserta yang sama (fullName +
+// school + grade, case-insensitive). Bila ada, ambil distribusi bidang
+// minat-nya untuk dijadikan koreksi pada penjurusan IPA / IPS.
+async function findMatchingMinatBidangScores(idents: {
+  fullName: string | null;
+  school: string | null;
+  grade: string | null;
+}): Promise<Record<string, number> | null> {
+  if (!idents.fullName || !idents.school) return null;
+  const where: {
+    testKind: "MINAT";
+    finishedAt: { not: null };
+    fullName: { equals: string; mode: "insensitive" };
+    school: { equals: string; mode: "insensitive" };
+    grade?: { equals: string; mode: "insensitive" };
+  } = {
+    testKind: "MINAT",
+    finishedAt: { not: null },
+    fullName: { equals: idents.fullName, mode: "insensitive" },
+    school: { equals: idents.school, mode: "insensitive" },
+  };
+  if (idents.grade) where.grade = { equals: idents.grade, mode: "insensitive" };
+
+  const candidates = await prisma.submission.findMany({
+    where,
+    include: {
+      result: true,
+      answers: { include: { question: { include: { subtest: true } } } },
+    },
+    orderBy: { finishedAt: "desc" },
+    take: 1,
+  });
+  if (candidates.length === 0) return null;
+  const m = candidates[0];
+  const stored = m.result?.payload as ScoringPayload | null | undefined;
+  if (stored?.minat?.bidangScores) return stored.minat.bidangScores;
+  // Fallback: recompute bidang scores from raw answers.
+  const scores: Record<string, number> = {};
+  for (const ans of m.answers) {
+    if (ans.question.subtest.code !== "MINAT_BIDANG") continue;
+    const raw = ans.selected;
+    const sel = String(Array.isArray(raw) ? (raw[0] as string) : raw).trim().toUpperCase();
+    if (sel) scores[sel] = (scores[sel] || 0) + 1;
+  }
+  return Object.keys(scores).length > 0 ? scores : null;
 }
 
 type SubWithAnswers = Awaited<ReturnType<typeof prisma.submission.findUniqueOrThrow>> & {
   answers: { selected: unknown; partialScore: number; isCorrect: boolean; question: { subtestId: string; subtest: { code: string; name: string }; parts: number; correct: unknown; scoringTag: string | null } }[];
 };
 
-function scoreBakat(sub: SubWithAnswers): ScoringPayload {
+function scoreBakat(
+  sub: SubWithAnswers,
+  minatBidang: Record<string, number> | null,
+): ScoringPayload {
   // Aggregate raw counts per subtest from saved answers (we expect Answer.partialScore
   // to already store the per-question score for parts>1 questions; otherwise use isCorrect).
   const perSubtest: Record<string, { name: string; raw: number; max: number }> = {};
@@ -94,6 +156,8 @@ function scoreBakat(sub: SubWithAnswers): ScoringPayload {
   const majors = Array.from(new Set(profileMatches.flatMap((p) => p.majors))).slice(0, 8);
   const careers = Array.from(new Set(profileMatches.flatMap((p) => p.careers))).slice(0, 8);
 
+  const penjurusan = hitungPenjurusan(perSubtest, minatBidang);
+
   return {
     testKind: "BAKAT",
     perSubtest: out,
@@ -109,6 +173,10 @@ function scoreBakat(sub: SubWithAnswers): ScoringPayload {
     iqEstimate: iq,
     iqInterpretation: interp,
     recommendations: { majors, careers },
+    penjurusan: {
+      ...penjurusan,
+      minatSource: minatBidang ? "cross-link" : null,
+    },
   };
 }
 
@@ -123,7 +191,9 @@ function scoreMinat(sub: SubWithAnswers): ScoringPayload {
     if (!perSubtest[code]) perSubtest[code] = { name: ans.question.subtest.name, raw: 0, max: 0 };
     perSubtest[code].max += 1;
     perSubtest[code].raw += 1; // every answered counts
-    const sel = String(Array.isArray(ans.selected) ? (ans.selected[0] as string) : ans.selected);
+    const raw = ans.selected;
+    const sel = String(Array.isArray(raw) ? (raw[0] as string) : raw).trim().toUpperCase();
+    if (!sel) continue;
     if (code === "MINAT_BIDANG") {
       bidangScores[sel] = (bidangScores[sel] || 0) + 1;
     } else if (code.startsWith("MINAT_PROG_")) {
@@ -142,7 +212,7 @@ function scoreMinat(sub: SubWithAnswers): ScoringPayload {
     const code = `MINAT_PROG_${b}`;
     const counts = programLetterCounts[code] || {};
     const ranking = Object.entries(counts)
-      .sort((a, b2) => b2[1] - a[1])
+      .sort((x, y) => y[1] - x[1])
       .slice(0, 3);
     const map = MINAT_BIDANG_TO_PROGRAM[b];
     const topAnswers = ranking.map(([letter, count]) => {
@@ -191,12 +261,9 @@ export async function gradeAnswers(submissionId: string): Promise<void> {
         if (c && c === s) okCount += 1;
       }
       partialScore = okCount;
-      // Per buku Subtes 4 (Penalaran Urutan): kalau salah satu salah → 0.
-      // Subtes 6 (Tiga Dimensi): hitung benar per slot.
-      if (ans.question.subtestId) {
-        // Use heuristic via subtest code already in question
-      }
-      isCorrect = okCount === correct.length;
+      // Tandai isCorrect hanya bila ada kunci dan semua slot benar (jangan
+      // sampai correct=[] menghasilkan isCorrect=true).
+      isCorrect = correct.length > 0 && okCount === correct.length;
     } else if (typeof correct === "string" || typeof correct === "number") {
       const c = String(correct).trim().toUpperCase();
       const s = String(Array.isArray(selected) ? selected[0] : selected ?? "").trim().toUpperCase();

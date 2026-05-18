@@ -1,6 +1,12 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { ScoringPayload } from "./scoring";
+import {
+  BOBOT_IPA_PCT,
+  BOBOT_IPS_PCT,
+  KOMPONEN_LABEL,
+  type KomponenKode,
+} from "./penjurusan";
 
 type SubmissionInfo = {
   id: string;
@@ -127,7 +133,7 @@ function drawBakatSection(
   let y = yIn;
   // Skor per subtes
   y = sectionTitle(doc, "SKOR PER SUBTES", margin, y, pageW);
-  const rows = Object.entries(payload.perSubtest).map(([code, v]) => [
+  const rows = Object.values(payload.perSubtest).map((v) => [
     v.name,
     `${v.raw} / ${v.max}`,
     v.categoryLabel ?? "—",
@@ -201,11 +207,126 @@ function drawBakatSection(
     y += 18;
   }
 
+  // Penjurusan IPA / IPS (untuk SMA — pada SMK ditampilkan sebagai info pendukung).
+  if (payload.penjurusan) {
+    y = ensureSpace(doc, y, 160, margin);
+    y = drawPenjurusanSection(doc, payload, margin, y, pageW);
+  }
+
   // Rekomendasi
   y = ensureSpace(doc, y, 80, margin);
   y = sectionTitle(doc, "REKOMENDASI JURUSAN & PEKERJAAN", margin, y, pageW);
   drawRecommendations(doc, payload, margin, y, pageW);
   return y + 100;
+}
+
+function drawPenjurusanSection(
+  doc: jsPDF,
+  payload: ScoringPayload,
+  margin: number,
+  yIn: number,
+  pageW: number,
+): number {
+  const pj = payload.penjurusan;
+  if (!pj) return yIn;
+  let y = yIn;
+  y = sectionTitle(doc, "PENJURUSAN IPA / IPS (SMA)", margin, y, pageW);
+
+  // Tabel komponen + bobot + skor
+  const komp = pj.components;
+  const order: KomponenKode[] = ["KUA", "PEN", "SPA", "MEK", "VER", "BHS", "KLE"];
+  const rows = order.map((k) => [
+    KOMPONEN_LABEL[k],
+    `${komp[k].toFixed(1)}`,
+    BOBOT_IPA_PCT[k] > 0 ? `${BOBOT_IPA_PCT[k]}%` : "—",
+    BOBOT_IPS_PCT[k] > 0 ? `${BOBOT_IPS_PCT[k]}%` : "—",
+  ]);
+  autoTable(doc, {
+    startY: y,
+    head: [["Komponen", "Skor (0–100)", "Bobot IPA", "Bobot IPS"]],
+    body: rows,
+    theme: "grid",
+    styles: { font: "helvetica", fontSize: 10, lineWidth: 1.2, lineColor: BLACK, textColor: BLACK },
+    headStyles: { fillColor: YELLOW, textColor: BLACK, fontStyle: "bold", lineWidth: 1.5 },
+    margin: { left: margin, right: margin },
+  });
+  // @ts-expect-error jspdf-autotable extends jsPDF instance with lastAutoTable
+  y = (doc.lastAutoTable?.finalY ?? y) + 14;
+
+  // Dua box skor final IPA dan IPS
+  y = ensureSpace(doc, y, 90, margin);
+  const innerW = pageW - margin * 2;
+  const boxW = (innerW - 12) / 2;
+  drawScoreBox(doc, margin, y, boxW, "SKOR FINAL IPA", pj.finalIPA, pj.kategoriIPA.label, CYAN);
+  drawScoreBox(doc, margin + boxW + 12, y, boxW, "SKOR FINAL IPS", pj.finalIPS, pj.kategoriIPS.label, PINK);
+  y += 76;
+
+  // Detail: bakat + minat (bila ada)
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(BLACK);
+  const bakatLine = `Skor bakat: IPA ${pj.bakatIPA.toFixed(1)}, IPS ${pj.bakatIPS.toFixed(1)}.`;
+  doc.text(bakatLine, margin, y);
+  y += 12;
+  if (pj.minat) {
+    doc.text(
+      `Skor minat (cross-link Tes Minat): IPA ${pj.minat.scoreIPA.toFixed(1)}, IPS ${pj.minat.scoreIPS.toFixed(1)}. ` +
+        "Skor final = 70% bakat + 30% minat.",
+      margin, y, { maxWidth: innerW },
+    );
+    y += 22;
+  } else {
+    doc.text(
+      "Data Tes Minat tidak ditemukan untuk peserta ini, skor final memakai 100% skor bakat.",
+      margin, y, { maxWidth: innerW },
+    );
+    y += 18;
+  }
+
+  // Box rekomendasi
+  y = ensureSpace(doc, y, 70, margin);
+  doc.setFillColor(YELLOW);
+  doc.rect(margin, y, innerW, 22, "F");
+  doc.setLineWidth(1.5);
+  doc.setDrawColor(BLACK);
+  doc.rect(margin, y, innerW, 22);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.text(`REKOMENDASI: ${pj.rekomendasiLabel.toUpperCase()}`, margin + 8, y + 15);
+  y += 28;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.text(`Selisih (IPA − IPS): ${pj.selisih.toFixed(1)} poin.`, margin, y);
+  y += 14;
+  doc.text(pj.catatan, margin, y, { maxWidth: innerW });
+  y += 28;
+  return y;
+}
+
+function drawScoreBox(
+  doc: jsPDF,
+  x: number,
+  y: number,
+  w: number,
+  label: string,
+  score: number,
+  kategori: string,
+  fill: string,
+): void {
+  doc.setFillColor(fill);
+  doc.rect(x, y, w, 64, "F");
+  doc.setLineWidth(2);
+  doc.setDrawColor(BLACK);
+  doc.rect(x, y, w, 64);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(BLACK);
+  doc.text(label, x + 8, y + 14);
+  doc.setFontSize(28);
+  doc.text(score.toFixed(1), x + 8, y + 44);
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.text(kategori, x + 8, y + 58, { maxWidth: w - 16 });
 }
 
 function drawMinatSection(
