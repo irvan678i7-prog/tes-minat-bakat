@@ -29,6 +29,15 @@ export async function POST(req: NextRequest) {
   if (sub.finishedAt) return NextResponse.json({ error: "Tes sudah selesai" }, { status: 400 });
   if (!q) return NextResponse.json({ error: "Soal tidak ditemukan" }, { status: 404 });
 
+  // Tolak kalau soal bukan milik testKind submission. Mencegah peserta BAKAT
+  // menyelipkan jawaban untuk soal MINAT (atau sebaliknya).
+  if (q.subtest.testKind !== sub.testKind) {
+    return NextResponse.json(
+      { error: "Soal tidak sesuai dengan jenis tes" },
+      { status: 403 },
+    );
+  }
+
   // Tolak kalau subtes sudah dikunci (waktu habis atau siswa klik Selesai).
   // computeSubtestLock juga akan auto-mark TIME_UP kalau timer lewat.
   const lock = await computeSubtestLock({
