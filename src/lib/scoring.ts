@@ -67,6 +67,45 @@ type AnswerRow = {
   };
 };
 
+/**
+ * Total skor maksimum per subtes berdasarkan SELURUH bank soal subtes
+ * (bukan hanya soal yang dijawab). Wajib dikirim oleh caller agar
+ * perbandingan raw/max dan estimasi IQ tidak bisa "diakali" dengan
+ * menjawab sebagian soal.
+ *
+ * - totalParts: jumlah part / sel "lembar jawaban" gabungan dari semua
+ *   non-example question pada subtes (untuk BAKAT yang punya
+ *   parts > 1 seperti SPASIAL & 3DIMENSI).
+ * - totalQuestions: jumlah baris soal (1 baris = 1 question, terlepas
+ *   dari parts). Dipakai sebagai max untuk MINAT, di mana 1 jawaban =
+ *   1 keterisian.
+ */
+export type SubtestMeta = {
+  code: string;
+  name: string;
+  totalParts: number;
+  totalQuestions: number;
+};
+
+export async function loadSubtestMeta(testKind: "BAKAT" | "MINAT"): Promise<SubtestMeta[]> {
+  const subtests = await prisma.subtest.findMany({
+    where: { testKind },
+    orderBy: { orderIndex: "asc" },
+    include: {
+      questions: {
+        where: { isExample: false },
+        select: { parts: true },
+      },
+    },
+  });
+  return subtests.map((s) => ({
+    code: s.code,
+    name: s.name,
+    totalQuestions: s.questions.length,
+    totalParts: s.questions.reduce((a, q) => a + Math.max(1, q.parts || 1), 0),
+  }));
+}
+
 function normalizeText(v: unknown): string {
   return String(v ?? "")
     .trim()
@@ -128,6 +167,7 @@ export async function scoreSubmission(submissionId: string): Promise<ScoringPayl
       answers: { include: { question: { include: { subtest: true } } } },
     },
   });
+  const subtestMeta = await loadSubtestMeta(sub.testKind);
   if (sub.testKind === "BAKAT") {
     const minatBidang = await findMatchingMinatBidangScores({
       fullName: sub.fullName,
@@ -142,13 +182,17 @@ export async function scoreSubmission(submissionId: string): Promise<ScoringPayl
         school: sub.school,
         grade: sub.grade,
       },
+      subtestMeta,
       minatBidang,
     );
   }
-  return computeScoringPayload({
-    testKind: sub.testKind,
-    answers: sub.answers,
-  });
+  return computeScoringPayload(
+    {
+      testKind: sub.testKind,
+      answers: sub.answers,
+    },
+    subtestMeta,
+  );
 }
 
 // Cross-link: cari submission MINAT milik peserta yang sama (fullName +
@@ -201,37 +245,58 @@ export async function findMatchingMinatBidangScores(idents: {
 /**
  * Compute the full scoring payload from a pre-loaded submission. No DB calls.
  * Use this from the finish endpoint to avoid an extra round-trip.
+ *
+ * `subtestMeta` (WAJIB diisi caller, kecuali dengan sengaja mau pakai mode
+ * fallback "max dari answered") menyediakan total bank soal per subtes.
+ * Ini PENTING agar peserta yang skip sebagian soal tidak mendapat
+ * raw/max = 100% (yang menginflasi IQ).
+ *
  * `minatBidang` (opsional) memuat skor bidang MINAT peserta yang sama untuk
  * mengoreksi penjurusan IPA / IPS — caller wajib menyiapkannya bila ingin
  * cross-link (mis. via `findMatchingMinatBidangScores`).
  */
 export function computeScoringPayload(
   sub: SubWithAnswers,
+  subtestMeta: SubtestMeta[] | null = null,
   minatBidang: Record<string, number> | null = null,
 ): ScoringPayload {
-  if (sub.testKind === "BAKAT") return scoreBakat(sub, minatBidang);
-  return scoreMinat(sub);
+  if (sub.testKind === "BAKAT") return scoreBakat(sub, subtestMeta, minatBidang);
+  return scoreMinat(sub, subtestMeta);
 }
 
 function scoreBakat(
   sub: SubWithAnswers,
+  subtestMeta: SubtestMeta[] | null,
   minatBidang: Record<string, number> | null,
 ): ScoringPayload {
   const grades = gradeAnswerRows(sub.answers);
-
-  // Ambil total max dari SELURUH bank soal per subtes BAKAT dari DB-agnostic
-  // approach: hitung dari answer yang ada, tapi JUGA pastikan subtes yang
-  // tidak ada jawabannya tetap masuk dengan raw=0. Karena fungsi ini
-  // dipanggil in-memory (tanpa akses DB tambahan), kita pakai data jawaban
-  // + fallback ke 0. Catatan: idealnya caller menyediakan subtestMeta,
-  // tapi untuk menjaga backward compat kita tetap hitung dari answers.
   const perSubtest: Record<string, { name: string; raw: number; max: number }> = {};
+
+  // Seed dari subtestMeta supaya `max` = total bank soal real (bukan dari
+  // answered). Subtes yang tidak dikerjakan tetap muncul dengan raw=0,
+  // max=totalParts → ratio 0% → IQ-nya tidak bisa di-inflate.
+  if (subtestMeta) {
+    for (const m of subtestMeta) {
+      perSubtest[m.code] = { name: m.name, raw: 0, max: m.totalParts };
+    }
+  }
+
   for (let i = 0; i < sub.answers.length; i++) {
     const ans = sub.answers[i];
     const g = grades[i];
     const code = ans.question.subtest.code;
-    if (!perSubtest[code]) perSubtest[code] = { name: ans.question.subtest.name, raw: 0, max: 0 };
-    perSubtest[code].max += Math.max(1, ans.question.parts || 1);
+    if (!perSubtest[code]) {
+      // Subtes asing (mis. data lama / mismatch testKind, atau
+      // subtestMeta tidak diberikan untuk backward compat). Akumulasi
+      // max dari parts answered — perilaku lama.
+      perSubtest[code] = { name: ans.question.subtest.name, raw: 0, max: 0 };
+    }
+    if (!subtestMeta) {
+      // Fallback mode (caller tidak menyediakan meta): max diakumulasi
+      // dari parts answered. Hanya untuk backward compat — caller
+      // produksi WAJIB mengirim subtestMeta.
+      perSubtest[code].max += Math.max(1, ans.question.parts || 1);
+    }
     if (ans.question.parts && ans.question.parts > 1) {
       perSubtest[code].raw += g.partialScore || 0;
     } else {
@@ -318,17 +383,32 @@ function scoreBakat(
   };
 }
 
-function scoreMinat(sub: SubWithAnswers): ScoringPayload {
+function scoreMinat(
+  sub: SubWithAnswers,
+  subtestMeta: SubtestMeta[] | null,
+): ScoringPayload {
   // Bidang counts: tally letters chosen on MINAT_BIDANG subtest.
   const bidangScores: Record<Letter, number> = {};
   const programLetterCounts: Record<string, Record<Letter, number>> = {};
   const perSubtest: Record<string, { name: string; raw: number; max: number }> = {};
 
+  // Seed perSubtest dengan max = total soal subtes (dari bank), bukan dari
+  // jumlah jawaban. Subtes tanpa jawaban tetap muncul dengan raw=0.
+  if (subtestMeta) {
+    for (const m of subtestMeta) {
+      perSubtest[m.code] = { name: m.name, raw: 0, max: m.totalQuestions };
+    }
+  }
+
   for (const ans of sub.answers) {
     const code = ans.question.subtest.code;
-    if (!perSubtest[code]) perSubtest[code] = { name: ans.question.subtest.name, raw: 0, max: 0 };
-    perSubtest[code].max += 1;
-    // MINAT: raw = jumlah jawaban tidak kosong (bukan "setiap jawaban = 1").
+    if (!perSubtest[code]) {
+      perSubtest[code] = { name: ans.question.subtest.name, raw: 0, max: 0 };
+    }
+    if (!subtestMeta) {
+      // Fallback (caller tidak kirim meta): max ikut +1 setiap jawaban.
+      perSubtest[code].max += 1;
+    }
     const sel = String(Array.isArray(ans.selected) ? (ans.selected[0] as string) : ans.selected).trim().toUpperCase();
     if (sel) perSubtest[code].raw += 1;
     if (code === "MINAT_BIDANG") {

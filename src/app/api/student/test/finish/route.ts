@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getStudentFromRequest, clearStudentCookie } from "@/lib/auth";
-import { computeScoringPayload, findMatchingMinatBidangScores } from "@/lib/scoring";
+import {
+  computeScoringPayload,
+  findMatchingMinatBidangScores,
+  loadSubtestMeta,
+} from "@/lib/scoring";
 
 export async function POST(req: NextRequest) {
   const student = getStudentFromRequest(req);
@@ -24,16 +28,20 @@ export async function POST(req: NextRequest) {
     return res;
   }
 
-  // Cross-link MINAT bidang scores for BAKAT submissions so that the
-  // computed payload includes penjurusan IPA / IPS with the minat correction.
-  const minatBidang =
+  // Load paralel: cross-link MINAT bidang (untuk BAKAT) + subtestMeta
+  // (jumlah soal asli per subtes — sumber otoritatif untuk `max` di
+  // perSubtest, supaya peserta yang skip soal tidak mendapat ratio
+  // raw/max = 100% yang menginflasi IQ).
+  const [minatBidang, subtestMeta] = await Promise.all([
     sub.testKind === "BAKAT"
-      ? await findMatchingMinatBidangScores({
+      ? findMatchingMinatBidangScores({
           fullName: sub.fullName,
           school: sub.school,
           grade: sub.grade,
         })
-      : null;
+      : Promise.resolve(null),
+    loadSubtestMeta(sub.testKind),
+  ]);
 
   // Compute scoring entirely in memory — no DB round-trips per answer.
   const payload = computeScoringPayload(
@@ -53,6 +61,7 @@ export async function POST(req: NextRequest) {
       school: sub.school,
       grade: sub.grade,
     },
+    subtestMeta,
     minatBidang,
   );
   const topProfiles = payload.bakat?.topProfiles.map((p) => p.name);
