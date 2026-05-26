@@ -33,19 +33,22 @@ export default function AdminLoginPage() {
       // server crash 500 dengan HTML), kita tetap bisa tampilkan info
       // berguna ke user — bukan toast "Login gagal" yang hampa.
       const text = await res.text();
-      let data: { error?: string; name?: string; email?: string } = {};
+      let data: { error?: string; detail?: string; name?: string; email?: string } = {};
       try {
         data = text ? JSON.parse(text) : {};
       } catch {
         data = {};
       }
       if (!res.ok) {
-        const msg =
+        const base =
           data.error ||
           `Login gagal (HTTP ${res.status}${
             res.status >= 500 ? " — error server, cek Vercel logs" : ""
           }).`;
-        toast.error(msg);
+        // Untuk error 500 (server crash), tampilkan detail asli dari server
+        // supaya admin tahu env mana yang salah TANPA harus buka Vercel logs.
+        const msg = data.detail ? `${base}\n\nDetail: ${data.detail}` : base;
+        toast.error(msg, { duration: 8000, style: { maxWidth: 520 } });
         return;
       }
       toast.success(`Halo, ${data.name}!`);
@@ -83,6 +86,14 @@ export default function AdminLoginPage() {
           <button type="submit" className="brut-btn brut-btn-black w-full" disabled={pending}>
             {pending ? "MASUK..." : "MASUK"}
           </button>
+          <a
+            href="/api/admin/diagnose"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block text-center text-xs font-bold uppercase underline opacity-70 mt-2"
+          >
+            Diagnosa Konfigurasi Server →
+          </a>
         </form>
       </div>
     </div>
