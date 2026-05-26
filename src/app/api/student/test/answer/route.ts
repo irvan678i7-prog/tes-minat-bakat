@@ -18,8 +18,20 @@ export async function POST(req: NextRequest) {
   if (!sub) return NextResponse.json({ error: "Submission tidak ditemukan" }, { status: 404 });
   if (sub.finishedAt) return NextResponse.json({ error: "Tes sudah selesai" }, { status: 400 });
 
-  const q = await prisma.question.findUnique({ where: { id: parsed.data.questionId } });
+  // Penting: pastikan soal yang dijawab benar-benar milik testKind submission.
+  // Tanpa cek ini, peserta BAKAT bisa "menyelipkan" jawaban untuk soal MINAT
+  // (atau sebaliknya), yang akan mencemari perhitungan skor & estimasi IQ.
+  const q = await prisma.question.findUnique({
+    where: { id: parsed.data.questionId },
+    include: { subtest: { select: { testKind: true } } },
+  });
   if (!q) return NextResponse.json({ error: "Soal tidak ditemukan" }, { status: 404 });
+  if (q.subtest.testKind !== sub.testKind) {
+    return NextResponse.json(
+      { error: "Soal tidak sesuai dengan jenis tes" },
+      { status: 403 },
+    );
+  }
 
   await prisma.answer.upsert({
     where: { submissionId_questionId: { submissionId: sub.id, questionId: q.id } },

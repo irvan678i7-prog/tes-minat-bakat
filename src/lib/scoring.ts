@@ -40,6 +40,28 @@ export type ScoringPayload = {
   penjurusan?: PenjurusanResult & { minatSource: "cross-link" | null };
 };
 
+/**
+ * Total skor maksimum per subtes berdasarkan SELURUH bank soal subtes
+ * (bukan hanya soal yang dijawab). Ini penting agar perbandingan raw/max
+ * dan estimasi IQ tidak bisa "diakali" dengan menjawab sebagian soal.
+ */
+type SubtestMeta = { id: string; code: string; name: string; max: number; total: number };
+
+async function loadSubtestMaxes(testKind: "BAKAT" | "MINAT"): Promise<SubtestMeta[]> {
+  const subtests = await prisma.subtest.findMany({
+    where: { testKind },
+    orderBy: { orderIndex: "asc" },
+    include: { questions: { select: { parts: true } } },
+  });
+  return subtests.map((s) => ({
+    id: s.id,
+    code: s.code,
+    name: s.name,
+    total: s.questions.length,
+    max: s.questions.reduce((a, q) => a + Math.max(1, q.parts || 1), 0),
+  }));
+}
+
 export async function scoreSubmission(submissionId: string): Promise<ScoringPayload> {
   const sub = await prisma.submission.findUniqueOrThrow({
     where: { id: submissionId },
@@ -48,15 +70,17 @@ export async function scoreSubmission(submissionId: string): Promise<ScoringPayl
     },
   });
 
+  const subtestMeta = await loadSubtestMaxes(sub.testKind);
+
   if (sub.testKind === "BAKAT") {
     const minatBidang = await findMatchingMinatBidangScores({
       fullName: sub.fullName,
       school: sub.school,
       grade: sub.grade,
     });
-    return scoreBakat(sub, minatBidang);
+    return scoreBakat(sub, subtestMeta, minatBidang);
   }
-  return scoreMinat(sub);
+  return scoreMinat(sub, subtestMeta);
 }
 
 // Cross-link: cari submission MINAT milik peserta yang sama (fullName +
@@ -112,15 +136,25 @@ type SubWithAnswers = Awaited<ReturnType<typeof prisma.submission.findUniqueOrTh
 
 function scoreBakat(
   sub: SubWithAnswers,
+  subtestMeta: SubtestMeta[],
   minatBidang: Record<string, number> | null,
 ): ScoringPayload {
-  // Aggregate raw counts per subtest from saved answers (we expect Answer.partialScore
-  // to already store the per-question score for parts>1 questions; otherwise use isCorrect).
+  // Seed perSubtest dari SELURUH subtes BAKAT supaya `max` mencerminkan
+  // total ekspektasi soal. raw akan diisi nol untuk subtes yang tidak
+  // dikerjakan — sehingga peserta yang melompati subtes tidak otomatis
+  // mendapat ratio 100% / IQ inflasi.
   const perSubtest: Record<string, { name: string; raw: number; max: number }> = {};
+  for (const meta of subtestMeta) {
+    perSubtest[meta.code] = { name: meta.name, raw: 0, max: meta.max };
+  }
+
   for (const ans of sub.answers) {
     const code = ans.question.subtest.code;
-    if (!perSubtest[code]) perSubtest[code] = { name: ans.question.subtest.name, raw: 0, max: 0 };
-    perSubtest[code].max += Math.max(1, ans.question.parts || 1);
+    if (!perSubtest[code]) {
+      // Subtes asing (mis. data lama / mismatch testKind) — abaikan agar
+      // tidak mencemari skor BAKAT.
+      continue;
+    }
     if (ans.question.parts && ans.question.parts > 1) {
       perSubtest[code].raw += ans.partialScore || 0;
     } else {
@@ -180,19 +214,25 @@ function scoreBakat(
   };
 }
 
-function scoreMinat(sub: SubWithAnswers): ScoringPayload {
+function scoreMinat(sub: SubWithAnswers, subtestMeta: SubtestMeta[]): ScoringPayload {
   // Bidang counts: tally letters chosen on MINAT_BIDANG subtest.
   const bidangScores: Record<Letter, number> = {};
   const programLetterCounts: Record<string, Record<Letter, number>> = {};
   const perSubtest: Record<string, { name: string; raw: number; max: number }> = {};
 
+  // Seed perSubtest dengan max = total soal subtes. raw kemudian diisi
+  // dengan jumlah jawaban TIDAK KOSONG (MINAT tidak punya jawaban benar /
+  // salah — yang dihitung adalah keterisian).
+  for (const meta of subtestMeta) {
+    perSubtest[meta.code] = { name: meta.name, raw: 0, max: meta.total };
+  }
+
   for (const ans of sub.answers) {
     const code = ans.question.subtest.code;
-    if (!perSubtest[code]) perSubtest[code] = { name: ans.question.subtest.name, raw: 0, max: 0 };
-    perSubtest[code].max += 1;
-    perSubtest[code].raw += 1; // every answered counts
+    if (!perSubtest[code]) continue;
     const raw = ans.selected;
     const sel = String(Array.isArray(raw) ? (raw[0] as string) : raw).trim().toUpperCase();
+    if (sel) perSubtest[code].raw += 1;
     if (!sel) continue;
     if (code === "MINAT_BIDANG") {
       bidangScores[sel] = (bidangScores[sel] || 0) + 1;

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { getStudentFromRequest, STUDENT_COOKIE } from "@/lib/auth";
+import { clearStudentCookie, getStudentFromRequest } from "@/lib/auth";
 import { gradeAnswers, scoreSubmission } from "@/lib/scoring";
 
 export async function POST(req: NextRequest) {
@@ -11,6 +11,39 @@ export async function POST(req: NextRequest) {
   const sub = await prisma.submission.findUnique({ where: { id: student.sub } });
   if (!sub) return NextResponse.json({ error: "Submission tidak ditemukan" }, { status: 404 });
   if (sub.finishedAt) return NextResponse.json({ ok: true, alreadyFinished: true });
+
+  // Defense in depth: tolak finish kalau masih ada subtes yang punya soal
+  // tetapi belum semua dijawab. UI sudah memblokir di TestHub, tapi jangan
+  // bergantung pada client.
+  const subtests = await prisma.subtest.findMany({
+    where: { testKind: sub.testKind },
+    select: { id: true, code: true, name: true, _count: { select: { questions: true } } },
+  });
+  const answers = await prisma.answer.findMany({
+    where: { submissionId: sub.id },
+    select: { question: { select: { subtestId: true } } },
+  });
+  const answeredCount: Record<string, number> = {};
+  for (const a of answers) {
+    answeredCount[a.question.subtestId] = (answeredCount[a.question.subtestId] || 0) + 1;
+  }
+  const incomplete = subtests
+    .filter((s) => s._count.questions > 0 && (answeredCount[s.id] || 0) < s._count.questions)
+    .map((s) => ({
+      code: s.code,
+      name: s.name,
+      total: s._count.questions,
+      answered: answeredCount[s.id] || 0,
+    }));
+  if (incomplete.length > 0) {
+    return NextResponse.json(
+      {
+        error: "Masih ada subtes yang belum selesai dijawab",
+        incomplete,
+      },
+      { status: 400 },
+    );
+  }
 
   await prisma.submission.update({
     where: { id: sub.id },
@@ -41,6 +74,6 @@ export async function POST(req: NextRequest) {
 
   const res = NextResponse.json({ ok: true });
   // Sign out the student session — they cannot redo the test.
-  res.cookies.set(STUDENT_COOKIE, "", { path: "/", maxAge: 0 });
+  clearStudentCookie(res);
   return res;
 }

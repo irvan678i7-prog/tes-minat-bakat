@@ -111,7 +111,7 @@ model Answer {
   submissionId  String
   submission    Submission  @relation(fields: [submissionId], references: [id], onDelete: Cascade)
   questionId    String
-  question      Question    @relation(fields: [questionId], references: [id])
+  question      Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
   selected      Json
   partialScore  Float       @default(0)
   isCorrect     Boolean     @default(false)

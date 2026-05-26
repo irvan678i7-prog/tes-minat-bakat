@@ -36,6 +36,7 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
 
   return (
     <SubtestRunner
+      submissionId={sub.id}
       subtest={{
         code: subtest.code,
         name: subtest.name,

@@ -15,7 +15,8 @@ type Question = {
   options: unknown;
 };
 
-const STORAGE_KEY = (subtestCode: string) => `tmb-runner-${subtestCode}`;
+const STORAGE_KEY = (submissionId: string, subtestCode: string) =>
+  `tmb-runner-${submissionId}-${subtestCode}`;
 
 function fmtTime(s: number): string {
   if (s < 0) s = 0;
@@ -25,10 +26,12 @@ function fmtTime(s: number): string {
 }
 
 export default function SubtestRunner({
+  submissionId,
   subtest,
   questions,
   existingAnswers,
 }: {
+  submissionId: string;
   subtest: { code: string; name: string; description: string; durationSec: number };
   questions: Question[];
   existingAnswers: Record<string, unknown>;
@@ -54,19 +57,27 @@ export default function SubtestRunner({
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const saved = window.localStorage.getItem(STORAGE_KEY(subtest.code));
+    const key = STORAGE_KEY(submissionId, subtest.code);
+    // Bersihkan entri lama (skema sebelum di-namespace per submission) supaya
+    // peserta tidak mewarisi timer dari sesi/peserta lain di browser ini.
+    try {
+      window.localStorage.removeItem(`tmb-runner-${subtest.code}`);
+    } catch {
+      // ignore (storage disabled)
+    }
+    const saved = window.localStorage.getItem(key);
     let s: number;
     if (saved) {
       s = parseInt(saved);
     } else {
       s = Date.now();
-      window.localStorage.setItem(STORAGE_KEY(subtest.code), String(s));
+      window.localStorage.setItem(key, String(s));
     }
     const update = () => setTick({ startedAt: s, now: Date.now() });
     update();
     const id = setInterval(update, 1000);
     return () => clearInterval(id);
-  }, [subtest.code]);
+  }, [subtest.code, submissionId]);
 
   const elapsed = tick ? Math.floor((tick.now - tick.startedAt) / 1000) : 0;
   const remaining = subtest.durationSec - elapsed;
@@ -111,7 +122,7 @@ export default function SubtestRunner({
   const goPrev = () => setIdx((i) => Math.max(i - 1, 0));
   const finishSub = async () => {
     if (typeof window !== "undefined") {
-      window.localStorage.removeItem(STORAGE_KEY(subtest.code));
+      window.localStorage.removeItem(STORAGE_KEY(submissionId, subtest.code));
     }
     toast.success("Subtes selesai. Kembali ke daftar.");
     router.push("/test");

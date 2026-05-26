@@ -3,18 +3,43 @@ import { z } from "zod";
 import { randomUUID } from "crypto";
 import { prisma } from "@/lib/db";
 import { signStudentToken } from "@/lib/jwt";
-import { STUDENT_COOKIE } from "@/lib/auth";
+import { setStudentCookie } from "@/lib/auth";
 
-const Body = z.object({ code: z.string().min(1) });
+const Body = z.object({
+  code: z
+    .string()
+    .min(1)
+    .max(32)
+    .transform((s) => s.trim().toUpperCase()),
+  // testKind diambil dari kartu tombol di halaman utama. Bila dikirim, kami
+  // wajib memvalidasi cocok dengan jenis tes yang sebenarnya milik token,
+  // dan TIDAK boleh memasang cookie student kalau mismatch.
+  testKind: z.enum(["MINAT", "BAKAT"]).optional(),
+});
 
 export async function POST(req: NextRequest) {
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ error: "Invalid input" }, { status: 400 });
-  const code = parsed.data.code.trim().toUpperCase();
-  const tok = await prisma.accessToken.findUnique({ where: { code }, include: { submission: true } });
+  const { code, testKind: requestedKind } = parsed.data;
+
+  const tok = await prisma.accessToken.findUnique({
+    where: { code },
+    include: { submission: true },
+  });
   if (!tok) return NextResponse.json({ error: "Token tidak ditemukan" }, { status: 404 });
   if (tok.expiresAt < new Date() && !tok.submission) {
     return NextResponse.json({ error: "Token sudah kadaluarsa" }, { status: 410 });
+  }
+  if (requestedKind && requestedKind !== tok.testKind) {
+    // Jangan set cookie. Kembalikan testKind sebenarnya supaya UI bisa
+    // mengarahkan peserta ke kartu yang benar.
+    return NextResponse.json(
+      {
+        error: `Token ini untuk ${tok.testKind}, bukan ${requestedKind}.`,
+        testKind: tok.testKind,
+      },
+      { status: 409 },
+    );
   }
 
   let submission = tok.submission;
@@ -45,12 +70,6 @@ export async function POST(req: NextRequest) {
     profileFilled: !!submission.fullName,
     finishedAt: submission.finishedAt,
   });
-  res.cookies.set(STUDENT_COOKIE, jwtTok, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 3 * 60 * 60,
-  });
+  setStudentCookie(res, jwtTok);
   return res;
 }
