@@ -7,7 +7,12 @@ const Body = z.object({
   fullName: z.string().min(1),
   gender: z.string().min(1),
   birthPlace: z.string().optional(),
-  birthDate: z.string().optional(),
+  birthDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Tanggal lahir harus format YYYY-MM-DD")
+    .refine((s) => !Number.isNaN(new Date(s).getTime()), "Tanggal lahir tidak valid")
+    .optional()
+    .or(z.literal("")),
   age: z.number().int().min(5).max(99).optional(),
   grade: z.string().optional(),
   school: z.string().min(1),

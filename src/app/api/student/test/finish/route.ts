@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { getStudentFromRequest, STUDENT_COOKIE } from "@/lib/auth";
+import { getStudentFromRequest, clearStudentCookie } from "@/lib/auth";
 import { computeScoringPayload, findMatchingMinatBidangScores } from "@/lib/scoring";
 
 export async function POST(req: NextRequest) {
@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
   if (!sub) return NextResponse.json({ error: "Submission tidak ditemukan" }, { status: 404 });
   if (sub.finishedAt) {
     const res = NextResponse.json({ ok: true, alreadyFinished: true });
-    res.cookies.set(STUDENT_COOKIE, "", { path: "/", maxAge: 0 });
+    clearStudentCookie(res);
     return res;
   }
 
@@ -84,6 +84,6 @@ export async function POST(req: NextRequest) {
 
   const res = NextResponse.json({ ok: true });
   // Sign out the student session — they cannot redo the test.
-  res.cookies.set(STUDENT_COOKIE, "", { path: "/", maxAge: 0 });
+  clearStudentCookie(res);
   return res;
 }

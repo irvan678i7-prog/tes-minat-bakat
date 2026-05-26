@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { ADMIN_COOKIE } from "@/lib/auth";
+import { clearAdminCookie } from "@/lib/auth";
 
 export async function POST() {
   const res = NextResponse.json({ ok: true });
-  res.cookies.set(ADMIN_COOKIE, "", { path: "/", maxAge: 0 });
+  clearAdminCookie(res);
   return res;
 }

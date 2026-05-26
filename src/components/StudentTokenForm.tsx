@@ -17,15 +17,11 @@ export default function StudentTokenForm({ testKind }: { testKind: "MINAT" | "BA
       const res = await fetch("/api/student/redeem", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: trimmed }),
+        body: JSON.stringify({ code: trimmed, testKind }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         toast.error(data.error || "Gagal validasi token");
-        return;
-      }
-      if (data.testKind !== testKind) {
-        toast.error(`Token ini untuk ${data.testKind}, bukan ${testKind}.`);
         return;
       }
       if (data.finishedAt) {

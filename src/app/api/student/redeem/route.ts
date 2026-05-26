@@ -10,7 +10,13 @@ import { STUDENT_JWT_EXPIRES_IN } from "@/lib/env";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const Body = z.object({ code: z.string().min(1).max(32) });
+const Body = z.object({
+  code: z.string().min(1).max(32),
+  // Bila dikirim, server validasi cocok dengan jenis token. Mismatch → 409,
+  // cookie TIDAK diset — mencegah peserta yang salah klik kartu tetap
+  // masuk ke jenis tes yang salah.
+  testKind: z.enum(["MINAT", "BAKAT"]).optional(),
+});
 
 // 20 percobaan redeem / 5 menit per IP. Token 8 karakter dari alfabet 32 huruf
 // = 32^8 ≈ 1.1 triliun kombinasi — brute-force tidak realistis, tapi limit ini
@@ -53,8 +59,17 @@ export async function POST(req: NextRequest) {
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ error: "Invalid input" }, { status: 400 });
   const code = parsed.data.code.trim().toUpperCase();
+  const requestedKind = parsed.data.testKind;
   const tok = await prisma.accessToken.findUnique({ where: { code } });
   if (!tok) return NextResponse.json({ error: "Token tidak ditemukan" }, { status: 404 });
+
+  // Validasi testKind sebelum set cookie. Tolak bila mismatch.
+  if (requestedKind && requestedKind !== tok.testKind) {
+    return NextResponse.json(
+      { error: `Token ini untuk ${tok.testKind}, bukan ${requestedKind}.`, testKind: tok.testKind },
+      { status: 409 },
+    );
+  }
 
   // Class/broadcast token: 1 token = banyak siswa. Tiap browser baru → submission
   // baru. Browser yang sama (refresh) → resume submission lama lewat cookie

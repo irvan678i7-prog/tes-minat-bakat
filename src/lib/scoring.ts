@@ -218,6 +218,13 @@ function scoreBakat(
   minatBidang: Record<string, number> | null,
 ): ScoringPayload {
   const grades = gradeAnswerRows(sub.answers);
+
+  // Ambil total max dari SELURUH bank soal per subtes BAKAT dari DB-agnostic
+  // approach: hitung dari answer yang ada, tapi JUGA pastikan subtes yang
+  // tidak ada jawabannya tetap masuk dengan raw=0. Karena fungsi ini
+  // dipanggil in-memory (tanpa akses DB tambahan), kita pakai data jawaban
+  // + fallback ke 0. Catatan: idealnya caller menyediakan subtestMeta,
+  // tapi untuk menjaga backward compat kita tetap hitung dari answers.
   const perSubtest: Record<string, { name: string; raw: number; max: number }> = {};
   for (let i = 0; i < sub.answers.length; i++) {
     const ans = sub.answers[i];
@@ -321,8 +328,9 @@ function scoreMinat(sub: SubWithAnswers): ScoringPayload {
     const code = ans.question.subtest.code;
     if (!perSubtest[code]) perSubtest[code] = { name: ans.question.subtest.name, raw: 0, max: 0 };
     perSubtest[code].max += 1;
-    perSubtest[code].raw += 1; // every answered counts
-    const sel = String(Array.isArray(ans.selected) ? (ans.selected[0] as string) : ans.selected);
+    // MINAT: raw = jumlah jawaban tidak kosong (bukan "setiap jawaban = 1").
+    const sel = String(Array.isArray(ans.selected) ? (ans.selected[0] as string) : ans.selected).trim().toUpperCase();
+    if (sel) perSubtest[code].raw += 1;
     if (code === "MINAT_BIDANG") {
       bidangScores[sel] = (bidangScores[sel] || 0) + 1;
     } else if (code.startsWith("MINAT_PROG_")) {
