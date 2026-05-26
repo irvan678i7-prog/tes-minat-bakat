@@ -121,6 +121,14 @@ export default function AdminSubmissions() {
   const [rekapBusy, setRekapBusy] = useState(false);
   const [lastSync, setLastSync] = useState<number>(0);
   const [, setTick] = useState(0);
+  // Status proses recompute skor (untuk tombol "Recompute Skor Lama").
+  const [rescoreStatus, setRescoreStatus] = useState<{
+    busy: boolean;
+    done: number;
+    total: number;
+    iqChanged: number;
+    failed: number;
+  }>({ busy: false, done: 0, total: 0, iqChanged: 0, failed: 0 });
   const { confirm, ConfirmModal } = useBrutConfirm();
 
   const refresh = () => {
@@ -186,6 +194,85 @@ export default function AdminSubmissions() {
       toast.error(e instanceof Error ? e.message : "Gagal mengunduh PDF");
     } finally {
       setPdfBusyId(null);
+    }
+  };
+
+  // Recompute skor lama yang tersimpan di tabel Result dengan formula
+  // skoring yang sudah benar (PR #39 untuk BAKAT, PR #40 untuk MINAT).
+  // Submission yang selesai SEBELUM PR di-deploy sudah punya Result.payload
+  // dengan formula lama (IQ inflasi). Tombol ini iterate semua submission
+  // dan update Result.payload pakai formula baru. Aman dipanggil berkali-
+  // kali — endpoint pakai sort by Result.generatedAt asc, jadi call kedua
+  // memproses submission yang berbeda.
+  const onRescore = async () => {
+    if (rescoreStatus.busy) return;
+    // Step 1: dryRun untuk lihat berapa banyak yang akan di-rescore.
+    let total = 0;
+    try {
+      const res = await fetch("/api/admin/rescore?dryRun=1", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "Gagal memeriksa data untuk recompute");
+        return;
+      }
+      total = Number(data.totalEligible) || 0;
+    } catch {
+      toast.error("Tidak bisa terhubung ke server");
+      return;
+    }
+    if (total === 0) {
+      toast.success("Tidak ada submission yang perlu di-recompute. Semua sudah pakai skor terbaru.");
+      return;
+    }
+    // Step 2: konfirmasi.
+    const ok = await confirm({
+      title: "Recompute Skor Lama?",
+      message:
+        `${total} submission akan dihitung ulang skor & IQ-nya pakai formula yang sudah diperbaiki (PR #39 & #40).\n\n` +
+        `Aman: data jawaban peserta tidak diubah, hanya hasil scoring (Result.payload). Proses bisa beberapa menit untuk batch besar.`,
+      confirmLabel: "YA, RECOMPUTE",
+      cancelLabel: "Batal",
+      tone: "warning",
+    });
+    if (!ok) return;
+    // Step 3: loop batch sampai remaining=0 atau error. Pakai cutoff
+    // before=now() supaya call berulang tidak ke-loop infinite kalau ada
+    // submission baru masuk di tengah proses.
+    const cutoff = new Date().toISOString();
+    setRescoreStatus({ busy: true, done: 0, total, iqChanged: 0, failed: 0 });
+    let done = 0;
+    let iqChanged = 0;
+    let failed = 0;
+    let safetyIter = 0;
+    const MAX_ITER = 20; // 20 batch × 200 max = 4000 submissions per session
+    try {
+      while (safetyIter < MAX_ITER) {
+        safetyIter += 1;
+        const params = new URLSearchParams({ limit: "100", before: cutoff });
+        const res = await fetch(`/api/admin/rescore?${params.toString()}`, { method: "POST" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          toast.error(data.error || `Gagal recompute (HTTP ${res.status})`);
+          break;
+        }
+        done += Number(data.processed) || 0;
+        iqChanged += Number(data.iqChanged) || 0;
+        failed += Number(data.failed) || 0;
+        setRescoreStatus({ busy: true, done, total, iqChanged, failed });
+        const remaining = Number(data.remaining) || 0;
+        const processedThisRound = Number(data.processed) || 0;
+        // Selesai kalau tidak ada lagi sisa, atau batch terakhir kosong
+        // (artinya semua submission yang lewat cutoff sudah diproses).
+        if (remaining === 0 || processedThisRound === 0) break;
+      }
+      toast.success(
+        `Recompute selesai. ${done} submission diproses, ${iqChanged} IQ berubah, ${failed} gagal.`,
+        { duration: 8000, style: { maxWidth: 520 } },
+      );
+      // Refresh tabel supaya kolom IQ di UI ikut update.
+      refresh();
+    } finally {
+      setRescoreStatus({ busy: false, done: 0, total: 0, iqChanged: 0, failed: 0 });
     }
   };
 
@@ -275,6 +362,18 @@ export default function AdminSubmissions() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h3 className="text-2xl font-black uppercase">Daftar Peserta</h3>
         <div className="flex items-center gap-3 flex-wrap">
+          <button
+            type="button"
+            onClick={onRescore}
+            disabled={rescoreStatus.busy}
+            className="brut-btn text-xs"
+            style={{ background: "#22d3ee", color: "#000" }}
+            title="Hitung ulang skor & IQ semua submission lama dengan formula yang sudah diperbaiki. Aman, jawaban peserta tidak berubah."
+          >
+            {rescoreStatus.busy
+              ? `RECOMPUTE… ${rescoreStatus.done}/${rescoreStatus.total}`
+              : "♻ RECOMPUTE SKOR LAMA"}
+          </button>
           <span
             className="text-xs font-bold"
             style={{ padding: "4px 8px", border: "2px solid #000", background: "#fff" }}
