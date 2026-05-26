@@ -14,14 +14,38 @@ export default function AdminLoginPage() {
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     startTransition(async () => {
-      const res = await fetch("/api/admin/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      const data = await res.json().catch(() => ({}));
+      let res: Response;
+      try {
+        res = await fetch("/api/admin/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+      } catch (e) {
+        toast.error(
+          `Tidak bisa terhubung ke server: ${
+            e instanceof Error ? e.message : "Network error"
+          }`,
+        );
+        return;
+      }
+      // Selalu coba parse text dulu supaya kalau body bukan JSON (mis.
+      // server crash 500 dengan HTML), kita tetap bisa tampilkan info
+      // berguna ke user — bukan toast "Login gagal" yang hampa.
+      const text = await res.text();
+      let data: { error?: string; name?: string; email?: string } = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = {};
+      }
       if (!res.ok) {
-        toast.error(data.error || "Login gagal");
+        const msg =
+          data.error ||
+          `Login gagal (HTTP ${res.status}${
+            res.status >= 500 ? " — error server, cek Vercel logs" : ""
+          }).`;
+        toast.error(msg);
         return;
       }
       toast.success(`Halo, ${data.name}!`);
