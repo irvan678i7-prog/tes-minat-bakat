@@ -235,8 +235,7 @@ export async function findMatchingMinatBidangScores(idents: {
   const scores: Record<string, number> = {};
   for (const ans of m.answers) {
     if (ans.question.subtest.code !== "MINAT_BIDANG") continue;
-    const raw = ans.selected;
-    const sel = String(Array.isArray(raw) ? (raw[0] as string) : raw).trim().toUpperCase();
+    const sel = pickAnswerLetter(ans.selected);
     if (sel) scores[sel] = (scores[sel] || 0) + 1;
   }
   return Object.keys(scores).length > 0 ? scores : null;
@@ -383,6 +382,24 @@ function scoreBakat(
   };
 }
 
+/**
+ * Ambil huruf jawaban yang valid (uppercase, single character A-Z) dari
+ * `selected`. Mengembalikan empty string kalau jawaban kosong / null / array
+ * kosong / nilai tidak valid. Dipakai di scoreMinat supaya tally bidang &
+ * program tidak ter-pollusi oleh jawaban kosong (yang bisa muncul sebagai
+ * "" atau "UNDEFINED" lewat String(undefined)).
+ */
+function pickAnswerLetter(selected: unknown): string {
+  let raw: unknown = selected;
+  if (Array.isArray(raw)) {
+    raw = raw.length > 0 ? raw[0] : "";
+  }
+  if (raw == null) return "";
+  const s = String(raw).trim().toUpperCase();
+  // Hanya terima huruf tunggal A-Z. Jawaban "UNDEFINED", "", "1", dll. ditolak.
+  return /^[A-Z]$/.test(s) ? s : "";
+}
+
 function scoreMinat(
   sub: SubWithAnswers,
   subtestMeta: SubtestMeta[] | null,
@@ -409,8 +426,12 @@ function scoreMinat(
       // Fallback (caller tidak kirim meta): max ikut +1 setiap jawaban.
       perSubtest[code].max += 1;
     }
-    const sel = String(Array.isArray(ans.selected) ? (ans.selected[0] as string) : ans.selected).trim().toUpperCase();
-    if (sel) perSubtest[code].raw += 1;
+    const sel = pickAnswerLetter(ans.selected);
+    // Hanya tally jawaban yang valid. Tanpa guard ini, jawaban kosong /
+    // "UNDEFINED" akan masuk sebagai "key" di bidangScores → bisa muncul
+    // sebagai top bidang kosong di hasil tes peserta.
+    if (!sel) continue;
+    perSubtest[code].raw += 1;
     if (code === "MINAT_BIDANG") {
       bidangScores[sel] = (bidangScores[sel] || 0) + 1;
     } else if (code.startsWith("MINAT_PROG_")) {
