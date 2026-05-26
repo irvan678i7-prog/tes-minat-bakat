@@ -31,111 +31,173 @@ const YELLOW = "#FFEB00";
 const PINK = "#FF4D8D";
 const CYAN = "#00E1FF";
 
-function fmtDate(d?: Date | null): string {
+function fmtDateTime(d?: Date | null): string {
   if (!d) return "—";
   return new Date(d).toLocaleString("id-ID", {
-    day: "2-digit", month: "long", year: "numeric",
-    hour: "2-digit", minute: "2-digit",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   });
 }
 
+function fmtBirth(d?: Date | null): string {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function truncate(doc: jsPDF, text: string, maxW: number): string {
+  if (doc.getTextWidth(text) <= maxW) return text;
+  let t = text;
+  while (t.length > 1 && doc.getTextWidth(t + "…") > maxW) {
+    t = t.slice(0, -1);
+  }
+  return t + "…";
+}
+
+/**
+ * Build the per-submission report on a single A4 page (portrait).
+ *
+ * Layout is intentionally tight: section title bars are 12pt, body uses
+ * 7–8pt fonts, autoTable cell padding is 1.5–2pt. As a safety net any extra
+ * page that jspdf-autotable might still create is deleted before output.
+ */
 export function buildReportPDF(submission: SubmissionInfo, payload: ScoringPayload): Buffer {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
-  const margin = 36;
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 22;
+  const innerW = pageW - margin * 2;
 
-  // Brutalist banner
+  // ── Banner ─────────────────────────────────────────────────────────
   doc.setFillColor(YELLOW);
-  doc.rect(0, 0, pageW, 110, "F");
+  doc.rect(0, 0, pageW, 36, "F");
   doc.setFillColor(BLACK);
-  doc.rect(0, 110, pageW, 6, "F");
-
+  doc.rect(0, 36, pageW, 3, "F");
   doc.setTextColor(BLACK);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(22);
-  doc.text("LAPORAN HASIL", margin, 50);
-  doc.setFontSize(28);
-  const title = submission.testKind === "BAKAT" ? "TES BAKAT" : "TES MINAT";
-  doc.text(title, margin, 86);
+  doc.setFontSize(14);
+  const title = submission.testKind === "BAKAT" ? "LAPORAN TES BAKAT" : "LAPORAN TES MINAT";
+  doc.text(title, margin, 24);
+  doc.setFontSize(8);
+  doc.text(`Dicetak: ${fmtDateTime(new Date())}`, pageW - margin, 24, { align: "right" });
 
-  // Identitas
-  let y = 140;
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "bold");
-  doc.text("IDENTITAS PESERTA", margin, y);
-  y += 6;
-  doc.setLineWidth(2);
-  doc.setDrawColor(BLACK);
-  doc.line(margin, y, pageW - margin, y);
+  let y = 46;
 
-  y += 14;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  const idRows: [string, string][] = [
-    ["Nama", submission.fullName || "—"],
-    ["Jenis Kelamin", submission.gender || "—"],
-    ["Tempat / Tgl Lahir", `${submission.birthPlace || "—"} / ${submission.birthDate ? fmtDate(submission.birthDate).split(",")[0] : "—"}`],
-    ["Sekolah", submission.school || "—"],
-    ["Kelas / Jurusan", `${submission.grade || "—"} / ${submission.major || "—"}`],
-    ["Telepon", submission.phone || "—"],
-    ["Email", submission.email || "—"],
-    ["Mulai Tes", fmtDate(submission.startedAt)],
-    ["Selesai Tes", fmtDate(submission.finishedAt)],
-  ];
-  for (const [k, v] of idRows) {
-    doc.setFont("helvetica", "bold");
-    doc.text(`${k}:`, margin, y);
-    doc.setFont("helvetica", "normal");
-    doc.text(String(v), margin + 130, y);
-    y += 14;
-  }
+  // ── Identitas ──────────────────────────────────────────────────────
+  y = sectionTitle(doc, "IDENTITAS PESERTA", margin, y, innerW);
+  y = drawIdentitas(doc, submission, margin, y, innerW);
 
-  y += 8;
   if (payload.testKind === "BAKAT") {
-    y = drawBakatSection(doc, payload, margin, y, pageW);
+    drawBakat(doc, payload, margin, y, innerW);
   } else {
-    y = drawMinatSection(doc, payload, margin, y, pageW);
+    drawMinat(doc, payload, margin, y, innerW);
   }
 
-  // Footer
-  const totalPages = doc.getNumberOfPages();
-  for (let i = 1; i <= totalPages; i++) {
-    doc.setPage(i);
-    const pageH = doc.internal.pageSize.getHeight();
-    doc.setFillColor(BLACK);
-    doc.rect(0, pageH - 22, pageW, 22, "F");
-    doc.setTextColor(WHITE);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
-    doc.text("LAPORAN TES MINAT & BAKAT — DICETAK OTOMATIS — RAHASIA", margin, pageH - 8);
-    doc.text(`Hal. ${i} / ${totalPages}`, pageW - margin - 60, pageH - 8);
+  // Hard-cap to 1 page in case any nested table tries to overflow.
+  while (doc.getNumberOfPages() > 1) {
+    doc.deletePage(doc.getNumberOfPages());
   }
+  doc.setPage(1);
+
+  // ── Footer ─────────────────────────────────────────────────────────
+  doc.setFillColor(BLACK);
+  doc.rect(0, pageH - 14, pageW, 14, "F");
+  doc.setTextColor(WHITE);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7);
+  doc.text(
+    "LAPORAN TES MINAT & BAKAT — DICETAK OTOMATIS — RAHASIA",
+    margin,
+    pageH - 4,
+  );
+  doc.text("Hal. 1 / 1", pageW - margin, pageH - 4, { align: "right" });
 
   return Buffer.from(doc.output("arraybuffer"));
 }
 
-function ensureSpace(doc: jsPDF, y: number, needed: number, margin: number): number {
-  const pageH = doc.internal.pageSize.getHeight();
-  if (y + needed > pageH - 40) {
-    doc.addPage();
-    return margin;
-  }
-  return y;
+function sectionTitle(
+  doc: jsPDF,
+  label: string,
+  margin: number,
+  y: number,
+  innerW: number,
+): number {
+  doc.setFillColor(BLACK);
+  doc.rect(margin, y, innerW, 12, "F");
+  doc.setTextColor(WHITE);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.text(label, margin + 4, y + 9);
+  doc.setTextColor(BLACK);
+  return y + 14;
 }
 
-function drawBakatSection(
+function drawIdentitas(
+  doc: jsPDF,
+  s: SubmissionInfo,
+  margin: number,
+  y: number,
+  innerW: number,
+): number {
+  doc.setFontSize(8);
+  const colW = (innerW - 8) / 2;
+  const rows: [string, string][] = [
+    ["Nama", s.fullName || "—"],
+    ["Jenis Kelamin", s.gender || "—"],
+    ["TTL", `${s.birthPlace || "—"} / ${fmtBirth(s.birthDate)}`],
+    ["Sekolah", s.school || "—"],
+    ["Kelas / Jurusan", `${s.grade || "—"} / ${s.major || "—"}`],
+    ["Telepon", s.phone || "—"],
+    ["Email", s.email || "—"],
+    ["Mulai Tes", fmtDateTime(s.startedAt)],
+    ["Selesai Tes", fmtDateTime(s.finishedAt)],
+  ];
+  const half = Math.ceil(rows.length / 2);
+  for (let i = 0; i < half; i++) {
+    drawIdLine(doc, margin, y, colW, rows[i]);
+    if (i + half < rows.length) {
+      drawIdLine(doc, margin + colW + 8, y, colW, rows[i + half]);
+    }
+    y += 11;
+  }
+  return y + 4;
+}
+
+function drawIdLine(
+  doc: jsPDF,
+  x: number,
+  y: number,
+  w: number,
+  [k, v]: [string, string],
+): void {
+  const labelW = 78;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.text(`${k}:`, x, y + 8);
+  doc.setFont("helvetica", "normal");
+  doc.text(truncate(doc, String(v), w - labelW), x + labelW, y + 8);
+}
+
+function drawBakat(
   doc: jsPDF,
   payload: ScoringPayload,
   margin: number,
   yIn: number,
-  pageW: number,
+  innerW: number,
 ): number {
   let y = yIn;
-  // Skor per subtes
-  y = sectionTitle(doc, "SKOR PER SUBTES", margin, y, pageW);
+
+  // ── Skor per subtes (compact table) ──
+  y = sectionTitle(doc, "SKOR PER SUBTES", margin, y, innerW);
   const rows = Object.values(payload.perSubtest).map((v) => [
     v.name,
-    `${v.raw} / ${v.max}`,
+    `${v.raw}/${v.max}`,
     v.categoryLabel ?? "—",
   ]);
   autoTable(doc, {
@@ -143,167 +205,158 @@ function drawBakatSection(
     head: [["Subtes", "Skor", "Kategori"]],
     body: rows,
     theme: "grid",
-    styles: { font: "helvetica", fontSize: 10, lineWidth: 1.2, lineColor: BLACK, textColor: BLACK },
-    headStyles: { fillColor: YELLOW, textColor: BLACK, fontStyle: "bold", lineWidth: 1.5 },
+    styles: {
+      font: "helvetica",
+      fontSize: 7.5,
+      lineWidth: 0.6,
+      lineColor: BLACK,
+      textColor: BLACK,
+      cellPadding: 1.8,
+    },
+    headStyles: { fillColor: YELLOW, textColor: BLACK, fontStyle: "bold", lineWidth: 1 },
     margin: { left: margin, right: margin },
   });
-  // @ts-expect-error – jspdf-autotable extends jsPDF instance with lastAutoTable
-  y = (doc.lastAutoTable?.finalY ?? y) + 18;
+  // @ts-expect-error - jspdf-autotable extends jsPDF instance with lastAutoTable
+  y = (doc.lastAutoTable?.finalY ?? y) + 6;
 
-  // Bar chart
-  y = ensureSpace(doc, y, 200, margin);
-  y = sectionTitle(doc, "VISUALISASI SKOR", margin, y, pageW);
-  drawBarChart(doc, payload, margin, y, pageW);
-  y += 200;
+  // ── IQ + Top Profil (side-by-side) ──
+  y = sectionTitle(doc, "IQ PREDIKSI & PROFIL BAKAT TERATAS", margin, y, innerW);
+  const halfW = (innerW - 8) / 2;
+  const blockH = 56;
 
-  // IQ
-  y = ensureSpace(doc, y, 110, margin);
-  y = sectionTitle(doc, "IQ PREDIKSI", margin, y, pageW);
+  // IQ box (left)
   doc.setFillColor(CYAN);
-  doc.rect(margin, y, pageW - margin * 2, 80, "F");
-  doc.setLineWidth(2);
+  doc.rect(margin, y, halfW, blockH, "F");
+  doc.setLineWidth(1.2);
   doc.setDrawColor(BLACK);
-  doc.rect(margin, y, pageW - margin * 2, 80);
+  doc.rect(margin, y, halfW, blockH);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(36);
+  doc.setFontSize(22);
   doc.setTextColor(BLACK);
-  doc.text(String(payload.iqEstimate ?? "—"), margin + 16, y + 50);
-  doc.setFontSize(12);
-  doc.text(payload.iqInterpretation?.band ?? "", margin + 110, y + 36);
+  doc.text(String(payload.iqEstimate ?? "—"), margin + 8, y + 30);
+  doc.setFontSize(9);
+  doc.text(payload.iqInterpretation?.band ?? "", margin + 70, y + 18);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.text(payload.iqInterpretation?.description ?? "", margin + 110, y + 56, {
-    maxWidth: pageW - margin * 2 - 130,
-  });
-  y += 100;
+  doc.setFontSize(7);
+  const desc = doc.splitTextToSize(
+    payload.iqInterpretation?.description ?? "",
+    halfW - 76,
+  ) as string[];
+  doc.text(desc.slice(0, 4), margin + 70, y + 28);
 
-  // Profil
-  y = ensureSpace(doc, y, 80, margin);
-  y = sectionTitle(doc, "PROFIL BAKAT TERATAS", margin, y, pageW);
-  for (const p of payload.bakat?.topProfiles ?? []) {
-    y = ensureSpace(doc, y, 70, margin);
-    doc.setFillColor(PINK);
-    doc.rect(margin, y, pageW - margin * 2, 16, "F");
-    doc.setLineWidth(1.5);
-    doc.rect(margin, y, pageW - margin * 2, 16);
-    doc.setTextColor(BLACK);
+  // Top Profile (right)
+  const topX = margin + halfW + 8;
+  doc.setFillColor(PINK);
+  doc.rect(topX, y, halfW, blockH, "F");
+  doc.setLineWidth(1.2);
+  doc.rect(topX, y, halfW, blockH);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.text("PROFIL BAKAT", topX + 6, y + 11);
+  let py = y + 22;
+  const profiles = (payload.bakat?.topProfiles ?? []).slice(0, 3);
+  for (const p of profiles) {
+    if (py > y + blockH - 4) break;
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
-    doc.text(p.name.toUpperCase(), margin + 6, y + 12);
-    y += 22;
+    doc.setFontSize(7.5);
+    doc.text(`• ${p.name}`, topX + 6, py);
+    py += 8;
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    doc.text(p.description, margin, y, { maxWidth: pageW - margin * 2 });
-    y += 16;
-    doc.setFont("helvetica", "bold");
-    doc.text("Jurusan:", margin, y);
-    doc.setFont("helvetica", "normal");
-    doc.text(p.majors.join(", "), margin + 50, y, { maxWidth: pageW - margin * 2 - 50 });
-    y += 14;
-    doc.setFont("helvetica", "bold");
-    doc.text("Karir:", margin, y);
-    doc.setFont("helvetica", "normal");
-    doc.text(p.careers.join(", "), margin + 50, y, { maxWidth: pageW - margin * 2 - 50 });
-    y += 18;
+    doc.setFontSize(7);
+    const line = (doc.splitTextToSize(p.description, halfW - 14) as string[])[0] ?? "";
+    doc.text(line, topX + 12, py);
+    py += 9;
   }
+  y += blockH + 6;
 
-  // Penjurusan IPA / IPS (untuk SMA — pada SMK ditampilkan sebagai info pendukung).
+  // ── Penjurusan IPA / IPS (jika ada) ──
   if (payload.penjurusan) {
-    y = ensureSpace(doc, y, 160, margin);
-    y = drawPenjurusanSection(doc, payload, margin, y, pageW);
+    y = drawPenjurusanCompact(doc, payload, margin, y, innerW);
   }
 
-  // Rekomendasi
-  y = ensureSpace(doc, y, 80, margin);
-  y = sectionTitle(doc, "REKOMENDASI JURUSAN & PEKERJAAN", margin, y, pageW);
-  drawRecommendations(doc, payload, margin, y, pageW);
-  return y + 100;
+  // ── Rekomendasi ──
+  y = sectionTitle(doc, "REKOMENDASI JURUSAN & PEKERJAAN", margin, y, innerW);
+  drawRecommendations(doc, payload, margin, y, innerW);
+  return y;
 }
 
-function drawPenjurusanSection(
+function drawPenjurusanCompact(
   doc: jsPDF,
   payload: ScoringPayload,
   margin: number,
   yIn: number,
-  pageW: number,
+  innerW: number,
 ): number {
-  const pj = payload.penjurusan;
-  if (!pj) return yIn;
+  const pj = payload.penjurusan!;
   let y = yIn;
-  y = sectionTitle(doc, "PENJURUSAN IPA / IPS (SMA)", margin, y, pageW);
+  y = sectionTitle(doc, "PENJURUSAN IPA / IPS (SMA)", margin, y, innerW);
 
-  // Tabel komponen + bobot + skor
-  const komp = pj.components;
+  const tableW = innerW * 0.55 - 6;
+  const boxX = margin + tableW + 12;
+  const boxW = innerW - tableW - 12;
+
+  // Tabel komponen kompak (kiri)
   const order: KomponenKode[] = ["KUA", "PEN", "SPA", "MEK", "VER", "BHS", "KLE"];
-  const rows = order.map((k) => [
+  const compRows = order.map((k) => [
     KOMPONEN_LABEL[k],
-    `${komp[k].toFixed(1)}`,
+    pj.components[k].toFixed(1),
     BOBOT_IPA_PCT[k] > 0 ? `${BOBOT_IPA_PCT[k]}%` : "—",
     BOBOT_IPS_PCT[k] > 0 ? `${BOBOT_IPS_PCT[k]}%` : "—",
   ]);
   autoTable(doc, {
     startY: y,
-    head: [["Komponen", "Skor (0–100)", "Bobot IPA", "Bobot IPS"]],
-    body: rows,
+    head: [["Komponen", "Skor", "IPA", "IPS"]],
+    body: compRows,
     theme: "grid",
-    styles: { font: "helvetica", fontSize: 10, lineWidth: 1.2, lineColor: BLACK, textColor: BLACK },
-    headStyles: { fillColor: YELLOW, textColor: BLACK, fontStyle: "bold", lineWidth: 1.5 },
-    margin: { left: margin, right: margin },
+    styles: {
+      font: "helvetica",
+      fontSize: 7,
+      lineWidth: 0.5,
+      lineColor: BLACK,
+      textColor: BLACK,
+      cellPadding: 1.5,
+    },
+    headStyles: { fillColor: YELLOW, textColor: BLACK, fontStyle: "bold", lineWidth: 0.8 },
+    margin: { left: margin },
+    tableWidth: tableW,
   });
-  // @ts-expect-error jspdf-autotable extends jsPDF instance with lastAutoTable
-  y = (doc.lastAutoTable?.finalY ?? y) + 14;
+  // @ts-expect-error - jspdf-autotable extends jsPDF
+  const tEnd = (doc.lastAutoTable?.finalY ?? y) as number;
 
-  // Dua box skor final IPA dan IPS
-  y = ensureSpace(doc, y, 90, margin);
-  const innerW = pageW - margin * 2;
-  const boxW = (innerW - 12) / 2;
-  drawScoreBox(doc, margin, y, boxW, "SKOR FINAL IPA", pj.finalIPA, pj.kategoriIPA.label, CYAN);
-  drawScoreBox(doc, margin + boxW + 12, y, boxW, "SKOR FINAL IPS", pj.finalIPS, pj.kategoriIPS.label, PINK);
-  y += 76;
+  // Score boxes IPA / IPS sebelah kanan
+  const boxH = 28;
+  drawScoreBoxMini(doc, boxX, y, boxW, "IPA", pj.finalIPA, pj.kategoriIPA.label, CYAN);
+  drawScoreBoxMini(doc, boxX, y + boxH + 4, boxW, "IPS", pj.finalIPS, pj.kategoriIPS.label, PINK);
 
-  // Detail: bakat + minat (bila ada)
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  doc.setTextColor(BLACK);
-  const bakatLine = `Skor bakat: IPA ${pj.bakatIPA.toFixed(1)}, IPS ${pj.bakatIPS.toFixed(1)}.`;
-  doc.text(bakatLine, margin, y);
-  y += 12;
-  if (pj.minat) {
-    doc.text(
-      `Skor minat (cross-link Tes Minat): IPA ${pj.minat.scoreIPA.toFixed(1)}, IPS ${pj.minat.scoreIPS.toFixed(1)}. ` +
-        "Skor final = 70% bakat + 30% minat.",
-      margin, y, { maxWidth: innerW },
-    );
-    y += 22;
-  } else {
-    doc.text(
-      "Data Tes Minat tidak ditemukan untuk peserta ini, skor final memakai 100% skor bakat.",
-      margin, y, { maxWidth: innerW },
-    );
-    y += 18;
-  }
+  let yBelow = Math.max(tEnd, y + boxH * 2 + 4) + 4;
 
-  // Box rekomendasi
-  y = ensureSpace(doc, y, 70, margin);
+  // Banner rekomendasi penjurusan
   doc.setFillColor(YELLOW);
-  doc.rect(margin, y, innerW, 22, "F");
-  doc.setLineWidth(1.5);
+  doc.rect(margin, yBelow, innerW, 14, "F");
+  doc.setLineWidth(1);
   doc.setDrawColor(BLACK);
-  doc.rect(margin, y, innerW, 22);
+  doc.rect(margin, yBelow, innerW, 14);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(12);
-  doc.text(`REKOMENDASI: ${pj.rekomendasiLabel.toUpperCase()}`, margin + 8, y + 15);
-  y += 28;
+  doc.setFontSize(9);
+  doc.text(
+    `REKOMENDASI: ${pj.rekomendasiLabel.toUpperCase()}  •  Selisih (IPA−IPS): ${pj.selisih.toFixed(1)}`,
+    margin + 6,
+    yBelow + 10,
+  );
+  yBelow += 16;
+
+  // Catatan (max 2 baris)
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.text(`Selisih (IPA − IPS): ${pj.selisih.toFixed(1)} poin.`, margin, y);
-  y += 14;
-  doc.text(pj.catatan, margin, y, { maxWidth: innerW });
-  y += 28;
-  return y;
+  doc.setFontSize(7);
+  const note = doc.splitTextToSize(pj.catatan, innerW) as string[];
+  doc.text(note.slice(0, 2), margin, yBelow + 7);
+  yBelow += note.slice(0, 2).length * 8 + 4;
+  return yBelow;
 }
 
-function drawScoreBox(
+// kept intentionally minimal — additional helpers below
+
+function drawScoreBoxMini(
   doc: jsPDF,
   x: number,
   y: number,
@@ -313,110 +366,108 @@ function drawScoreBox(
   kategori: string,
   fill: string,
 ): void {
+  const h = 28;
   doc.setFillColor(fill);
-  doc.rect(x, y, w, 64, "F");
-  doc.setLineWidth(2);
+  doc.rect(x, y, w, h, "F");
+  doc.setLineWidth(1.2);
   doc.setDrawColor(BLACK);
-  doc.rect(x, y, w, 64);
+  doc.rect(x, y, w, h);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
+  doc.setFontSize(8);
   doc.setTextColor(BLACK);
-  doc.text(label, x + 8, y + 14);
-  doc.setFontSize(28);
-  doc.text(score.toFixed(1), x + 8, y + 44);
-  doc.setFontSize(10);
+  doc.text(label, x + 6, y + 11);
+  doc.setFontSize(16);
+  doc.text(score.toFixed(1), x + 6, y + 24);
+  doc.setFontSize(7);
   doc.setFont("helvetica", "normal");
-  doc.text(kategori, x + 8, y + 58, { maxWidth: w - 16 });
+  doc.text(kategori, x + 50, y + 14, { maxWidth: w - 56 });
 }
 
-function drawMinatSection(
+function drawMinat(
   doc: jsPDF,
   payload: ScoringPayload,
   margin: number,
   yIn: number,
-  pageW: number,
+  innerW: number,
 ): number {
   let y = yIn;
-  y = sectionTitle(doc, "SKOR BIDANG MINAT", margin, y, pageW);
-  const bidangRows = Object.entries(payload.minat?.bidangScores ?? {}).map(([k, v]) => [k, String(v)]);
+  y = sectionTitle(doc, "SKOR BIDANG MINAT", margin, y, innerW);
+  const tableW = innerW / 2 - 4;
+  const rightX = margin + tableW + 8;
+  const rightW = innerW - tableW - 8;
+
+  const rows = Object.entries(payload.minat?.bidangScores ?? {}).map(([k, v]) => [
+    k,
+    String(v),
+  ]);
   autoTable(doc, {
     startY: y,
     head: [["Bidang", "Skor"]],
-    body: bidangRows,
+    body: rows,
     theme: "grid",
-    styles: { fontSize: 11, lineWidth: 1.2, lineColor: BLACK, textColor: BLACK },
-    headStyles: { fillColor: YELLOW, textColor: BLACK, fontStyle: "bold", lineWidth: 1.5 },
-    margin: { left: margin, right: margin },
+    styles: {
+      font: "helvetica",
+      fontSize: 8,
+      lineWidth: 0.6,
+      lineColor: BLACK,
+      textColor: BLACK,
+      cellPadding: 2,
+    },
+    headStyles: { fillColor: YELLOW, textColor: BLACK, fontStyle: "bold", lineWidth: 1 },
+    margin: { left: margin },
+    tableWidth: tableW,
   });
-  // @ts-expect-error - lastAutoTable extension on jsPDF
-  y = (doc.lastAutoTable?.finalY ?? y) + 16;
+  // @ts-expect-error - jspdf-autotable extends jsPDF
+  const t1End = (doc.lastAutoTable?.finalY ?? y) as number;
 
-  y = sectionTitle(doc, "PROGRAM KEAHLIAN REKOMENDASI", margin, y, pageW);
-  for (const p of payload.minat?.programs ?? []) {
-    y = ensureSpace(doc, y, 70, margin);
-    doc.setFillColor(CYAN);
-    doc.rect(margin, y, pageW - margin * 2, 16, "F");
-    doc.setLineWidth(1.5);
-    doc.rect(margin, y, pageW - margin * 2, 16);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
-    doc.text(`Bidang ${p.bidang}: ${p.kind}`, margin + 6, y + 12);
-    y += 22;
-    for (const a of p.topAnswers) {
-      doc.setFont("helvetica", "bold");
-      doc.text(`• ${a.label}`, margin + 8, y);
-      doc.setFont("helvetica", "normal");
-      doc.text(`(${a.major})`, margin + 8 + 150, y);
-      y += 13;
-    }
-    y += 8;
-  }
-
-  y = ensureSpace(doc, y, 80, margin);
-  y = sectionTitle(doc, "REKOMENDASI JURUSAN & PEKERJAAN", margin, y, pageW);
-  drawRecommendations(doc, payload, margin, y, pageW);
-  return y + 100;
-}
-
-function sectionTitle(doc: jsPDF, label: string, margin: number, y: number, pageW: number): number {
-  doc.setFillColor(BLACK);
-  doc.rect(margin, y, pageW - margin * 2, 18, "F");
-  doc.setTextColor(WHITE);
+  // Top bidang chips di kanan
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.text(label, margin + 6, y + 13);
-  doc.setTextColor(BLACK);
-  return y + 26;
-}
-
-function drawBarChart(
-  doc: jsPDF,
-  payload: ScoringPayload,
-  margin: number,
-  y: number,
-  pageW: number,
-): void {
-  const items = Object.entries(payload.perSubtest);
-  const innerW = pageW - margin * 2;
-  const labelW = 140;
-  const barAreaW = innerW - labelW - 10;
-  const rowH = 16;
-  const max = Math.max(1, ...items.map(([, v]) => v.max));
-  doc.setFontSize(9);
-  for (let i = 0; i < items.length; i++) {
-    const [, v] = items[i];
-    const yi = y + i * rowH;
-    doc.setFont("helvetica", "bold");
-    doc.text(v.name, margin, yi + 11);
-    const bw = (v.raw / max) * barAreaW;
-    doc.setFillColor(YELLOW);
-    doc.rect(margin + labelW, yi + 2, bw, rowH - 6, "F");
+  doc.setFontSize(8);
+  doc.text("TOP BIDANG", rightX, y + 8);
+  let ry = y + 14;
+  const top = payload.minat?.topBidang ?? [];
+  for (let i = 0; i < top.length; i++) {
+    const fill = i === 0 ? PINK : i === 1 ? CYAN : YELLOW;
+    doc.setFillColor(fill);
+    doc.rect(rightX, ry, rightW, 18, "F");
     doc.setLineWidth(1);
     doc.setDrawColor(BLACK);
-    doc.rect(margin + labelW, yi + 2, barAreaW, rowH - 6);
-    doc.setFont("helvetica", "normal");
-    doc.text(`${v.raw}/${v.max}`, margin + labelW + barAreaW + 4, yi + 11);
+    doc.rect(rightX, ry, rightW, 18);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text(`#${i + 1} ${top[i]}`, rightX + 6, ry + 12);
+    ry += 22;
   }
+  y = Math.max(t1End, ry) + 6;
+
+  // ── Program Keahlian Rekomendasi (compact) ──
+  y = sectionTitle(doc, "PROGRAM KEAHLIAN REKOMENDASI", margin, y, innerW);
+  const programs = payload.minat?.programs ?? [];
+  for (const p of programs) {
+    doc.setFillColor(CYAN);
+    doc.rect(margin, y, innerW, 12, "F");
+    doc.setLineWidth(1);
+    doc.setDrawColor(BLACK);
+    doc.rect(margin, y, innerW, 12);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text(`Bidang ${p.bidang}: ${p.kind}`, margin + 4, y + 9);
+    y += 14;
+    doc.setFontSize(7.5);
+    for (const a of p.topAnswers) {
+      doc.setFont("helvetica", "bold");
+      doc.text(`• ${a.label}`, margin + 6, y + 7);
+      doc.setFont("helvetica", "normal");
+      doc.text(`(${a.major})`, margin + 140, y + 7, { maxWidth: innerW - 146 });
+      y += 9;
+    }
+    y += 3;
+  }
+
+  // ── Rekomendasi ──
+  y = sectionTitle(doc, "REKOMENDASI JURUSAN & PEKERJAAN", margin, y, innerW);
+  drawRecommendations(doc, payload, margin, y, innerW);
+  return y;
 }
 
 function drawRecommendations(
@@ -424,28 +475,31 @@ function drawRecommendations(
   payload: ScoringPayload,
   margin: number,
   y: number,
-  pageW: number,
+  innerW: number,
 ): void {
-  const colW = (pageW - margin * 2) / 2 - 6;
+  const colW = (innerW - 8) / 2;
   doc.setFillColor(YELLOW);
-  doc.rect(margin, y, colW, 16, "F");
-  doc.rect(margin + colW + 12, y, colW, 16, "F");
-  doc.setLineWidth(1.5);
-  doc.rect(margin, y, colW, 16);
-  doc.rect(margin + colW + 12, y, colW, 16);
+  doc.rect(margin, y, colW, 12, "F");
+  doc.rect(margin + colW + 8, y, colW, 12, "F");
+  doc.setLineWidth(1);
+  doc.setDrawColor(BLACK);
+  doc.rect(margin, y, colW, 12);
+  doc.rect(margin + colW + 8, y, colW, 12);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.text("JURUSAN", margin + 6, y + 12);
-  doc.text("PEKERJAAN", margin + colW + 18, y + 12);
+  doc.setFontSize(8);
+  doc.setTextColor(BLACK);
+  doc.text("JURUSAN", margin + 4, y + 9);
+  doc.text("PEKERJAAN", margin + colW + 12, y + 9);
   doc.setFont("helvetica", "normal");
-  let yLeft = y + 22;
-  for (const m of payload.recommendations.majors) {
-    doc.text(`• ${m}`, margin + 6, yLeft);
-    yLeft += 13;
+  doc.setFontSize(7.5);
+  let yL = y + 20;
+  for (const m of (payload.recommendations.majors || []).slice(0, 10)) {
+    doc.text(`• ${m}`, margin + 4, yL, { maxWidth: colW - 8 });
+    yL += 9;
   }
-  let yRight = y + 22;
-  for (const c of payload.recommendations.careers) {
-    doc.text(`• ${c}`, margin + colW + 18, yRight);
-    yRight += 13;
+  let yR = y + 20;
+  for (const c of (payload.recommendations.careers || []).slice(0, 10)) {
+    doc.text(`• ${c}`, margin + colW + 12, yR, { maxWidth: colW - 8 });
+    yR += 9;
   }
 }
