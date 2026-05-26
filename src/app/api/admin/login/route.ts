@@ -32,39 +32,62 @@ function expiresInToSeconds(v: string | number): number {
 }
 
 export async function POST(req: NextRequest) {
-  const ip = getClientIp(req);
-  const rl = rateLimit(`admin-login:${ip}`, LOGIN_LIMIT, LOGIN_WINDOW_MS);
-  if (!rl.ok) {
-    const retry = Math.max(1, Math.ceil((rl.resetAt - Date.now()) / 1000));
-    return NextResponse.json(
-      { error: "Terlalu banyak percobaan login. Coba lagi nanti." },
-      {
-        status: 429,
-        headers: {
-          "Retry-After": String(retry),
-          "X-RateLimit-Limit": String(LOGIN_LIMIT),
-          "X-RateLimit-Remaining": "0",
+  // Wrap entire flow so any unexpected throw (mis. JWT_SECRET tidak ter-set,
+  // DB unreachable, prisma client init error) tetap pulang sebagai JSON
+  // dengan field `error` — bukan HTML 500 generik dari Vercel yang membuat
+  // toast frontend jatuh ke fallback "Login gagal" tanpa info berguna.
+  try {
+    const ip = getClientIp(req);
+    const rl = rateLimit(`admin-login:${ip}`, LOGIN_LIMIT, LOGIN_WINDOW_MS);
+    if (!rl.ok) {
+      const retry = Math.max(1, Math.ceil((rl.resetAt - Date.now()) / 1000));
+      return NextResponse.json(
+        { error: "Terlalu banyak percobaan login. Coba lagi nanti." },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(retry),
+            "X-RateLimit-Limit": String(LOGIN_LIMIT),
+            "X-RateLimit-Remaining": "0",
+          },
         },
+      );
+    }
+
+    const parsed = Body.safeParse(await req.json().catch(() => ({})));
+    if (!parsed.success) return NextResponse.json({ error: "Format email/password tidak valid" }, { status: 400 });
+
+    const user = await prisma.adminUser.findUnique({ where: { email: parsed.data.email } });
+    if (!user) return NextResponse.json({ error: "Email atau password salah" }, { status: 401 });
+    const ok = await bcrypt.compare(parsed.data.password, user.passwordHash);
+    if (!ok) return NextResponse.json({ error: "Email atau password salah" }, { status: 401 });
+
+    const tok = signAdminToken({ sub: user.id, role: "admin", email: user.email });
+    const res = NextResponse.json({ ok: true, name: user.name, email: user.email });
+    res.cookies.set(ADMIN_COOKIE, tok, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: expiresInToSeconds(ADMIN_JWT_EXPIRES_IN),
+    });
+    return res;
+  } catch (err) {
+    // Log ke Vercel logs supaya admin bisa investigasi.
+    console.error("[admin/login] internal error:", err);
+    const detail =
+      err instanceof Error
+        ? err.message.replace(/\s+/g, " ").slice(0, 200)
+        : "Unknown error";
+    // Detail di body BUKAN string sensitif (tidak ada secret/token di
+    // pesan error library Prisma/JWT). Ini bukan untuk end-user, tapi
+    // untuk admin saat menghidupkan aplikasi & memeriksa di toast.
+    return NextResponse.json(
+      {
+        error: "Server error saat login. Periksa konfigurasi env (JWT_SECRET, DATABASE_URL).",
+        detail,
       },
+      { status: 500 },
     );
   }
-
-  const parsed = Body.safeParse(await req.json().catch(() => ({})));
-  if (!parsed.success) return NextResponse.json({ error: "Invalid input" }, { status: 400 });
-
-  const user = await prisma.adminUser.findUnique({ where: { email: parsed.data.email } });
-  if (!user) return NextResponse.json({ error: "Email atau password salah" }, { status: 401 });
-  const ok = await bcrypt.compare(parsed.data.password, user.passwordHash);
-  if (!ok) return NextResponse.json({ error: "Email atau password salah" }, { status: 401 });
-
-  const tok = signAdminToken({ sub: user.id, role: "admin", email: user.email });
-  const res = NextResponse.json({ ok: true, name: user.name, email: user.email });
-  res.cookies.set(ADMIN_COOKIE, tok, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: expiresInToSeconds(ADMIN_JWT_EXPIRES_IN),
-  });
-  return res;
 }
