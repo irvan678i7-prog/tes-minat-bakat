@@ -6,10 +6,9 @@ import { scoreSubmission } from "@/lib/scoring";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// Untuk batch besar (>50 peserta) panggil endpoint ini berkali-kali — tiap
-// call ambil submission yang Result.generatedAt paling lama (atau belum
-// ada Result), lalu update generatedAt = sekarang. Akibatnya, call berulang
-// otomatis pick batch berbeda sampai semua di-recompute.
+// Vercel Hobby plan max 10 detik. Untuk batch besar (>30 peserta) panggil
+// endpoint ini berkali-kali — `dryRun=true` untuk lihat berapa yang akan
+// di-recompute, lalu pakai `limit` untuk membatasi per-call.
 export const maxDuration = 60;
 
 /**
@@ -21,19 +20,9 @@ export const maxDuration = 60;
  *
  * Query params:
  *  - dryRun=1   : hanya hitung berapa banyak yang akan di-recompute
- *  - limit=N    : maksimum jumlah submission yang di-process per call (max 200)
+ *  - limit=N    : maksimum jumlah submission yang di-process per call
  *  - testKind=BAKAT|MINAT : filter testKind tertentu
  *  - submissionId=ID      : recompute hanya satu submission tertentu
- *  - before=ISODATE       : hanya rescore submission yang Result.generatedAt
- *                           < ISODATE (atau Result null). Dipakai admin
- *                           panel: cutoff = waktu mulai sesi rescore,
- *                           supaya call berulang berhenti otomatis kalau
- *                           semua submission lama sudah di-rescore.
- *
- * Strategi batching: ambil dulu submission yang BELUM punya Result, lalu
- * yang Result.generatedAt paling lama. Tiap rescore meng-update
- * generatedAt jadi waktu sekarang → submission tersebut "naik" ke akhir
- * antrian.
  */
 export async function POST(req: NextRequest) {
   const admin = getAdminFromRequest(req);
@@ -47,22 +36,14 @@ export async function POST(req: NextRequest) {
   const testKind: "MINAT" | "BAKAT" | null =
     testKindParam === "MINAT" || testKindParam === "BAKAT" ? testKindParam : null;
   const submissionIdParam = url.searchParams.get("submissionId");
-  const beforeParam = url.searchParams.get("before");
-  const beforeDate = beforeParam ? new Date(beforeParam) : null;
-  const beforeValid = beforeDate && !Number.isNaN(beforeDate.getTime()) ? beforeDate : null;
 
-  const where: Prisma.SubmissionWhereInput = { finishedAt: { not: null } };
+  const where: {
+    finishedAt: { not: null };
+    testKind?: "MINAT" | "BAKAT";
+    id?: string;
+  } = { finishedAt: { not: null } };
   if (testKind) where.testKind = testKind;
   if (submissionIdParam) where.id = submissionIdParam;
-  if (beforeValid) {
-    // Submission yang Result.generatedAt < before, ATAU belum punya Result
-    // sama sekali. Ini supaya admin bisa "rescore semua data sebelum
-    // PR scoring fix di-deploy" dengan satu cutoff.
-    where.OR = [
-      { result: { is: { generatedAt: { lt: beforeValid } } } },
-      { result: { is: null } },
-    ];
-  }
 
   const total = await prisma.submission.count({ where });
 
@@ -78,28 +59,12 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Order by Result.generatedAt ASC NULLS FIRST. Prisma tidak punya nulls
-  // ordering native, jadi kita pakai 2 query:
-  //  1) yang result-nya null (belum pernah di-score) — ambil sebanyak limit
-  //  2) sisa quota → yang result.generatedAt paling lama
-  // Ini lebih simpel dan deterministik daripada pakai $queryRaw.
-  const subsNoResult = await prisma.submission.findMany({
-    where: { ...where, result: { is: null } },
-    orderBy: { finishedAt: "asc" },
+  const subs = await prisma.submission.findMany({
+    where,
+    orderBy: { finishedAt: "desc" },
     take: limit,
     select: { id: true, fullName: true, testKind: true },
   });
-  const remainingQuota = limit - subsNoResult.length;
-  const subsOldResult =
-    remainingQuota > 0
-      ? await prisma.submission.findMany({
-          where: { ...where, result: { isNot: null } },
-          orderBy: { result: { generatedAt: "asc" } },
-          take: remainingQuota,
-          select: { id: true, fullName: true, testKind: true },
-        })
-      : [];
-  const subs = [...subsNoResult, ...subsOldResult];
 
   const results: {
     submissionId: string;
@@ -120,7 +85,6 @@ export async function POST(req: NextRequest) {
       const payload = await scoreSubmission(s.id);
       const topProfiles = payload.bakat?.topProfiles.map((p) => p.name);
       const topPrograms = payload.minat?.programs.map((p) => p.bidang);
-      const now = new Date();
       await prisma.result.upsert({
         where: { submissionId: s.id },
         create: {
@@ -129,16 +93,12 @@ export async function POST(req: NextRequest) {
           iqEstimate: payload.iqEstimate ?? null,
           topProfiles: topProfiles ?? Prisma.JsonNull,
           topPrograms: topPrograms ?? Prisma.JsonNull,
-          generatedAt: now,
         },
         update: {
           payload: payload as unknown as Prisma.InputJsonValue,
           iqEstimate: payload.iqEstimate ?? null,
           topProfiles: topProfiles ?? Prisma.JsonNull,
           topPrograms: topPrograms ?? Prisma.JsonNull,
-          // Penting: update generatedAt supaya call berulang tidak
-          // memproses submission yang sama dua kali di session ini.
-          generatedAt: now,
         },
       });
       results.push({
@@ -164,14 +124,10 @@ export async function POST(req: NextRequest) {
 
   const okCount = results.filter((r) => r.ok).length;
   const failedCount = results.length - okCount;
-  const iqChanged = results.filter(
-    (r) => r.ok && r.oldIq != null && r.newIq != null && r.oldIq !== r.newIq,
-  ).length;
   return NextResponse.json({
     processed: results.length,
     ok: okCount,
     failed: failedCount,
-    iqChanged,
     totalEligible: total,
     remaining: Math.max(0, total - results.length),
     results,
