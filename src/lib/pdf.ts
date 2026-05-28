@@ -101,6 +101,35 @@ function hexToRGB(hex: string): [number, number, number] {
   return [r, g, b];
 }
 
+// jsPDF default Helvetica encodes to WinAnsi (CP1252).  Most
+// typographic punctuation works (em-dash, en-dash, ellipsis,
+// bullet, multiplication sign) but U+2212 MINUS and U+2192 RIGHT
+// ARROW are outside CP1252 and render as garbage glyphs.  Replace
+// just those with ASCII equivalents before any string is drawn.
+function safe(s: string): string {
+  return s.replace(/\u2212/g, "-").replace(/\u2192/g, "->");
+}
+
+// Wrap `s` to `maxW` and return at most `maxLines` lines; the
+// final line is truncated with an ellipsis if more wrapped lines
+// were dropped, so callers never see text bleeding past a box.
+function wrapClamp(
+  doc: jsPDF,
+  s: string,
+  maxW: number,
+  maxLines: number,
+): string[] {
+  const lines = doc.splitTextToSize(safe(s), maxW) as string[];
+  if (lines.length <= maxLines) return lines;
+  const kept = lines.slice(0, maxLines);
+  let tail = kept[maxLines - 1];
+  while (tail.length > 1 && doc.getTextWidth(tail + "\u2026") > maxW) {
+    tail = tail.slice(0, -1);
+  }
+  kept[maxLines - 1] = tail + "\u2026";
+  return kept;
+}
+
 function setFillHex(doc: jsPDF, hex: string): void {
   const [r, g, b] = hexToRGB(hex);
   doc.setFillColor(r, g, b);
@@ -137,6 +166,11 @@ export function buildReportPDF(submission: SubmissionInfo, payload: ScoringPaylo
   }
 
   drawFooter(doc, margin, pageW, pageH);
+  // Safety net: laporan WAJIB 1 halaman.  Jika ada konten yang
+  // tiba-tiba pindah ke halaman 2+ (mis. autoTable overshoot), buang
+  // saja — lebih baik konten terpotong ringan daripada PDF jadi 2
+  // lembar yang berantakan.
+  while (doc.getNumberOfPages() > 1) doc.deletePage(doc.getNumberOfPages());
   return Buffer.from(doc.output("arraybuffer"));
 }
 
@@ -253,9 +287,10 @@ function drawIdentity(
       lineColor: hexToRGB(HAIRLINE),
       textColor: hexToRGB(INK),
       cellPadding: { top: 2.5, bottom: 2.5, left: 6, right: 6 },
+      overflow: "ellipsize",
     },
     columnStyles: {
-      0: { fontStyle: "bold", textColor: hexToRGB(SOFT_INK), cellWidth: 76 },
+      0: { fontStyle: "bold", textColor: hexToRGB(SOFT_INK), cellWidth: 92 },
       1: { fontStyle: "bold", cellWidth: "auto" },
       2: { fontStyle: "bold", textColor: hexToRGB(SOFT_INK), cellWidth: 76 },
       3: { fontStyle: "bold", cellWidth: 130 },
@@ -390,15 +425,17 @@ function drawIqCard(
   setTextHex(doc, INK);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
-  const bandLabel =
-    fsiq?.band.label ?? payload.iqInterpretation?.band ?? "—";
-  doc.text(bandLabel, rightX, y + 18);
+  const bandLabel = safe(
+    fsiq?.band.label ?? payload.iqInterpretation?.band ?? "—",
+  );
+  doc.text(bandLabel, rightX, y + 18, { maxWidth: rightW });
 
+  // Deskripsi maks 2 baris supaya tidak nubruk "FORMULA AKUMULASI".
   doc.setFont("helvetica", "normal");
   setTextHex(doc, SOFT_INK);
   doc.setFontSize(8.4);
   const desc = fsiq?.band.descId ?? payload.iqInterpretation?.description ?? "";
-  const descLines = doc.splitTextToSize(desc, rightW);
+  const descLines = wrapClamp(doc, desc, rightW, 2);
   doc.text(descLines, rightX, y + 30);
 
   // Formula box
@@ -412,13 +449,14 @@ function drawIqCard(
   const formula =
     fsiq?.formula ??
     "IQ = (0.30 \u00D7 Penalaran) + (0.25 \u00D7 Verbal) + (0.25 \u00D7 Kuantitatif) + (0.20 \u00D7 Spasial)";
-  const fLines = doc.splitTextToSize(formula, rightW);
+  const fLines = wrapClamp(doc, formula, rightW, 1);
   doc.text(fLines, rightX, y + 62);
   doc.setFontSize(7.4);
   doc.text(
-    "-> hasil dikonversi ke skala IQ (M=100, SD=15).",
+    "hasil dikonversi ke skala IQ (M=100, SD=15).",
     rightX,
     y + 76,
+    { maxWidth: rightW },
   );
 
   return y + cardH + 10;
@@ -513,6 +551,7 @@ function drawSubtestTable(
       lineColor: hexToRGB(HAIRLINE),
       textColor: hexToRGB(INK),
       cellPadding: { top: 3, bottom: 3, left: 6, right: 6 },
+      overflow: "ellipsize",
     },
     headStyles: {
       fillColor: hexToRGB(INK),
@@ -654,11 +693,16 @@ function drawPenjurusanBakat(
   setTextHex(doc, INK);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
-  doc.text(`REKOMENDASI: ${pj.rekomendasiLabel.toUpperCase()}`, margin + 8, y + 13);
+  doc.text(
+    safe(`REKOMENDASI: ${pj.rekomendasiLabel.toUpperCase()}`),
+    margin + 8,
+    y + 13,
+    { maxWidth: innerW - 16 },
+  );
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.6);
   doc.text(
-    `Selisih (IPA − IPS): ${pj.selisih.toFixed(1)} poin.`,
+    `Selisih (IPA - IPS): ${pj.selisih.toFixed(1)} poin.`,
     margin + 8,
     y + 24,
   );
@@ -730,6 +774,7 @@ function drawRecommendations(
       lineColor: hexToRGB(HAIRLINE),
       textColor: hexToRGB(INK),
       cellPadding: { top: 2.5, bottom: 2.5, left: 8, right: 8 },
+      overflow: "ellipsize",
     },
     headStyles: {
       fillColor: hexToRGB(ACCENT),
@@ -753,6 +798,7 @@ function drawRecommendations(
       lineColor: hexToRGB(HAIRLINE),
       textColor: hexToRGB(INK),
       cellPadding: { top: 2.5, bottom: 2.5, left: 8, right: 8 },
+      overflow: "ellipsize",
     },
     headStyles: {
       fillColor: hexToRGB(PRIMARY),
@@ -943,6 +989,7 @@ function drawMinatBody(
         lineColor: hexToRGB(HAIRLINE),
         textColor: hexToRGB(INK),
         cellPadding: { top: 3, bottom: 3, left: 8, right: 8 },
+        overflow: "ellipsize",
       },
       headStyles: {
         fillColor: hexToRGB(INK),
