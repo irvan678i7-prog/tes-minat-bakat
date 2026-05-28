@@ -102,12 +102,60 @@ function hexToRGB(hex: string): [number, number, number] {
 }
 
 // jsPDF default Helvetica encodes to WinAnsi (CP1252).  Most
-// typographic punctuation works (em-dash, en-dash, ellipsis,
-// bullet, multiplication sign) but U+2212 MINUS and U+2192 RIGHT
-// ARROW are outside CP1252 and render as garbage glyphs.  Replace
-// just those with ASCII equivalents before any string is drawn.
+// typographic punctuation (em-dash, en-dash, ellipsis, bullet,
+// multiplication sign, smart quotes, fractions, degree, plus-minus,
+// trademark, copyright, superscripts) renders fine; but a handful of
+// math/arrow symbols are outside CP1252 and render as garbage glyphs
+// (mis. \u2264 muncul sebagai "'d" di laporan).  Daftar di bawah ini
+// dihasilkan dari probe nyata terhadap jsPDF default Helvetica —
+// hanya yang TERBUKTI rusak yang di-substitusi, supaya tipografi
+// karakter lain tetap natural.
+const GLYPH_FIX: Record<string, string> = {
+  "\u2212": "-", //  −  minus
+  "\u2192": "->", // →  right arrow
+  "\u2190": "<-", // ←  left arrow
+  "\u2264": "<=", // ≤  less or equal
+  "\u2265": ">=", // ≥  greater or equal
+  "\u2260": "!=", // ≠  not equal
+  "\u2248": "~", //  ≈  approx
+  "\u221A": "sqrt", // √
+  "\u221E": "inf", // ∞
+  "\u2032": "'", //  ′  prime
+  "\u25CF": "\u2022", // ● → •
+  "\u25CB": "o", //  ○
+};
+const GLYPH_FIX_RE = new RegExp(
+  `[${Object.keys(GLYPH_FIX).join("")}]`,
+  "g",
+);
 function safe(s: string): string {
-  return s.replace(/\u2212/g, "-").replace(/\u2192/g, "->");
+  if (!s) return s;
+  return s.replace(GLYPH_FIX_RE, (c) => GLYPH_FIX[c] ?? c);
+}
+
+// Patch jsPDF.text + splitTextToSize so SEMUA tulisan otomatis lewat
+// safe() — termasuk yang ditulis oleh jspdf-autotable.  Dengan begini
+// tidak ada lagi catatan / kategori / nama dari data yang lolos dan
+// dirender sebagai glyph rusak.
+function installSafeTextPatches(doc: jsPDF): void {
+  const origText = doc.text.bind(doc);
+  const origSplit = doc.splitTextToSize.bind(doc);
+  const sanitize = (t: unknown): unknown => {
+    if (typeof t === "string") return safe(t);
+    if (Array.isArray(t))
+      return t.map((x) => (typeof x === "string" ? safe(x) : x));
+    return t;
+  };
+  doc.text = ((...args: unknown[]) => {
+    args[0] = sanitize(args[0]);
+    return (origText as (...a: unknown[]) => jsPDF)(...args);
+  }) as typeof doc.text;
+  doc.splitTextToSize = ((t: unknown, w: number, opts?: unknown) =>
+    (origSplit as (t: unknown, w: number, o?: unknown) => string[])(
+      sanitize(t),
+      w,
+      opts,
+    )) as typeof doc.splitTextToSize;
 }
 
 // Wrap `s` to `maxW` and return at most `maxLines` lines; the
@@ -150,6 +198,7 @@ function nextY(doc: jsPDF, fallback: number): number {
 
 export function buildReportPDF(submission: SubmissionInfo, payload: ScoringPayload): Buffer {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
+  installSafeTextPatches(doc);
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 28;
@@ -165,6 +214,11 @@ export function buildReportPDF(submission: SubmissionInfo, payload: ScoringPaylo
     drawMinatBody(doc, payload, margin, y, pageW, pageH);
   }
 
+  // Disclaimer + footer ditarik di luar drawBakatBody/drawMinatBody
+  // sehingga setPage(1) selalu dipanggil di sini, memastikan keduanya
+  // selalu tergambar di halaman 1 meskipun autoTable sempat membuka
+  // halaman 2 sebelum dipotong safety net.
+  if (doc.getNumberOfPages() > 1) doc.setPage(1);
   drawFooter(doc, margin, pageW, pageH);
   // Safety net: laporan WAJIB 1 halaman.  Jika ada konten yang
   // tiba-tiba pindah ke halaman 2+ (mis. autoTable overshoot), buang
@@ -338,7 +392,7 @@ function drawBakatBody(
   }
 
   // 5) Rekomendasi (2 kolom)
-  y = drawRecommendations(doc, payload, margin, y, pageW);
+  y = drawRecommendations(doc, payload, margin, y, pageW, pageH);
 
   // 6) Narasi singkat
   const narrative = payload.bakat?.narrative;
@@ -346,7 +400,10 @@ function drawBakatBody(
     y = drawNarrative(doc, narrative, margin, y, pageW);
   }
 
-  // 7) Disclaimer ringkas
+  // 7) Disclaimer ringkas.  setPage(1) defensif jika autoTable
+  // sebelumnya membuka halaman 2 — disclaimer tetap rendered di
+  // halaman 1, dan safety-net akan menghapus halaman ekstra.
+  if (doc.getNumberOfPages() > 1) doc.setPage(1);
   drawDisclaimerOneLine(doc, margin, pageW, pageH);
   return y;
 }
@@ -600,7 +657,9 @@ function drawSubtestTable(
     margin,
     y,
   );
-  return y + 8;
+  // Tambah napas antara baris keterangan & judul section berikutnya
+  // (PENJURUSAN / 3 BIDANG MINAT) supaya tidak nempel.
+  return y + 14;
 }
 
 // ── PENJURUSAN IPA / IPS ────────────────────────────────────────────────
@@ -706,13 +765,17 @@ function drawPenjurusanBakat(
     margin + 8,
     y + 24,
   );
-  y += recH + 6;
+  // Jarak yang cukup setelah banner agar catatan di bawahnya jelas
+  // terpisah secara visual (bukan kelihatan bagian dari banner).
+  y += recH + 12;
   setTextHex(doc, SOFT_INK);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.6);
-  const catatanLines = doc.splitTextToSize(pj.catatan, innerW);
+  // Catatan dibatasi maks 3 baris dengan ellipsis: kalau lebih, baris
+  // berikutnya berisiko mendorong tabel rekomendasi keluar halaman.
+  const catatanLines = wrapClamp(doc, pj.catatan, innerW, 3);
   doc.text(catatanLines, margin, y);
-  y += catatanLines.length * 9 + 8;
+  y += catatanLines.length * 9 + 10;
   return y;
 }
 
@@ -750,9 +813,20 @@ function drawRecommendations(
   margin: number,
   yIn: number,
   pageW: number,
+  pageH: number,
 ): number {
-  const majors = payload.recommendations.majors.slice(0, 6);
-  const careers = payload.recommendations.careers.slice(0, 6);
+  // Hitung baris maksimum yang masih masuk halaman sebelum kotak
+  // disclaimer (pageH-56).  Ini mencegah autoTable membuat halaman 2
+  // yang akan menyeret disclaimer + footer ikut ke halaman 2 (lalu
+  // terbuang oleh safety net 1-halaman).
+  const rowH = 16;
+  const headerH = 18;
+  const reserved = 56 + 8; // disclaimer + napas
+  const available = pageH - reserved - (yIn + 4) - headerH;
+  const maxRows = Math.max(1, Math.floor(available / rowH));
+  const cap = Math.min(6, maxRows);
+  const majors = payload.recommendations.majors.slice(0, cap);
+  const careers = payload.recommendations.careers.slice(0, cap);
   if (majors.length === 0 && careers.length === 0) return yIn;
 
   setTextHex(doc, INK);
@@ -1009,9 +1083,12 @@ function drawMinatBody(
   }
 
   // Rekomendasi jurusan & karir
-  y = drawRecommendations(doc, payload, margin, y, pageW);
+  y = drawRecommendations(doc, payload, margin, y, pageW, pageH);
 
-  // Disclaimer + footer
+  // Disclaimer + footer.  setPage(1) defensif kalau autoTable
+  // sebelumnya sempat membuka halaman 2 — disclaimer tetap di
+  // halaman 1.
+  if (doc.getNumberOfPages() > 1) doc.setPage(1);
   drawDisclaimerOneLine(doc, margin, pageW, pageH);
   return y;
 }
