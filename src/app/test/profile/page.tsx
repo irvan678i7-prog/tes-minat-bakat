@@ -28,6 +28,7 @@ export default async function ProfilePage() {
           initial={{
             fullName: sub.fullName || "",
             gender: sub.gender || "",
+            jenjang: sub.jenjang || "",
             birthPlace: sub.birthPlace || "",
             birthDate: sub.birthDate ? sub.birthDate.toISOString().slice(0, 10) : "",
             age: sub.age ?? undefined,

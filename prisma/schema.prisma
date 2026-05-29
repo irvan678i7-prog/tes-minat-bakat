@@ -103,6 +103,9 @@ model Submission {
   testKind      TestKind
   fullName      String?
   gender        String?
+  // Jenjang pendidikan peserta: "SMP", "SMA", atau "SMK". Menentukan
+  // bentuk rekomendasi di laporan PDF (lanjut sekolah / kuliah / kerja).
+  jenjang       String?
   birthPlace    String?
   birthDate     DateTime?
   age           Int?

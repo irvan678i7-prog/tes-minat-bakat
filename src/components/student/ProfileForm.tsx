@@ -5,7 +5,8 @@ import { useMemo, useState, useTransition } from "react";
 import toast from "react-hot-toast";
 
 type Initial = {
-  fullName: string; gender: string; birthPlace: string; birthDate: string;
+  fullName: string; gender: string; jenjang: string;
+  birthPlace: string; birthDate: string;
   age?: number; grade: string; school: string; major: string;
   phone: string; email: string;
 };
@@ -34,8 +35,8 @@ export default function ProfileForm({ initial }: { initial: Initial }) {
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!d.fullName.trim() || !d.gender || !d.school.trim()) {
-      return toast.error("Nama, jenis kelamin, & sekolah wajib diisi");
+    if (!d.fullName.trim() || !d.gender || !d.jenjang || !d.school.trim()) {
+      return toast.error("Nama, jenis kelamin, jenjang, & sekolah wajib diisi");
     }
     startTransition(async () => {
       const body = { ...d, age: derivedAge, email: d.email || undefined };
@@ -67,6 +68,18 @@ export default function ProfileForm({ initial }: { initial: Initial }) {
           <option value="L">Laki-laki</option>
           <option value="P">Perempuan</option>
         </select>
+      </div>
+      <div className="md:col-span-2">
+        <label className="text-xs font-black uppercase block mb-1">Jenjang Pendidikan *</label>
+        <select className="brut-input w-full" value={d.jenjang} onChange={(e) => set("jenjang", e.target.value)} required>
+          <option value="">— Pilih jenjang —</option>
+          <option value="SMP">SMP / MTs / sederajat</option>
+          <option value="SMA">SMA / MA / sederajat</option>
+          <option value="SMK">SMK / MAK / sederajat</option>
+        </select>
+        <p className="text-[11px] text-neutral-600 mt-1">
+          Menentukan bentuk rekomendasi pada laporan hasil tes.
+        </p>
       </div>
       <div>
         <label className="text-xs font-black uppercase block mb-1">Tempat Lahir</label>

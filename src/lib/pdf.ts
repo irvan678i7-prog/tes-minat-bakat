@@ -26,13 +26,35 @@ import {
   BOBOT_IPA_PCT,
   BOBOT_IPS_PCT,
   KOMPONEN_LABEL,
+  hitungMinatSkor,
   type KomponenKode,
 } from "./penjurusan";
+
+type Jenjang = "SMP" | "SMA" | "SMK";
+
+function normJenjang(j: string | null | undefined): Jenjang | null {
+  const v = String(j ?? "").trim().toUpperCase();
+  return v === "SMP" || v === "SMA" || v === "SMK" ? v : null;
+}
+
+function jenjangLabel(j: string | null | undefined): string {
+  switch (normJenjang(j)) {
+    case "SMP":
+      return "SMP/MTs";
+    case "SMA":
+      return "SMA/MA";
+    case "SMK":
+      return "SMK/MAK";
+    default:
+      return "—";
+  }
+}
 
 type SubmissionInfo = {
   id: string;
   fullName: string | null;
   gender: string | null;
+  jenjang: string | null;
   birthPlace: string | null;
   birthDate: Date | null;
   age: number | null;
@@ -208,10 +230,11 @@ export function buildReportPDF(submission: SubmissionInfo, payload: ScoringPaylo
   // Identitas peserta — kompak 2 baris × 4 sel.
   const y = drawIdentity(doc, submission, margin, 88);
 
+  const jenjang = normJenjang(submission.jenjang);
   if (payload.testKind === "BAKAT") {
-    drawBakatBody(doc, payload, margin, y, pageW, pageH);
+    drawBakatBody(doc, payload, jenjang, margin, y, pageW, pageH);
   } else {
-    drawMinatBody(doc, payload, margin, y, pageW, pageH);
+    drawMinatBody(doc, payload, jenjang, margin, y, pageW, pageH);
   }
 
   // Disclaimer + footer ditarik di luar drawBakatBody/drawMinatBody
@@ -320,8 +343,8 @@ function drawIdentity(
     [
       "Sekolah",
       sub.school || "—",
-      "Kelas/Jurusan",
-      `${sub.grade || "—"} / ${sub.major || "—"}`,
+      "Jenjang/Kelas/Jur.",
+      `${jenjangLabel(sub.jenjang)} / ${sub.grade || "—"} / ${sub.major || "—"}`,
     ],
     [
       "Mulai",
@@ -367,6 +390,7 @@ function drawIdentity(
 function drawBakatBody(
   doc: jsPDF,
   payload: ScoringPayload,
+  jenjang: Jenjang | null,
   margin: number,
   yIn: number,
   pageW: number,
@@ -386,18 +410,30 @@ function drawBakatBody(
   // 3) Skor per subtes
   y = drawSubtestTable(doc, payload, margin, y);
 
-  // 4) Penjurusan IPA / IPS (untuk SMA — pada SMK ditampilkan sebagai info pendukung)
-  if (payload.penjurusan) {
+  // 4) Penjurusan IPA / IPS — blok analisis lengkap hanya untuk SMA (peserta
+  //    yang benar-benar memilih peminatan) dan data lama tanpa jenjang. Pada
+  //    SMP cukup diringkas sebagai "SMA - Peminatan X" di rekomendasi, dan
+  //    pada SMK tidak relevan (tidak ada peminatan IPA/IPS). Dengan begitu
+  //    ruang halaman dipakai untuk daftar jurusan/karir yang lebih lengkap.
+  if (payload.penjurusan && (jenjang === "SMA" || jenjang === null)) {
     y = drawPenjurusanBakat(doc, payload, margin, y, pageW);
   }
 
-  // 5) Rekomendasi (2 kolom)
-  y = drawRecommendations(doc, payload, margin, y, pageW, pageH);
+  // 5) Rekomendasi (2 kolom) — bentuk menyesuaikan jenjang. Rekomendasi
+  //    (jurusan/karir) lebih diprioritaskan daripada RINGKASAN; biarkan ia
+  //    mengisi ruang yang tersedia (cap maksimum 6 baris).
+  y = drawRecommendationsByJenjang(doc, payload, jenjang, margin, y, pageW, pageH);
 
-  // 6) Narasi singkat
+  // 6) Narasi singkat — hanya digambar bila masih muat penuh di atas band
+  //    disclaimer, supaya tidak pernah menabrak (laporan tetap rapih).
   const narrative = payload.bakat?.narrative;
   if (narrative) {
-    y = drawNarrative(doc, narrative, margin, y, pageW);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.4);
+    const narrativeLines = doc.splitTextToSize(narrative, pageW - margin * 2);
+    if (y + 12 + narrativeLines.length * 10 + 4 < pageH - 56) {
+      y = drawNarrative(doc, narrative, margin, y, pageW);
+    }
   }
 
   // 7) Disclaimer ringkas.  setPage(1) defensif jika autoTable
@@ -460,7 +496,7 @@ function drawIqCard(
   setTextHex(doc, WHITE);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.6);
-  doc.text("SKOR IQ PREDIKTIF", margin + 10, y + 18);
+  doc.text("SKOR EKIU", margin + 10, y + 18);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(36);
   const score = fsiq?.score ?? payload.iqEstimate ?? null;
@@ -806,53 +842,129 @@ function drawPenjurusanScoreBox(
   doc.text(lines, x + 8, y + 44);
 }
 
-// ── REKOMENDASI (2 kolom) ────────────────────────────────────────────────
-function drawRecommendations(
+// ── REKOMENDASI (2 kolom, menyesuaikan jenjang) ──────────────────────────
+type RecColumn = {
+  header: string;
+  items: string[];
+  fill: string;
+  headerText: string;
+};
+
+// Arah lanjut sekolah untuk peserta SMP: peminatan SMA (IPA/IPS) + bidang SMK
+// yang paling selaras dengan profil bakat / minat.
+function buildArahLanjut(payload: ScoringPayload): string[] {
+  const isBakat = payload.testKind === "BAKAT";
+  let peminatan = "IPA / IPS (fleksibel)";
+  if (isBakat && payload.penjurusan) {
+    peminatan = payload.penjurusan.rekomendasiLabel;
+  } else if (!isBakat && payload.minat?.bidangScores) {
+    const m = hitungMinatSkor(payload.minat.bidangScores);
+    peminatan = m.ipaDominant
+      ? "IPA"
+      : m.ipsDominant
+        ? "IPS"
+        : "IPA / IPS (fleksibel)";
+  }
+  let smk = "Sesuai minat & bakat";
+  if (isBakat) {
+    smk = payload.bakat?.topProfiles?.[0]?.name ?? smk;
+  } else {
+    smk = payload.minat?.programs?.[0]?.kind || smk;
+  }
+  return [`SMA - Peminatan ${peminatan}`, `SMK - ${smk}`];
+}
+
+// Bangun judul + 2 kolom rekomendasi sesuai jenjang peserta.
+function recommendationLayout(
+  payload: ScoringPayload,
+  jenjang: Jenjang | null,
+): { title: string; left: RecColumn; right: RecColumn } {
+  const majors = payload.recommendations.majors;
+  const careers = payload.recommendations.careers;
+  const yellow = { fill: ACCENT, headerText: INK };
+  const blue = { fill: PRIMARY, headerText: WHITE };
+
+  if (jenjang === "SMP") {
+    return {
+      title: "REKOMENDASI LANJUTAN & JURUSAN",
+      left: { header: "LANJUT KE (SMA / SMK)", items: buildArahLanjut(payload), ...yellow },
+      right: { header: "JURUSAN YANG COCOK", items: majors, ...blue },
+    };
+  }
+  if (jenjang === "SMA") {
+    return {
+      title: "REKOMENDASI KULIAH & JURUSAN",
+      left: { header: "JURUSAN KULIAH", items: majors, ...yellow },
+      right: { header: "PROSPEK KARIR", items: careers, ...blue },
+    };
+  }
+  if (jenjang === "SMK") {
+    return {
+      title: "REKOMENDASI PEKERJAAN & JURUSAN",
+      left: { header: "JURUSAN / PROGRAM", items: majors, ...yellow },
+      right: { header: "PEKERJAAN", items: careers, ...blue },
+    };
+  }
+  // Tanpa jenjang (data lama): pertahankan format lama.
+  return {
+    title: "REKOMENDASI",
+    left: { header: "JURUSAN", items: majors, ...yellow },
+    right: { header: "PEKERJAAN", items: careers, ...blue },
+  };
+}
+
+function drawRecommendationsByJenjang(
   doc: jsPDF,
   payload: ScoringPayload,
+  jenjang: Jenjang | null,
   margin: number,
   yIn: number,
   pageW: number,
   pageH: number,
+  reserveBelow = 0,
 ): number {
+  const { title, left, right } = recommendationLayout(payload, jenjang);
+
   // Hitung baris maksimum yang masih masuk halaman sebelum kotak
   // disclaimer (pageH-56).  Ini mencegah autoTable membuat halaman 2
   // yang akan menyeret disclaimer + footer ikut ke halaman 2 (lalu
-  // terbuang oleh safety net 1-halaman).
+  // terbuang oleh safety net 1-halaman).  `reserveBelow` menyisakan ruang
+  // untuk elemen setelah rekomendasi (mis. RINGKASAN) agar tidak menabrak.
   const rowH = 16;
   const headerH = 18;
-  const reserved = 56 + 8; // disclaimer + napas
+  const reserved = 56 + 8 + reserveBelow; // disclaimer + napas + ruang bawah
   const available = pageH - reserved - (yIn + 4) - headerH;
   const maxRows = Math.max(1, Math.floor(available / rowH));
   const cap = Math.min(6, maxRows);
-  const majors = payload.recommendations.majors.slice(0, cap);
-  const careers = payload.recommendations.careers.slice(0, cap);
-  if (majors.length === 0 && careers.length === 0) return yIn;
+  const leftItems = left.items.slice(0, cap);
+  const rightItems = right.items.slice(0, cap);
+  if (leftItems.length === 0 && rightItems.length === 0) return yIn;
 
   setTextHex(doc, INK);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
-  doc.text("REKOMENDASI", margin, yIn);
+  doc.text(title, margin, yIn);
 
   const colW = (pageW - margin * 2 - 12) / 2;
   const yStart = yIn + 4;
+  const baseStyles = {
+    font: "helvetica",
+    fontSize: 8.4,
+    lineWidth: 0.3,
+    lineColor: hexToRGB(HAIRLINE),
+    textColor: hexToRGB(INK),
+    cellPadding: { top: 2.5, bottom: 2.5, left: 8, right: 8 },
+    overflow: "ellipsize" as const,
+  };
   autoTable(doc, {
     startY: yStart,
-    head: [["JURUSAN"]],
-    body: majors.length > 0 ? majors.map((m) => [m]) : [["—"]],
+    head: [[left.header]],
+    body: leftItems.length > 0 ? leftItems.map((m) => [m]) : [["—"]],
     theme: "plain",
-    styles: {
-      font: "helvetica",
-      fontSize: 8.4,
-      lineWidth: 0.3,
-      lineColor: hexToRGB(HAIRLINE),
-      textColor: hexToRGB(INK),
-      cellPadding: { top: 2.5, bottom: 2.5, left: 8, right: 8 },
-      overflow: "ellipsize",
-    },
+    styles: baseStyles,
     headStyles: {
-      fillColor: hexToRGB(ACCENT),
-      textColor: hexToRGB(INK),
+      fillColor: hexToRGB(left.fill),
+      textColor: hexToRGB(left.headerText),
       fontStyle: "bold",
       fontSize: 8,
     },
@@ -862,21 +974,13 @@ function drawRecommendations(
   });
   autoTable(doc, {
     startY: yStart,
-    head: [["PEKERJAAN"]],
-    body: careers.length > 0 ? careers.map((c) => [c]) : [["—"]],
+    head: [[right.header]],
+    body: rightItems.length > 0 ? rightItems.map((c) => [c]) : [["—"]],
     theme: "plain",
-    styles: {
-      font: "helvetica",
-      fontSize: 8.4,
-      lineWidth: 0.3,
-      lineColor: hexToRGB(HAIRLINE),
-      textColor: hexToRGB(INK),
-      cellPadding: { top: 2.5, bottom: 2.5, left: 8, right: 8 },
-      overflow: "ellipsize",
-    },
+    styles: baseStyles,
     headStyles: {
-      fillColor: hexToRGB(PRIMARY),
-      textColor: hexToRGB(WHITE),
+      fillColor: hexToRGB(right.fill),
+      textColor: hexToRGB(right.headerText),
       fontStyle: "bold",
       fontSize: 8,
     },
@@ -940,6 +1044,7 @@ function drawFooter(doc: jsPDF, margin: number, pageW: number, pageH: number): v
 function drawMinatBody(
   doc: jsPDF,
   payload: ScoringPayload,
+  jenjang: Jenjang | null,
   margin: number,
   yIn: number,
   pageW: number,
@@ -1082,8 +1187,8 @@ function drawMinatBody(
     y = nextY(doc, y + 4) + 10;
   }
 
-  // Rekomendasi jurusan & karir
-  y = drawRecommendations(doc, payload, margin, y, pageW, pageH);
+  // Rekomendasi jurusan & karir — bentuk menyesuaikan jenjang.
+  y = drawRecommendationsByJenjang(doc, payload, jenjang, margin, y, pageW, pageH);
 
   // Disclaimer + footer.  setPage(1) defensif kalau autoTable
   // sebelumnya sempat membuka halaman 2 — disclaimer tetap di
