@@ -495,8 +495,14 @@ function drawIqCard(
   const fsiq = payload.bakat?.fsiq;
   setTextHex(doc, WHITE);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(7.6);
-  doc.text("SKOR EKIU", margin + 10, y + 18);
+  doc.setFontSize(6.2);
+  // Label penuh (bukan singkatan "SKOR EKIU"). Dibungkus beberapa baris agar
+  // muat di panel skor yang sempit, lalu angka besar tetap di bawahnya.
+  const ekiuLabelLines = doc.splitTextToSize(
+    "Skor Estimasi Kemampuan Intelektual Umum",
+    scoreW - 16,
+  );
+  doc.text(ekiuLabelLines, margin + 10, y + 12);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(36);
   const score = fsiq?.score ?? payload.iqEstimate ?? null;
