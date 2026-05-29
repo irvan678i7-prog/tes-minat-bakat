@@ -6,6 +6,7 @@ import { getStudentFromRequest } from "@/lib/auth";
 const Body = z.object({
   fullName: z.string().min(1),
   gender: z.string().min(1),
+  jenjang: z.enum(["SMP", "SMA", "SMK"]),
   birthPlace: z.string().optional(),
   birthDate: z
     .string()
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest) {
     data: {
       fullName: d.fullName,
       gender: d.gender,
+      jenjang: d.jenjang,
       birthPlace: d.birthPlace || null,
       birthDate: d.birthDate ? new Date(d.birthDate) : null,
       age: d.age || null,
