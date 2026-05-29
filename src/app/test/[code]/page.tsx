@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { shuffle } from "@/lib/random";
 import SubtestRunner from "@/components/student/SubtestRunner";
 import { BAKAT_SUBTESTS, MINAT_SUBTESTS } from "@/lib/test-config";
-import { ensureSubtestStarted } from "@/lib/subtestLock";
+import { computeSubtestLock } from "@/lib/subtestLock";
 
 export default async function SubtestPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
@@ -71,12 +71,14 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
     partLabels: resolvePartLabels(q),
   }));
 
-  // ensureSubtestStarted ALSO does the lock check (auto-TIME_UP kalau deadline
-  // lewat). Sebelumnya dipanggil terpisah dari computeSubtestLock — sekarang
-  // satu panggilan saja, dan dijalankan paralel dengan pengambilan jawaban
-  // yang sudah ada. Menghemat 1–2 round-trip ke DB saat siswa klik MULAI.
+  // Opening the subtest must NOT start the timer. We only READ the lock state
+  // here (computeSubtestLock) so the runner can show the intro screen
+  // (instructions + contoh soal) first. The server-side timer is started
+  // explicitly when the student clicks "MULAI" (POST /subtest-start).
+  // computeSubtestLock still auto-marks TIME_UP if a previously-started
+  // subtest's deadline has passed. Run it in parallel with the answer fetch.
   const [startInfo, existing] = await Promise.all([
-    ensureSubtestStarted({
+    computeSubtestLock({
       submissionId: sub.id,
       subtestId: subtest.id,
       durationSec: subtest.durationSec,
