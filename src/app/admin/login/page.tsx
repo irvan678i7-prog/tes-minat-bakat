@@ -135,14 +135,6 @@ export default function AdminLoginPage() {
           <button type="submit" className="brut-btn brut-btn-black w-full" disabled={pending}>
             {pending ? "MASUK..." : "MASUK"}
           </button>
-          <a
-            href="/api/admin/diagnose"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block text-center text-xs font-bold uppercase underline opacity-70 mt-2"
-          >
-            Diagnosa Konfigurasi Server →
-          </a>
         </form>
       </div>
     </div>

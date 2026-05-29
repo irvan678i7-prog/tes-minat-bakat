@@ -1,5 +1,5 @@
 // Skeleton saat siswa klik "MULAI" di kartu subtes — segera tampil sambil
-// server menyelesaikan query (ensureSubtestStarted + answer.findMany jalan
+// server menyelesaikan query (computeSubtestLock + answer.findMany jalan
 // paralel di page.tsx). Tanpa file ini, browser cuma diam ~ratusan ms.
 export default function SubtestLoading() {
   return (

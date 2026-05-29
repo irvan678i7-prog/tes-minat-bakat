@@ -430,6 +430,34 @@ export default function SubtestRunner({
     setStartedManual(true);
     // Enter fullscreen immediately while we still have the user gesture.
     ac.requestFullscreen();
+    // Record the server-side start time NOW (this is what begins the
+    // authoritative countdown + enables lazy TIME_UP locking). Opening the
+    // page no longer does this, so the intro/contoh-soal screen can show
+    // first. Fire-and-forget: the local timer already runs from localStorage;
+    // on reload the server startedAt becomes the source of truth.
+    void (async () => {
+      try {
+        const res = await fetch("/api/student/test/subtest-start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ subtestCode: subtest.code }),
+        });
+        const data = await res.json().catch(() => ({} as { locked?: boolean }));
+        // Kalau ternyata subtes sudah terkunci (mis. waktu sudah habis di
+        // sesi sebelumnya), kembalikan siswa ke daftar subtes.
+        if (data?.locked) {
+          if (typeof window !== "undefined") {
+            window.localStorage.removeItem(STORAGE_KEY(subtest.code));
+            window.localStorage.removeItem(STARTED_KEY(subtest.code));
+          }
+          router.push("/test");
+        }
+      } catch {
+        // Best-effort. Timer tetap jalan dari localStorage; saat siswa
+        // menyelesaikan subtes, /subtest-finish akan membuat progress bila
+        // belum ada.
+      }
+    })();
   };
 
   if (!q) return null;
