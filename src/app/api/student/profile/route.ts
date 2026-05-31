@@ -52,6 +52,24 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const student = getStudentFromRequest(req);
   if (!student) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const sub = await prisma.submission.findUnique({ where: { id: student.sub } });
+  const sub = await prisma.submission.findUnique({
+    where: { id: student.sub },
+    select: {
+      id: true,
+      testKind: true,
+      fullName: true,
+      gender: true,
+      jenjang: true,
+      birthPlace: true,
+      birthDate: true,
+      age: true,
+      grade: true,
+      school: true,
+      major: true,
+      phone: true,
+      email: true,
+      finishedAt: true,
+    },
+  });
   return NextResponse.json({ submission: sub });
 }
