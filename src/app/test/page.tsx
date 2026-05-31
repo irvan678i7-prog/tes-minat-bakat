@@ -2,7 +2,42 @@ import { redirect } from "next/navigation";
 import { getStudentFromCookies } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import TestHub from "@/components/student/TestHub";
-import { computeSubtestLock } from "@/lib/subtestLock";
+
+const TIME_UP_GRACE_MS = 3_000;
+
+type ProgressRow = { subtestId: string; startedAt: Date; finishedAt: Date | null; finishReason: string | null };
+type SubtestRow = { id: string; durationSec: number };
+
+function computeLocks(
+  subtests: SubtestRow[],
+  progressRecords: ProgressRow[],
+) {
+  const progressBySubtest = new Map(progressRecords.map((p) => [p.subtestId, p]));
+  const lockBySubtest = new Map<string, { locked: boolean; finishReason: string | null }>();
+  const expiredSubtestIds: string[] = [];
+  let firstDeadline: Date | null = null;
+  const now = Date.now();
+  for (const s of subtests) {
+    const p = progressBySubtest.get(s.id);
+    if (!p) {
+      lockBySubtest.set(s.id, { locked: false, finishReason: null });
+      continue;
+    }
+    if (p.finishedAt) {
+      lockBySubtest.set(s.id, { locked: true, finishReason: p.finishReason });
+      continue;
+    }
+    const deadline = new Date(p.startedAt.getTime() + s.durationSec * 1000);
+    if (now >= deadline.getTime() + TIME_UP_GRACE_MS) {
+      lockBySubtest.set(s.id, { locked: true, finishReason: "TIME_UP" });
+      expiredSubtestIds.push(s.id);
+      if (!firstDeadline) firstDeadline = deadline;
+    } else {
+      lockBySubtest.set(s.id, { locked: false, finishReason: null });
+    }
+  }
+  return { lockBySubtest, expiredSubtestIds, firstDeadline };
+}
 
 export default async function TestHome() {
   const me = await getStudentFromCookies();
@@ -12,50 +47,43 @@ export default async function TestHome() {
   if (!sub.fullName) redirect("/test/profile");
   if (sub.finishedAt) redirect("/test/done");
 
-  // Fetch subtest list + answered counts in parallel — independent reads.
-  const [subtests, answered] = await Promise.all([
+  // Fetch subtests, answer counts, AND all progress records in 1 parallel
+  // batch (3 queries) instead of 2 + 9 individual computeSubtestLock calls
+  // (12 queries total). Saves ~8 DB round-trips per page load.
+  const [subtests, answered, progressRecords] = await Promise.all([
     prisma.subtest.findMany({
       where: { testKind: sub.testKind },
       orderBy: { orderIndex: "asc" },
-      // Total soal harus mengecualikan soal contoh (isExample=true) supaya status
-      // "DONE/REVIEW" muncul saat siswa menjawab semua soal real, bukan saat
-      // jumlah jawaban menyentuh total termasuk contoh (yang tidak dijawab).
       include: {
         _count: { select: { questions: { where: { isExample: false } } } },
       },
     }),
-    // Hanya hitung jawaban untuk soal REAL (bukan contoh). Soal contoh tidak
-    // pernah disimpan sebagai Answer, tapi defensif: filter eksplisit di sini.
     prisma.answer.findMany({
       where: { submissionId: sub.id, question: { isExample: false } },
       select: { question: { select: { subtestId: true } } },
+    }),
+    prisma.subtestProgress.findMany({
+      where: { submissionId: sub.id },
+      select: { subtestId: true, startedAt: true, finishedAt: true, finishReason: true },
     }),
   ]);
   const counts: Record<string, number> = {};
   for (const a of answered) counts[a.question.subtestId] = (counts[a.question.subtestId] || 0) + 1;
 
-  // Hitung lock per subtes secara paralel (sekaligus auto-finish kalau timer
-  // sudah lewat). Sebelumnya dijalankan sequential dalam for-loop — dengan
-  // 9 subtes & latency Supabase ~80ms, ini menghemat ~600-700ms TTFB di /test.
-  const lockResults = await Promise.all(
-    subtests.map((s) =>
-      computeSubtestLock({
+  // Compute lock status in-memory from batch-fetched progress records.
+  const { lockBySubtest, expiredSubtestIds, firstDeadline } = computeLocks(subtests, progressRecords);
+
+  // Batch auto-finish expired subtests in one updateMany (fire-and-forget).
+  if (expiredSubtestIds.length > 0 && firstDeadline) {
+    prisma.subtestProgress.updateMany({
+      where: {
         submissionId: sub.id,
-        subtestId: s.id,
-        durationSec: s.durationSec,
-      }),
-    ),
-  );
-  const lockBySubtest = new Map<
-    string,
-    { locked: boolean; finishReason: string | null }
-  >();
-  subtests.forEach((s, i) => {
-    lockBySubtest.set(s.id, {
-      locked: lockResults[i].locked,
-      finishReason: lockResults[i].finishReason,
-    });
-  });
+        subtestId: { in: expiredSubtestIds },
+        finishedAt: null,
+      },
+      data: { finishReason: "TIME_UP", finishedAt: firstDeadline },
+    }).catch(() => {});
+  }
 
   return (
     <TestHub
