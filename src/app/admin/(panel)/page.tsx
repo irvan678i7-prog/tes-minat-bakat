@@ -4,21 +4,21 @@ import { useEffect, useState } from "react";
 import AdminTokens from "@/components/admin/AdminTokens";
 import AdminQuestions from "@/components/admin/AdminQuestions";
 import AdminSubmissions from "@/components/admin/AdminSubmissions";
+import AdminPanduan from "@/components/admin/AdminPanduan";
 
-type Tab = "tokens" | "questions" | "submissions";
+type Tab = "tokens" | "questions" | "submissions" | "panduan";
+const TABS = ["tokens", "questions", "submissions", "panduan"] as const;
 
 export default function AdminDashboard() {
   const [tab, setTab] = useState<Tab>(() => {
     if (typeof window === "undefined") return "tokens";
     const fromHash = window.location.hash.replace("#", "") as Tab;
-    return (["tokens", "questions", "submissions"] as const).includes(fromHash)
-      ? fromHash
-      : "tokens";
+    return TABS.includes(fromHash) ? fromHash : "tokens";
   });
   useEffect(() => {
     const onHash = () => {
       const h = window.location.hash.replace("#", "") as Tab;
-      if ((["tokens", "questions", "submissions"] as const).includes(h)) setTab(h);
+      if (TABS.includes(h)) setTab(h);
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
@@ -32,6 +32,7 @@ export default function AdminDashboard() {
           ["tokens", "Token"],
           ["questions", "Bank Soal"],
           ["submissions", "Hasil"],
+          ["panduan", "Panduan"],
         ] as const).map(([k, l]) => (
           <button
             key={k}
@@ -48,6 +49,7 @@ export default function AdminDashboard() {
       {tab === "tokens" && <AdminTokens />}
       {tab === "questions" && <AdminQuestions />}
       {tab === "submissions" && <AdminSubmissions />}
+      {tab === "panduan" && <AdminPanduan />}
     </div>
   );
 }

@@ -3,7 +3,14 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getAdminFromRequest } from "@/lib/auth";
 import { buildRekapPDF } from "@/lib/pdf-rekap";
-import { gradeAnswers, scoreSubmission, type ScoringPayload } from "@/lib/scoring";
+import { scoreSubmission, type ScoringPayload } from "@/lib/scoring";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+// Vercel Hobby plan max 10 detik. Untuk rekap besar (>50 peserta) bisa kena
+// limit ini \u2014 kalau perlu, batasi jumlah peserta per rekap atau pertimbangkan
+// upgrade plan. Sebagian besar payload sudah di-cache di tabel Result.
+export const maxDuration = 10;
 
 export async function GET(req: NextRequest) {
   const admin = getAdminFromRequest(req);
@@ -38,7 +45,6 @@ export async function GET(req: NextRequest) {
       let payload = s.result?.payload as unknown as ScoringPayload | null;
       let iq = s.result?.iqEstimate ?? null;
       if (!payload) {
-        await gradeAnswers(s.id);
         payload = await scoreSubmission(s.id);
         const topProfiles = payload.bakat?.topProfiles.map((p) => p.name);
         const topPrograms = payload.minat?.programs.map((p) => p.bidang);

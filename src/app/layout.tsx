@@ -15,8 +15,9 @@ const monoFont = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TES MINAT & BAKAT — SMK",
-  description: "Aplikasi tes minat & bakat untuk SMK. Brutalism UI.",
+  title: "EKIU — Estimasi Kemampuan Intelektual Umum",
+  description:
+    "EKIU (Estimasi Kemampuan Intelektual Umum) — aplikasi tes minat & bakat untuk SMK. Brutalism UI.",
 };
 
 export default function RootLayout({

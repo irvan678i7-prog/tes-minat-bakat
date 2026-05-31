@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getStudentFromRequest } from "@/lib/auth";
 import { shuffle } from "@/lib/random";
+import { BAKAT_SUBTESTS, MINAT_SUBTESTS } from "@/lib/test-config";
 
 export async function GET(req: NextRequest) {
   const student = getStudentFromRequest(req);
@@ -27,9 +28,16 @@ export async function GET(req: NextRequest) {
   const answeredQuestionIds = new Set(sub.answers.map((a) => a.questionId));
   const subtestProgress = await Promise.all(
     subtests.map(async (s) => {
-      const total = await prisma.question.count({ where: { subtestId: s.id } });
+      // Only count non-example questions (isExample=false) toward progress.
+      const total = await prisma.question.count({
+        where: { subtestId: s.id, isExample: false },
+      });
       const answered = await prisma.question.count({
-        where: { subtestId: s.id, id: { in: Array.from(answeredQuestionIds) } },
+        where: {
+          subtestId: s.id,
+          isExample: false,
+          id: { in: Array.from(answeredQuestionIds) },
+        },
       });
       return { ...s, total, answered, done: total > 0 && answered >= total };
     }),
@@ -47,6 +55,7 @@ export async function GET(req: NextRequest) {
       code: s.code,
       name: s.name,
       description: s.description,
+      instructions: s.instructions ?? "",
       durationSec: s.durationSec,
       total: s.total,
       answered: s.answered,
@@ -74,8 +83,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Subtest tidak valid" }, { status: 400 });
   }
 
+  const seedCfg = [...BAKAT_SUBTESTS, ...MINAT_SUBTESTS].find(
+    (x) => x.code === subtest.code,
+  );
+  const seedPartLabels = seedCfg?.partLabels ?? [];
+
+  // Per-soal partLabels: Question.partLabels override seed default. Kalau
+  // null, pakai seed; kalau seed juga kosong, pakai "1","2",..."parts".
+  const resolvePartLabels = (q: { parts: number; partLabels: unknown }): string[] => {
+    if (Array.isArray(q.partLabels) && q.partLabels.length > 0) {
+      return q.partLabels.map((v) => (v == null ? "" : String(v)));
+    }
+    if (seedPartLabels.length > 0) return seedPartLabels;
+    return Array.from({ length: q.parts }, (_, i) => String(i + 1));
+  };
+
   const seed = `${sub.randomSeed}:${subtest.code}`;
-  const questions = shuffle(subtest.questions, seed).map((q) => {
+  const realQuestions = subtest.questions.filter((q) => !q.isExample);
+  const exampleQuestions = subtest.questions
+    .filter((q) => q.isExample)
+    .sort((a, b) => a.questionNo - b.questionNo);
+
+  const questions = shuffle(realQuestions, seed).map((q) => {
     // Optionally shuffle option order too — but careful for letter-keyed answers.
     // We do NOT shuffle options because keys (A/B/C..) carry semantic meaning
     // for some subtests (e.g. spasial B/S, minat letters).
@@ -84,16 +113,32 @@ export async function POST(req: NextRequest) {
       questionNo: q.questionNo,
       prompt: q.prompt,
       imageUrl: q.imageUrl,
+      imageUrl2: q.imageUrl2,
       parts: q.parts,
       options: q.options,
+      inputMode: q.inputMode,
+      partLabels: resolvePartLabels(q),
     };
   });
 
-  // Existing saved answers (for resume)
+  const examples = exampleQuestions.map((q) => ({
+    id: q.id,
+    questionNo: q.questionNo,
+    prompt: q.prompt,
+    imageUrl: q.imageUrl,
+    imageUrl2: q.imageUrl2,
+    parts: q.parts,
+    options: q.options,
+    correct: q.correct,
+    inputMode: q.inputMode,
+    partLabels: resolvePartLabels(q),
+  }));
+
+  // Existing saved answers (for resume) — only for real questions.
   const existing = await prisma.answer.findMany({
     where: {
       submissionId: sub.id,
-      questionId: { in: subtest.questions.map((q) => q.id) },
+      questionId: { in: realQuestions.map((q) => q.id) },
     },
   });
   const answersMap: Record<string, unknown> = {};
@@ -105,9 +150,11 @@ export async function POST(req: NextRequest) {
       code: subtest.code,
       name: subtest.name,
       description: subtest.description,
+      instructions: subtest.instructions ?? "",
       durationSec: subtest.durationSec,
     },
     questions,
+    examples,
     existingAnswers: answersMap,
   });
 }

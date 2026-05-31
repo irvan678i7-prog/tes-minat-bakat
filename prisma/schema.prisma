@@ -27,8 +27,11 @@ model AdminUser {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// 5-minute access tokens for students. Token is single-use; once redeemed,
-// a Submission row is created and the token is marked used.
+// Class/broadcast access tokens. SATU token bisa di-redeem oleh BANYAK siswa
+// selama belum kadaluarsa — admin cukup share 1 link/kode ke grup kelas.
+// Refresh di browser yang sama → tetap resume submission lama (lewat cookie).
+// Browser baru / siswa lain → buat Submission baru untuk token yang sama.
+// `redeemedAt` = waktu redeem pertama kali (informasi saja, tidak meng-lock).
 // ───────────────────────────────────────────────────────────────────────────
 model AccessToken {
   id          String      @id @default(cuid())
@@ -39,7 +42,7 @@ model AccessToken {
   createdById String?
   createdBy   AdminUser?  @relation(fields: [createdById], references: [id])
   redeemedAt  DateTime?
-  submission  Submission?
+  submissions Submission[]
 
   @@index([testKind])
 }
@@ -54,14 +57,16 @@ enum TestKind {
 // For Minat: 1 "Bidang Minat" subtest + 8 program subtests (A..H).
 // ───────────────────────────────────────────────────────────────────────────
 model Subtest {
-  id           String     @id @default(cuid())
-  code         String     @unique
+  id           String             @id @default(cuid())
+  code         String             @unique
   testKind     TestKind
   name         String
   description  String
+  instructions String             @default("")
   durationSec  Int
-  orderIndex   Int        @default(0)
+  orderIndex   Int                @default(0)
   questions    Question[]
+  progress     SubtestProgress[]
 }
 
 model Question {
@@ -71,13 +76,20 @@ model Question {
   questionNo    Int
   prompt        String
   imageUrl      String?
+  imageUrl2     String?
   parts         Int             @default(1)
   options       Json
   correct       Json
+  // Per-question override untuk label nomor di tiap sel "lembar jawaban"
+  // (mis. SPASIAL & SISTEMATIS). null = pakai default dari test-config
+  // (1, 2, 3, …). Disimpan sebagai array string.
+  partLabels    Json?
   scoringTag    String?
+  isExample     Boolean         @default(false)
+  inputMode     String          @default("CHOICE")
   createdAt     DateTime        @default(now())
 
-  @@unique([subtestId, questionNo])
+  @@unique([subtestId, questionNo, isExample])
   answers       Answer[]
 }
 
@@ -86,11 +98,14 @@ model Question {
 // ───────────────────────────────────────────────────────────────────────────
 model Submission {
   id            String       @id @default(cuid())
-  tokenId       String       @unique
+  tokenId       String
   token         AccessToken  @relation(fields: [tokenId], references: [id])
   testKind      TestKind
   fullName      String?
   gender        String?
+  // Jenjang pendidikan peserta: "SMP", "SMA", atau "SMK". Menentukan
+  // bentuk rekomendasi di laporan PDF (lanjut sekolah / kuliah / kerja).
+  jenjang       String?
   birthPlace    String?
   birthDate     DateTime?
   age           Int?
@@ -102,8 +117,34 @@ model Submission {
   startedAt     DateTime     @default(now())
   finishedAt    DateTime?
   randomSeed    String
+  violationCount   Int       @default(0)
+  violationLog     Json      @default("[]")
+  flaggedCheating  Boolean   @default(false)
   answers       Answer[]
   result        Result?
+  subtestProgress SubtestProgress[]
+
+  @@index([tokenId])
+  @@index([finishedAt])
+}
+
+// Per-subtest lock state. Created when student first opens a subtest.
+// finishedAt: kapan subtes terkunci (manual via tombol Selesai, atau auto
+// karena timer habis). finishReason: "MANUAL" | "TIME_UP" | "AUTO_FLAG".
+// startedAt jadi sumber kebenaran timer (server-authoritative), bukan
+// localStorage.
+model SubtestProgress {
+  id           String     @id @default(cuid())
+  submissionId String
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  subtestId    String
+  subtest      Subtest    @relation(fields: [subtestId], references: [id], onDelete: Cascade)
+  startedAt    DateTime   @default(now())
+  finishedAt   DateTime?
+  finishReason String?
+
+  @@unique([submissionId, subtestId])
+  @@index([submissionId])
 }
 
 model Answer {
@@ -111,7 +152,7 @@ model Answer {
   submissionId  String
   submission    Submission  @relation(fields: [submissionId], references: [id], onDelete: Cascade)
   questionId    String
-  question      Question    @relation(fields: [questionId], references: [id])
+  question      Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
   selected      Json
   partialScore  Float       @default(0)
   isCorrect     Boolean     @default(false)

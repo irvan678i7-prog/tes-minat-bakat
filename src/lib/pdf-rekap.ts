@@ -43,14 +43,22 @@ export function buildRekapPDF(
   doc.setTextColor(BLACK);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(20);
-  doc.text("REKAP HASIL TES", margin, 42);
+  doc.text("EKIU — REKAP HASIL TES", margin, 42);
   doc.setFontSize(28);
   doc.text(`${meta.testKind === "BAKAT" ? "TES BAKAT" : "TES MINAT"} — ${meta.school || "Semua Sekolah"}`.toUpperCase(), margin, 78);
 
   let y = 130;
   doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
-  const subtitle = `Kelas: ${meta.grade || "Semua Kelas"}    •    Total Peserta: ${rows.length}    •    Dicetak: ${meta.generatedAt.toLocaleString("id-ID")}`;
+  const printedAt = meta.generatedAt.toLocaleString("id-ID", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Jakarta",
+  });
+  const subtitle = `Kelas: ${meta.grade || "Semua Kelas"}    •    Total Peserta: ${rows.length}    •    Dicetak: ${printedAt} WIB`;
   doc.text(subtitle, margin, y);
   y += 18;
 
@@ -242,13 +250,15 @@ function drawIqDistribution(
 ): number {
   const iqs = rows.map((r) => r.iqEstimate).filter((n): n is number => typeof n === "number");
   if (iqs.length === 0) return yIn;
+  // 7 kategori IQ Wechsler (Suryani dkk., SNIMed 2019).
   const buckets = [
-    { label: "Sangat Rendah (<80)", min: 0, max: 79 },
-    { label: "Rendah (80–89)", min: 80, max: 89 },
+    { label: "Sangat Superior (≥130)", min: 130, max: 999 },
+    { label: "Superior (120–129)", min: 120, max: 129 },
+    { label: "Di Atas Rata-rata (110–119)", min: 110, max: 119 },
     { label: "Rata-rata (90–109)", min: 90, max: 109 },
-    { label: "Atas Rata-rata (110–119)", min: 110, max: 119 },
-    { label: "Tinggi (120–129)", min: 120, max: 129 },
-    { label: "Sangat Tinggi (≥130)", min: 130, max: 999 },
+    { label: "Di Bawah Rata-rata (80–89)", min: 80, max: 89 },
+    { label: "Lambat Belajar (70–79)", min: 70, max: 79 },
+    { label: "Keterbelakangan Mental (≤69)", min: 0, max: 69 },
   ];
   let y = ensureSpace(doc, yIn, 180, margin, doc.internal.pageSize.getHeight());
   doc.setFillColor(BLACK);
