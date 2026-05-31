@@ -12,11 +12,31 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
   if (!me) redirect("/");
 
   // Submission + subtest reads are independent — fire them in parallel.
+  // Questions use select to skip `correct`, `scoringTag`, `createdAt` for
+  // real questions — these are never sent to the client and can be large
+  // (150 soal SISTEMATISASI). `correct` IS needed for example questions, so
+  // we fetch it for all and only send it for examples.
   const [sub, subtest] = await Promise.all([
     prisma.submission.findUnique({ where: { id: me.sub } }),
     prisma.subtest.findUnique({
       where: { code },
-      include: { questions: true },
+      include: {
+        questions: {
+          select: {
+            id: true,
+            questionNo: true,
+            prompt: true,
+            imageUrl: true,
+            imageUrl2: true,
+            parts: true,
+            options: true,
+            correct: true,
+            inputMode: true,
+            partLabels: true,
+            isExample: true,
+          },
+        },
+      },
     }),
   ]);
   if (!sub || sub.finishedAt) redirect("/test/done");
@@ -85,6 +105,7 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
     }),
     prisma.answer.findMany({
       where: { submissionId: sub.id, questionId: { in: realQuestions.map((q) => q.id) } },
+      select: { questionId: true, selected: true },
     }),
   ]);
   if (startInfo.locked) redirect("/test");
