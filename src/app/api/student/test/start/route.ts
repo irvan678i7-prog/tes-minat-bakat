@@ -9,58 +9,49 @@ export async function GET(req: NextRequest) {
   if (!student) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const sub = await prisma.submission.findUnique({
     where: { id: student.sub },
-    include: { answers: true },
   });
   if (!sub) return NextResponse.json({ error: "Submission tidak ditemukan" }, { status: 404 });
   if (!sub.fullName) return NextResponse.json({ error: "Data diri belum lengkap" }, { status: 400 });
 
-  const subtests = await prisma.subtest.findMany({
-    where: { testKind: sub.testKind },
-    orderBy: { orderIndex: "asc" },
-  });
-
-  // Determine next subtest by inspecting answers; subtest is "done" if any of its
-  // questions has been answered AND the user has marked subtest finished by
-  // having every question answered OR a marker. For simplicity we pick the
-  // first subtest not yet "started" (any answer) or compute completion below.
-  // Actually: client-side will declare progress; here we just return list of
-  // subtests with progress + next pending.
-  const answeredQuestionIds = new Set(sub.answers.map((a) => a.questionId));
-  const subtestProgress = await Promise.all(
-    subtests.map(async (s) => {
-      // Only count non-example questions (isExample=false) toward progress.
-      const total = await prisma.question.count({
-        where: { subtestId: s.id, isExample: false },
-      });
-      const answered = await prisma.question.count({
-        where: {
-          subtestId: s.id,
-          isExample: false,
-          id: { in: Array.from(answeredQuestionIds) },
-        },
-      });
-      return { ...s, total, answered, done: total > 0 && answered >= total };
+  // Batch queries: fetch subtests with question counts + all answered question
+  // IDs in 2 queries instead of 2×N (N = number of subtests).
+  const [subtests, answered] = await Promise.all([
+    prisma.subtest.findMany({
+      where: { testKind: sub.testKind },
+      orderBy: { orderIndex: "asc" },
+      include: {
+        _count: { select: { questions: { where: { isExample: false } } } },
+      },
     }),
-  );
+    prisma.answer.findMany({
+      where: { submissionId: sub.id, question: { isExample: false } },
+      select: { question: { select: { subtestId: true } } },
+    }),
+  ]);
+  const counts: Record<string, number> = {};
+  for (const a of answered) counts[a.question.subtestId] = (counts[a.question.subtestId] || 0) + 1;
 
   return NextResponse.json({
     submission: {
       id: sub.id,
       testKind: sub.testKind,
       finishedAt: sub.finishedAt,
-      randomSeed: sub.randomSeed,
     },
-    subtests: subtestProgress.map((s) => ({
-      id: s.id,
-      code: s.code,
-      name: s.name,
-      description: s.description,
-      instructions: s.instructions ?? "",
-      durationSec: s.durationSec,
-      total: s.total,
-      answered: s.answered,
-      done: s.done,
-    })),
+    subtests: subtests.map((s) => {
+      const total = s._count.questions;
+      const ans = counts[s.id] || 0;
+      return {
+        id: s.id,
+        code: s.code,
+        name: s.name,
+        description: s.description,
+        instructions: s.instructions ?? "",
+        durationSec: s.durationSec,
+        total,
+        answered: ans,
+        done: total > 0 && ans >= total,
+      };
+    }),
   });
 }
 

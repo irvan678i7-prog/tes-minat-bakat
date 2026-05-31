@@ -98,15 +98,31 @@ export async function GET(req: NextRequest) {
   const perSubmission = new Map<string, Map<string, AnsAgg>>();
   const lastActivityBySubmission = new Map<string, Date>();
 
+  // Locked subtests: subtes yang sudah TIME_UP atau MANUAL finish.
+  // Tanpa ini, subtes kecepatan (SPASIAL 70 soal, SISTEMATISASI 150 soal)
+  // selalu tampak "belum selesai" di dashboard admin karena answered < total.
+  const lockedSubtests = new Map<string, Set<string>>();
+
   if (submissionIds.length > 0) {
-    const answers = await prisma.answer.findMany({
-      where: { submissionId: { in: submissionIds } },
-      select: {
-        submissionId: true,
-        answeredAt: true,
-        question: { select: { subtestId: true, isExample: true } },
-      },
-    });
+    const [answers, progressRecords] = await Promise.all([
+      prisma.answer.findMany({
+        where: { submissionId: { in: submissionIds } },
+        select: {
+          submissionId: true,
+          answeredAt: true,
+          question: { select: { subtestId: true, isExample: true } },
+        },
+      }),
+      prisma.subtestProgress.findMany({
+        where: { submissionId: { in: submissionIds }, finishedAt: { not: null } },
+        select: { submissionId: true, subtestId: true },
+      }),
+    ]);
+    for (const p of progressRecords) {
+      let set = lockedSubtests.get(p.submissionId);
+      if (!set) { set = new Set(); lockedSubtests.set(p.submissionId, set); }
+      set.add(p.subtestId);
+    }
     for (const a of answers) {
       if (a.question.isExample) continue;
       const subId = a.submissionId;
@@ -131,15 +147,17 @@ export async function GET(req: NextRequest) {
     const meta = subtestsByKind[t.testKind];
     const submissions = t.submissions.map((s) => {
       const ans = perSubmission.get(s.id) ?? new Map<string, AnsAgg>();
+      const locked = lockedSubtests.get(s.id);
       const perSubtest = meta.map((m) => {
         const a = ans.get(m.id);
         const answered = a?.count ?? 0;
+        const isLocked = locked?.has(m.id) ?? false;
         return {
           code: m.code,
           name: m.name,
           total: m.total,
           answered,
-          done: m.total > 0 && answered >= m.total,
+          done: isLocked || (m.total > 0 && answered >= m.total),
         };
       });
       const completed = perSubtest.filter((p) => p.done).length;
