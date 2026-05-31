@@ -15,7 +15,11 @@ type Question = {
   options: unknown;
 };
 
-const STORAGE_KEY = (subtestCode: string) => `tmb-runner-${subtestCode}`;
+import {
+  ensureStartedAt,
+  isSubtestFinished,
+  markSubtestFinished,
+} from "@/lib/subtest-state";
 
 function fmtTime(s: number): string {
   if (s < 0) s = 0;
@@ -49,19 +53,24 @@ export default function SubtestRunner({
     return firstUnanswered === -1 ? 0 : firstUnanswered;
   });
 
+  // If subtest is already finished (time expired previously), redirect back.
+  useEffect(() => {
+    if (isSubtestFinished(subtest.code)) {
+      toast("Subtes ini sudah selesai (waktu habis).");
+      router.push("/test");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subtest.code]);
+
   // Timer: persist startedAt in localStorage so reload doesn't reset.
+  // ensureStartedAt only writes once; subsequent visits reuse the same value.
   const [tick, setTick] = useState<{ startedAt: number; now: number } | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const saved = window.localStorage.getItem(STORAGE_KEY(subtest.code));
-    let s: number;
-    if (saved) {
-      s = parseInt(saved);
-    } else {
-      s = Date.now();
-      window.localStorage.setItem(STORAGE_KEY(subtest.code), String(s));
-    }
+    // Don't start a timer for an already-finished subtest
+    if (isSubtestFinished(subtest.code)) return;
+    const s = ensureStartedAt(subtest.code);
     const update = () => setTick({ startedAt: s, now: Date.now() });
     update();
     const id = setInterval(update, 1000);
@@ -81,14 +90,29 @@ export default function SubtestRunner({
 
   const save = async (qid: string, sel: string | string[]) => {
     setAnswers((s) => ({ ...s, [qid]: sel }));
-    try {
-      await fetch("/api/student/test/answer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ questionId: qid, selected: sel }),
-      });
-    } catch {
-      // ignore network blip; will retry on next answer
+    const maxRetries = 3;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const res = await fetch("/api/student/test/answer", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ questionId: qid, selected: sel }),
+        });
+        if (res.ok) break;
+        if (res.status === 401) {
+          toast.error("Sesi habis. Silakan login ulang.");
+          return;
+        }
+        if (attempt === maxRetries - 1) {
+          toast.error("Gagal menyimpan jawaban. Periksa koneksi Anda.");
+        }
+      } catch {
+        if (attempt === maxRetries - 1) {
+          toast.error("Gagal menyimpan jawaban. Periksa koneksi Anda.");
+        }
+        // brief delay before retry
+        await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+      }
     }
   };
 
@@ -110,9 +134,9 @@ export default function SubtestRunner({
   const goNext = () => setIdx((i) => Math.min(i + 1, questions.length - 1));
   const goPrev = () => setIdx((i) => Math.max(i - 1, 0));
   const finishSub = async () => {
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem(STORAGE_KEY(subtest.code));
-    }
+    // Mark subtest as permanently finished so it can't be re-entered
+    // and TestHub knows it's "done" even if not all questions answered.
+    markSubtestFinished(subtest.code);
     toast.success("Subtes selesai. Kembali ke daftar.");
     router.push("/test");
   };

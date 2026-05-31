@@ -54,7 +54,10 @@ export async function scoreSubmission(submissionId: string): Promise<ScoringPayl
       school: sub.school,
       grade: sub.grade,
     });
-    return scoreBakat(sub, minatBidang);
+    // Query total question count (including parts) per subtest from DB
+    // so the denominator reflects all questions, not just answered ones.
+    const subtestTotals = await getSubtestQuestionTotals("BAKAT");
+    return scoreBakat(sub, minatBidang, subtestTotals);
   }
   return scoreMinat(sub);
 }
@@ -106,6 +109,23 @@ async function findMatchingMinatBidangScores(idents: {
   return Object.keys(scores).length > 0 ? scores : null;
 }
 
+/** Query total scorable points per subtest (sum of parts across all questions). */
+async function getSubtestQuestionTotals(
+  testKind: "BAKAT" | "MINAT",
+): Promise<Record<string, { name: string; max: number }>> {
+  const subtests = await prisma.subtest.findMany({
+    where: { testKind },
+    include: { questions: { select: { parts: true } } },
+  });
+  const result: Record<string, { name: string; max: number }> = {};
+  for (const st of subtests) {
+    let total = 0;
+    for (const q of st.questions) total += Math.max(1, q.parts || 1);
+    result[st.code] = { name: st.name, max: total };
+  }
+  return result;
+}
+
 type SubWithAnswers = Awaited<ReturnType<typeof prisma.submission.findUniqueOrThrow>> & {
   answers: { selected: unknown; partialScore: number; isCorrect: boolean; question: { subtestId: string; subtest: { code: string; name: string }; parts: number; correct: unknown; scoringTag: string | null } }[];
 };
@@ -113,14 +133,24 @@ type SubWithAnswers = Awaited<ReturnType<typeof prisma.submission.findUniqueOrTh
 function scoreBakat(
   sub: SubWithAnswers,
   minatBidang: Record<string, number> | null,
+  subtestTotals: Record<string, { name: string; max: number }>,
 ): ScoringPayload {
-  // Aggregate raw counts per subtest from saved answers (we expect Answer.partialScore
-  // to already store the per-question score for parts>1 questions; otherwise use isCorrect).
+  // Aggregate raw counts per subtest from saved answers.
+  // Use DB-based totals for the denominator so speed-tests that can't
+  // finish all questions still have the correct max.
   const perSubtest: Record<string, { name: string; raw: number; max: number }> = {};
+
+  // Seed with DB totals first so subtests with zero answers still appear
+  for (const [code, info] of Object.entries(subtestTotals)) {
+    perSubtest[code] = { name: info.name, raw: 0, max: info.max };
+  }
+
   for (const ans of sub.answers) {
     const code = ans.question.subtest.code;
-    if (!perSubtest[code]) perSubtest[code] = { name: ans.question.subtest.name, raw: 0, max: 0 };
-    perSubtest[code].max += Math.max(1, ans.question.parts || 1);
+    if (!perSubtest[code]) {
+      // Fallback in case the subtest is missing from DB query
+      perSubtest[code] = { name: ans.question.subtest.name, raw: 0, max: 0 };
+    }
     if (ans.question.parts && ans.question.parts > 1) {
       perSubtest[code].raw += ans.partialScore || 0;
     } else {

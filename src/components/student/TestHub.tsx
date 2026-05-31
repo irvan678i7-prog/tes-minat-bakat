@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import toast from "react-hot-toast";
+import { isSubtestFinished } from "@/lib/subtest-state";
 
 type Sub = {
   id: string;
@@ -26,9 +27,26 @@ export default function TestHub({
 }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
+
+  // Read finished-subtest flags from localStorage on mount.
+  // useState initializer runs once; the page is server-rendered then hydrated,
+  // so this picks up whatever SubtestRunner wrote before the student returned.
+  const [finishedCodes] = useState<Set<string>>(() => {
+    const set = new Set<string>();
+    for (const s of subtests) {
+      if (isSubtestFinished(s.code)) set.add(s.code);
+    }
+    return set;
+  });
+
   const allDone =
     subtests.length > 0 &&
-    subtests.every((s) => s.total === 0 || s.answered >= s.total);
+    subtests.every(
+      (s) =>
+        s.total === 0 ||
+        s.answered >= s.total ||
+        finishedCodes.has(s.code),
+    );
 
   const finish = async () => {
     if (!confirm("Selesaikan tes? Anda tidak dapat mengubah jawaban setelah dikirim.")) return;
@@ -64,7 +82,9 @@ export default function TestHub({
         </p>
         <ol className="space-y-3">
           {subtests.map((s, idx) => {
-            const done = s.total > 0 && s.answered >= s.total;
+            const done =
+              s.total > 0 &&
+              (s.answered >= s.total || finishedCodes.has(s.code));
             const empty = s.total === 0;
             return (
               <li

@@ -14,7 +14,7 @@ export function signAdminToken(p: AdminPayload, expiresIn: SignOptions["expiresI
   return jwt.sign(p, SECRET, { expiresIn });
 }
 
-export function signStudentToken(p: StudentPayload, expiresIn: SignOptions["expiresIn"] = "3h"): string {
+export function signStudentToken(p: StudentPayload, expiresIn: SignOptions["expiresIn"] = "6h"): string {
   return jwt.sign(p, SECRET, { expiresIn });
 }
 
