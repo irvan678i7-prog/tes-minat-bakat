@@ -29,9 +29,9 @@ function readSecret(name: string, minLength: number): string {
 export const JWT_SECRET = readSecret("JWT_SECRET", 32);
 
 // Durasi JWT — bisa di-override via env tapi punya default aman.
-// Student: cukup 3 jam (semua subtes BAKAT + buffer). Tadi 12 jam.
+// Student: 6 jam — cukup untuk Tes MINAT (9×30 menit = 4,5 jam) + buffer.
 // Admin: 8 jam (1 shift kerja). Tadi 12 jam.
-export const STUDENT_JWT_EXPIRES_IN = process.env.STUDENT_JWT_EXPIRES_IN || "3h";
+export const STUDENT_JWT_EXPIRES_IN = process.env.STUDENT_JWT_EXPIRES_IN || "6h";
 export const ADMIN_JWT_EXPIRES_IN = process.env.ADMIN_JWT_EXPIRES_IN || "8h";
 
 // Maksimum ukuran upload gambar (default 5 MB).
