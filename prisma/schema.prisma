@@ -102,6 +102,11 @@ model Submission {
   startedAt     DateTime     @default(now())
   finishedAt    DateTime?
   randomSeed    String
+  // Per-subtest timer/completion progress, keyed by subtest code:
+  //   { "<code>": { "startedAt": <epoch ms>, "completedAt": <epoch ms|null> } }
+  // Used to enforce a non-resettable per-subtest timer and to know when a
+  // subtest is "locked" (time up or finished early). Null until first opened.
+  subtestProgress Json?
   answers       Answer[]
   result        Result?
 }

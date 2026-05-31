@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getStudentFromCookies } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { shuffle } from "@/lib/random";
+import { parseProgress, isSubtestCompleted, remainingSeconds } from "@/lib/progress";
 import SubtestRunner from "@/components/student/SubtestRunner";
 
 export default async function SubtestPage({ params }: { params: Promise<{ code: string }> }) {
@@ -34,6 +35,13 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
   const existingMap: Record<string, unknown> = {};
   for (const a of existing) existingMap[a.questionId] = a.selected;
 
+  // Read-only here (no DB writes during render to stay prefetch-safe). The
+  // timer is actually started by the client on mount via /subtest/start.
+  const progress = parseProgress(sub.subtestProgress);
+  const entry = progress[subtest.code];
+  const lockedInitial = isSubtestCompleted(entry, subtest.durationSec);
+  const remainingSecInitial = remainingSeconds(entry, subtest.durationSec);
+
   return (
     <SubtestRunner
       subtest={{
@@ -44,6 +52,8 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
       }}
       questions={questions}
       existingAnswers={existingMap}
+      remainingSecInitial={remainingSecInitial}
+      lockedInitial={lockedInitial}
     />
   );
 }

@@ -14,7 +14,10 @@ export function signAdminToken(p: AdminPayload, expiresIn: SignOptions["expiresI
   return jwt.sign(p, SECRET, { expiresIn });
 }
 
-export function signStudentToken(p: StudentPayload, expiresIn: SignOptions["expiresIn"] = "3h"): string {
+// 8h covers the longest test (MINAT = 9 subtes x 30 menit = 4.5 jam) plus
+// pengisian data diri dan jeda, sehingga sesi siswa tidak kedaluwarsa di
+// tengah tes.
+export function signStudentToken(p: StudentPayload, expiresIn: SignOptions["expiresIn"] = "8h"): string {
   return jwt.sign(p, SECRET, { expiresIn });
 }
 

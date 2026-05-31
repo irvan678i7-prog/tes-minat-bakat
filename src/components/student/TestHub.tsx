@@ -13,6 +13,8 @@ type Sub = {
   durationSec: number;
   total: number;
   answered: number;
+  started: boolean;
+  completed: boolean;
 };
 
 export default function TestHub({
@@ -26,9 +28,13 @@ export default function TestHub({
 }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
-  const allDone =
-    subtests.length > 0 &&
-    subtests.every((s) => s.total === 0 || s.answered >= s.total);
+
+  // A subtest is "selesai" when its timer is up or the student finished it.
+  // The whole test can be submitted once every subtest that has questions is
+  // completed. (Subtes tanpa soal diabaikan.)
+  const answerable = subtests.filter((s) => s.total > 0);
+  const remainingCount = answerable.filter((s) => !s.completed).length;
+  const allDone = answerable.length > 0 && remainingCount === 0;
 
   const finish = async () => {
     if (!confirm("Selesaikan tes? Anda tidak dapat mengubah jawaban setelah dikirim.")) return;
@@ -58,31 +64,48 @@ export default function TestHub({
         </div>
       </header>
       <main className="flex-1 max-w-4xl mx-auto px-6 py-8 w-full space-y-4">
-        <p className="font-semibold">
-          Pilih subtes untuk dikerjakan. Anda dapat resume dari soal terakhir yang dijawab.
-          Setelah semua subtes terisi, klik <strong>SELESAIKAN TES</strong>.
-        </p>
+        <div className="brut-card" style={{ background: "#fff" }}>
+          <p className="font-semibold">
+            Pilih subtes untuk dikerjakan. Setiap subtes memiliki <strong>batas waktu</strong> yang
+            mulai berjalan saat subtes pertama kali dibuka dan terus berjalan sampai habis.
+          </p>
+          <p className="font-semibold mt-2">
+            Subtes dianggap <strong>SELESAI</strong> bila waktunya habis atau Anda menekan tombol
+            <em> &ldquo;Selesaikan Subtes&rdquo;</em>. Setelah <strong>semua subtes selesai</strong>,
+            tombol <strong>SELESAIKAN TES</strong> akan aktif.
+          </p>
+        </div>
         <ol className="space-y-3">
           {subtests.map((s, idx) => {
-            const done = s.total > 0 && s.answered >= s.total;
             const empty = s.total === 0;
+            const done = s.completed;
+            const inProgress = s.started && !done && !empty;
+            const bg = empty ? "#fff" : done ? "#a3e635" : inProgress ? "#fde047" : "#22d3ee";
             return (
               <li
                 key={s.id}
                 className="brut-card flex items-center justify-between gap-4"
-                style={{ background: empty ? "#fff" : done ? "#a3e635" : "#22d3ee" }}
+                style={{ background: bg }}
               >
                 <div className="flex-1">
                   <div className="text-sm font-bold opacity-70">SUBTES {idx + 1}</div>
                   <div className="text-xl font-black uppercase">{s.name}</div>
                   <div className="text-sm font-semibold">{s.description}</div>
-                  <div className="text-xs font-bold mt-1">
-                    {s.total === 0 ? (
+                  <div className="text-xs font-bold mt-1 flex flex-wrap gap-2 items-center">
+                    {empty ? (
                       <span className="brut-tag" style={{ background: "#ff4d8d" }}>BELUM ADA SOAL</span>
                     ) : (
                       <>
-                        {s.answered}/{s.total} terjawab •{" "}
-                        Waktu {Math.round(s.durationSec / 60)} menit
+                        <span>{s.answered}/{s.total} terjawab</span>
+                        <span>• Waktu {Math.round(s.durationSec / 60)} menit</span>
+                        {done && (
+                          <span className="brut-tag" style={{ background: "#000", color: "#fff" }}>SELESAI</span>
+                        )}
+                        {inProgress && (
+                          <span className="brut-tag" style={{ background: "#ff4d8d", color: "#fff" }}>
+                            SEDANG BERJALAN
+                          </span>
+                        )}
                       </>
                     )}
                   </div>
@@ -91,7 +114,7 @@ export default function TestHub({
                   href={`/test/${s.code}`}
                   className={`brut-btn ${done ? "brut-btn-black" : ""} ${empty ? "opacity-50 pointer-events-none" : ""}`}
                 >
-                  {done ? "REVIEW" : s.answered > 0 ? "LANJUT" : "MULAI"}
+                  {done ? "TINJAU" : inProgress ? "LANJUT" : "MULAI"}
                 </Link>
               </li>
             );
@@ -109,7 +132,9 @@ export default function TestHub({
           </button>
           {!allDone && (
             <p className="text-xs font-bold text-center mt-2 opacity-70">
-              Tombol aktif setelah semua subtes selesai dikerjakan.
+              {answerable.length === 0
+                ? "Belum ada soal pada tes ini."
+                : `Masih ada ${remainingCount} subtes yang belum selesai.`}
             </p>
           )}
         </div>

@@ -50,7 +50,9 @@ export async function POST(req: NextRequest) {
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 3 * 60 * 60,
+    // Selaras dengan masa berlaku JWT siswa (8 jam) agar sesi tidak putus di
+    // tengah tes panjang (MINAT bisa sampai 4.5 jam).
+    maxAge: 8 * 60 * 60,
   });
   return res;
 }

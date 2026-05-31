@@ -40,6 +40,29 @@ export type ScoringPayload = {
   penjurusan?: PenjurusanResult & { minatSource: "cross-link" | null };
 };
 
+type SubtestTotals = Record<string, { name: string; totalQuestions: number; maxParts: number }>;
+
+/**
+ * Total possible score per subtest, computed from the FULL question bank
+ * (not just answered questions). Only subtests that actually have questions
+ * are included. This keeps normalised scores (raw/max), IQ, and penjurusan
+ * accurate even when the student skips questions — which is expected on the
+ * speed-based subtests.
+ */
+async function getSubtestTotals(testKind: "BAKAT" | "MINAT"): Promise<SubtestTotals> {
+  const subtests = await prisma.subtest.findMany({
+    where: { testKind },
+    include: { questions: { select: { parts: true } } },
+  });
+  const map: SubtestTotals = {};
+  for (const s of subtests) {
+    if (s.questions.length === 0) continue;
+    const maxParts = s.questions.reduce((acc, q) => acc + Math.max(1, q.parts || 1), 0);
+    map[s.code] = { name: s.name, totalQuestions: s.questions.length, maxParts };
+  }
+  return map;
+}
+
 export async function scoreSubmission(submissionId: string): Promise<ScoringPayload> {
   const sub = await prisma.submission.findUniqueOrThrow({
     where: { id: submissionId },
@@ -48,15 +71,17 @@ export async function scoreSubmission(submissionId: string): Promise<ScoringPayl
     },
   });
 
+  const totals = await getSubtestTotals(sub.testKind);
+
   if (sub.testKind === "BAKAT") {
     const minatBidang = await findMatchingMinatBidangScores({
       fullName: sub.fullName,
       school: sub.school,
       grade: sub.grade,
     });
-    return scoreBakat(sub, minatBidang);
+    return scoreBakat(sub, minatBidang, totals);
   }
-  return scoreMinat(sub);
+  return scoreMinat(sub, totals);
 }
 
 // Cross-link: cari submission MINAT milik peserta yang sama (fullName +
@@ -113,14 +138,23 @@ type SubWithAnswers = Awaited<ReturnType<typeof prisma.submission.findUniqueOrTh
 function scoreBakat(
   sub: SubWithAnswers,
   minatBidang: Record<string, number> | null,
+  totals: SubtestTotals,
 ): ScoringPayload {
-  // Aggregate raw counts per subtest from saved answers (we expect Answer.partialScore
-  // to already store the per-question score for parts>1 questions; otherwise use isCorrect).
+  // Seed every populated subtest with its FULL possible score (max) so that
+  // skipped questions / skipped subtests correctly lower the normalised score.
   const perSubtest: Record<string, { name: string; raw: number; max: number }> = {};
+  for (const [code, t] of Object.entries(totals)) {
+    perSubtest[code] = { name: t.name, raw: 0, max: t.maxParts };
+  }
   for (const ans of sub.answers) {
     const code = ans.question.subtest.code;
-    if (!perSubtest[code]) perSubtest[code] = { name: ans.question.subtest.name, raw: 0, max: 0 };
-    perSubtest[code].max += Math.max(1, ans.question.parts || 1);
+    if (!perSubtest[code]) {
+      perSubtest[code] = {
+        name: ans.question.subtest.name,
+        raw: 0,
+        max: Math.max(1, ans.question.parts || 1),
+      };
+    }
     if (ans.question.parts && ans.question.parts > 1) {
       perSubtest[code].raw += ans.partialScore || 0;
     } else {
@@ -180,16 +214,19 @@ function scoreBakat(
   };
 }
 
-function scoreMinat(sub: SubWithAnswers): ScoringPayload {
+function scoreMinat(sub: SubWithAnswers, totals: SubtestTotals): ScoringPayload {
   // Bidang counts: tally letters chosen on MINAT_BIDANG subtest.
   const bidangScores: Record<Letter, number> = {};
   const programLetterCounts: Record<string, Record<Letter, number>> = {};
+  // Seed perSubtest with full question totals so "raw/max" reflects completion.
   const perSubtest: Record<string, { name: string; raw: number; max: number }> = {};
+  for (const [code, t] of Object.entries(totals)) {
+    perSubtest[code] = { name: t.name, raw: 0, max: t.totalQuestions };
+  }
 
   for (const ans of sub.answers) {
     const code = ans.question.subtest.code;
-    if (!perSubtest[code]) perSubtest[code] = { name: ans.question.subtest.name, raw: 0, max: 0 };
-    perSubtest[code].max += 1;
+    if (!perSubtest[code]) perSubtest[code] = { name: ans.question.subtest.name, raw: 0, max: 1 };
     perSubtest[code].raw += 1; // every answered counts
     const raw = ans.selected;
     const sel = String(Array.isArray(raw) ? (raw[0] as string) : raw).trim().toUpperCase();
