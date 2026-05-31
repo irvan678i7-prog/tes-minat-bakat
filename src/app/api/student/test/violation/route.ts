@@ -11,17 +11,8 @@ const MAX_LOG_ENTRIES = 200;
 
 const VIOLATION_TYPES = [
   "tab_hidden",
-  // "blur" tetap diterima untuk backward compatibility dengan log lama,
-  // tapi client tidak lagi mengirim event ini (terlalu banyak false positive).
-  "blur",
   "fullscreen_exit",
-  "copy",
-  "paste",
-  "cut",
-  "context_menu",
-  "shortcut",
   "screenshot",
-  "screen_record",
 ] as const;
 
 const Body = z.object({
@@ -80,10 +71,6 @@ export async function POST(req: NextRequest) {
   // ketika 2 event browser dari 1 aksi user sampai ke server hampir bersamaan.
   const SERVER_DEDUP_MS = 1500;
   const SAME_ACTION_GROUPS: string[][] = [
-    ["shortcut", "copy"],
-    ["shortcut", "paste"],
-    ["shortcut", "cut"],
-    ["shortcut", "screenshot"],
     ["tab_hidden", "fullscreen_exit"],
   ];
   const inSameGroup = (a: string, b: string): boolean => {

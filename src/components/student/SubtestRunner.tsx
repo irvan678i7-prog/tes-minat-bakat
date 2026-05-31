@@ -57,25 +57,10 @@ function violationLabel(t: string | null): string {
   switch (t) {
     case "tab_hidden":
       return "Pindah tab / ganti aplikasi";
-    case "blur":
-      // Tidak lagi dikirim oleh client, tapi tetap muncul untuk log lama.
-      return "Klik di luar halaman tes";
     case "fullscreen_exit":
       return "Keluar dari mode full-screen";
-    case "copy":
-      return "Menyalin teks (copy)";
-    case "paste":
-      return "Menempel teks (paste)";
-    case "cut":
-      return "Memotong teks (cut)";
-    case "context_menu":
-      return "Klik kanan";
-    case "shortcut":
-      return "Pintasan keyboard terlarang";
     case "screenshot":
       return "Mengambil screenshot";
-    case "screen_record":
-      return "Merekam layar";
     default:
       return "Aktivitas mencurigakan";
   }
