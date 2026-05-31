@@ -84,6 +84,7 @@ export async function POST(req: NextRequest) {
     ["shortcut", "paste"],
     ["shortcut", "cut"],
     ["shortcut", "screenshot"],
+    ["tab_hidden", "fullscreen_exit"],
   ];
   const inSameGroup = (a: string, b: string): boolean => {
     if (a === b) return true;

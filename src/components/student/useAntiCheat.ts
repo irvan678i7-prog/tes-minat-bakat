@@ -34,6 +34,11 @@ const SAME_ACTION_GROUPS: ViolationType[][] = [
   ["shortcut", "paste"],
   ["shortcut", "cut"],
   ["shortcut", "screenshot"],
+  // Device sleep / screen lock memicu KEDUA event sekaligus: tab menjadi
+  // hidden (visibilitychange) DAN fullscreen keluar (fullscreenchange).
+  // Tanpa grup ini, 1× layar mati = 2 pelanggaran — dengan threshold 5,
+  // siswa bisa ter-auto-finish hanya karena 3× layar mati.
+  ["tab_hidden", "fullscreen_exit"],
 ];
 
 // Tab harus tersembunyi minimal sebanyak ini supaya dianggap pelanggaran.
