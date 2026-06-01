@@ -4,7 +4,10 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import toast from "react-hot-toast";
 
-export default function StudentTokenForm({ testKind }: { testKind: "MINAT" | "BAKAT" }) {
+// Form token universal — TIDAK mengirim testKind ke server. Server otomatis
+// pakai testKind dari token itu sendiri, sehingga siswa tidak perlu tahu
+// token-nya untuk MINAT atau BAKAT.
+export default function StudentTokenForm() {
   const [code, setCode] = useState("");
   const [pending, startTransition] = useTransition();
   const router = useRouter();
@@ -17,7 +20,7 @@ export default function StudentTokenForm({ testKind }: { testKind: "MINAT" | "BA
       const res = await fetch("/api/student/redeem", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: trimmed, testKind }),
+        body: JSON.stringify({ code: trimmed }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -25,10 +28,11 @@ export default function StudentTokenForm({ testKind }: { testKind: "MINAT" | "BA
         return;
       }
       if (data.finishedAt) {
-        toast.error("Token ini sudah pernah dipakai dan tes selesai.");
+        // Redirect ke /k/ supaya bisa pilih "Mulai sebagai peserta baru".
+        router.push(`/k/${trimmed}`);
         return;
       }
-      toast.success("Token valid! Lanjut ke data diri.");
+      toast.success(`Token valid (${data.testKind})! Lanjut ke data diri.`);
       router.push(data.profileFilled ? "/test" : "/test/profile");
     });
   };
@@ -44,8 +48,8 @@ export default function StudentTokenForm({ testKind }: { testKind: "MINAT" | "BA
         disabled={pending}
         autoComplete="off"
       />
-      <button type="submit" className={`brut-btn w-full ${testKind === "MINAT" ? "brut-btn-pink" : ""}`} disabled={pending}>
-        {pending ? "MEMERIKSA..." : `MULAI TES ${testKind}`}
+      <button type="submit" className="brut-btn brut-btn-black w-full" disabled={pending}>
+        {pending ? "MEMERIKSA..." : "MULAI TES"}
       </button>
     </form>
   );
