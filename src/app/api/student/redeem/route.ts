@@ -89,7 +89,11 @@ export async function POST(req: NextRequest) {
   if (submission && submission.tokenId !== tok.id) submission = null;
 
   if (!submission) {
-    if (tok.expiresAt < new Date()) {
+    // Token expired & belum pernah dipakai siapa pun → tolak.
+    // Token expired tapi sudah pernah di-redeem (class token) → izinkan
+    // peserta baru bergabung (siswa lain di kelas yang sama yang lebih lambat
+    // membuka link).
+    if (tok.expiresAt < new Date() && !tok.redeemedAt) {
       return NextResponse.json({ error: "Token sudah kadaluarsa" }, { status: 410 });
     }
     submission = await prisma.submission.create({

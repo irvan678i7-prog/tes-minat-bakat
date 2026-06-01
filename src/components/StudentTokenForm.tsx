@@ -25,7 +25,9 @@ export default function StudentTokenForm({ testKind }: { testKind: "MINAT" | "BA
         return;
       }
       if (data.finishedAt) {
-        toast.error("Token ini sudah pernah dipakai dan tes selesai.");
+        // Sesi sebelumnya sudah selesai — redirect ke /k/ supaya bisa
+        // pilih "Mulai sebagai peserta baru".
+        router.push(`/k/${trimmed}`);
         return;
       }
       toast.success("Token valid! Lanjut ke data diri.");
