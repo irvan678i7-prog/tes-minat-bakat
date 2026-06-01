@@ -23,52 +23,57 @@ export default function Home() {
       <main className="flex-1 max-w-6xl mx-auto px-6 py-12 w-full">
         <section className="mb-10">
           <h2 className="text-4xl md:text-5xl font-black uppercase leading-tight">
-            Pilih Jenis <span className="bg-pink-400 px-2 border-4 border-black">TES</span>
+            Masukkan <span className="bg-pink-400 px-2 border-4 border-black">TOKEN</span>
           </h2>
           <p className="mt-3 text-lg font-semibold max-w-2xl">
             Masukkan token yang diberikan oleh admin / guru pembimbing.
+            Jenis tes (Minat atau Bakat) otomatis terdeteksi dari token.
           </p>
         </section>
 
-        <section className="grid md:grid-cols-2 gap-8">
-          <div className="brut-card" style={{ background: "#22d3ee" }}>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-3xl font-black uppercase">Tes Minat</h3>
-              <span className="brut-tag" style={{ background: "#000", color: "#fff" }}>A–H</span>
-            </div>
-            <p className="font-semibold mb-4">
-              Mengukur ketertarikan terhadap bidang tertentu lewat 28 soal pasangan kata,
-              dilanjutkan pemetaan ke 8 program keahlian (A — Komunikasi sampai H — Teknik &amp; Maritim).
-            </p>
-            <ul className="font-semibold mb-4 list-disc list-inside">
-              <li>Tidak ada jawaban benar / salah</li>
-              <li>Hasil: rekomendasi jurusan keahlian</li>
-            </ul>
-            <StudentTokenForm testKind="MINAT" />
-          </div>
-
+        <section className="max-w-md">
           <div className="brut-card" style={{ background: "#facc15" }}>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-3xl font-black uppercase">Tes Bakat</h3>
-              <span className="brut-tag" style={{ background: "#000", color: "#fff" }}>9 SUBTES</span>
-            </div>
-            <p className="font-semibold mb-4">
-              Mengukur kemampuan kognitif: penalaran visual, numerik, verbal, urutan, spasial,
-              tiga dimensi, sistematisasi, kosa kata, &amp; figural angka.
-            </p>
-            <ul className="font-semibold mb-4 list-disc list-inside">
-              <li>Tiap subtes punya batas waktu</li>
-              <li>Hasil: profil bakat + IQ prediksi + rekomendasi</li>
-            </ul>
-            <StudentTokenForm testKind="BAKAT" />
+            <StudentTokenForm />
           </div>
         </section>
 
-        <section className="mt-12 brut-card" style={{ background: "#fff" }}>
+        <section className="grid md:grid-cols-2 gap-8 mt-10">
+          <div className="brut-card" style={{ background: "#22d3ee" }}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-2xl font-black uppercase">Tes Minat</h3>
+              <span className="brut-tag" style={{ background: "#000", color: "#fff" }}>A–H</span>
+            </div>
+            <p className="font-semibold mb-2">
+              Mengukur ketertarikan terhadap bidang tertentu lewat 28 soal pasangan kata,
+              dilanjutkan pemetaan ke 8 program keahlian.
+            </p>
+            <ul className="font-semibold list-disc list-inside text-sm">
+              <li>Tidak ada jawaban benar / salah</li>
+              <li>Hasil: rekomendasi jurusan keahlian</li>
+            </ul>
+          </div>
+
+          <div className="brut-card" style={{ background: "#a3e635" }}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-2xl font-black uppercase">Tes Bakat</h3>
+              <span className="brut-tag" style={{ background: "#000", color: "#fff" }}>9 SUBTES</span>
+            </div>
+            <p className="font-semibold mb-2">
+              Mengukur kemampuan kognitif: penalaran visual, numerik, verbal, urutan, spasial,
+              tiga dimensi, sistematisasi, kosa kata, &amp; figural angka.
+            </p>
+            <ul className="font-semibold list-disc list-inside text-sm">
+              <li>Tiap subtes punya batas waktu</li>
+              <li>Hasil: profil bakat + IQ prediksi + rekomendasi</li>
+            </ul>
+          </div>
+        </section>
+
+        <section className="mt-10 brut-card" style={{ background: "#fff" }}>
           <h3 className="text-2xl font-black uppercase mb-3">Bagaimana cara mengikuti tes?</h3>
           <ol className="list-decimal list-inside font-semibold space-y-2">
             <li>Minta token kepada admin / guru.</li>
-            <li>Pilih jenis tes (Minat atau Bakat) sesuai token.</li>
+            <li>Masukkan token di atas.</li>
             <li>Isi data diri.</li>
             <li>Kerjakan soal sesuai waktu yang disediakan tiap subtes.</li>
             <li>Selesai. Hasil akan dilihat &amp; diunduh oleh admin/guru.</li>
