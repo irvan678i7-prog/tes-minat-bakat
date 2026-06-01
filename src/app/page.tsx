@@ -26,8 +26,7 @@ export default function Home() {
             Pilih Jenis <span className="bg-pink-400 px-2 border-4 border-black">TES</span>
           </h2>
           <p className="mt-3 text-lg font-semibold max-w-2xl">
-            Masukkan token yang diberikan oleh admin / guru pembimbing. Token aktif
-            <span className="brut-tag mx-1">5 menit</span> sejak dibuat.
+            Masukkan token yang diberikan oleh admin / guru pembimbing.
           </p>
         </section>
 

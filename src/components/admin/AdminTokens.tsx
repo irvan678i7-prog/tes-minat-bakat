@@ -154,7 +154,7 @@ export default function AdminTokens() {
   });
   const [testKind, setTestKind] = useState<"MINAT" | "BAKAT">("BAKAT");
   const [count, setCount] = useState(1);
-  const [ttlSec, setTtlSec] = useState(300);
+  const [ttlSec, setTtlSec] = useState(3600);
   const [includeRedeemed, setIncludeRedeemed] = useState(false);
   const [pending, startTransition] = useTransition();
   const [, setTick] = useState(0);
@@ -282,8 +282,9 @@ export default function AdminTokens() {
       <div className="brut-card" style={{ background: "#a3e635" }}>
         <h2 className="text-2xl font-black uppercase mb-3">Generate Token Kelas</h2>
         <p className="text-xs font-bold mb-3 opacity-80">
-          Satu token bisa dipakai BANYAK siswa selama belum kadaluarsa. Share 1 link/kode ke grup
-          kelas — semua peserta otomatis terdaftar dengan submission masing-masing.
+          Satu token bisa dipakai BANYAK siswa selama belum kadaluarsa. Share 1 link/kode ke
+          grup kelas — semua peserta otomatis terdaftar dengan submission masing-masing.
+          Pastikan waktu berlaku cukup untuk semua siswa membuka link.
         </p>
         <div className="grid md:grid-cols-4 gap-3 items-end">
           <div>
@@ -309,16 +310,22 @@ export default function AdminTokens() {
             />
           </div>
           <div>
-            <label className="text-xs font-black uppercase block mb-1">Berlaku (detik)</label>
-            <input
-              type="number"
-              min={60}
-              max={3600}
+            <label className="text-xs font-black uppercase block mb-1">Berlaku</label>
+            <select
               className="brut-input w-full"
               value={ttlSec}
-              onChange={(e) => setTtlSec(parseInt(e.target.value || "300"))}
-            />
-            <p className="text-xs font-bold mt-1">Default 300s = 5 menit · max 1 jam</p>
+              onChange={(e) => setTtlSec(parseInt(e.target.value))}
+            >
+              <option value={300}>5 menit</option>
+              <option value={600}>10 menit</option>
+              <option value={1800}>30 menit</option>
+              <option value={3600}>1 jam</option>
+              <option value={7200}>2 jam</option>
+              <option value={14400}>4 jam</option>
+              <option value={28800}>8 jam</option>
+              <option value={86400}>24 jam</option>
+            </select>
+            <p className="text-xs font-bold mt-1">Waktu untuk siswa membuka token</p>
           </div>
           <button onClick={generate} disabled={pending} className="brut-btn brut-btn-black">
             {pending ? "BUAT..." : "BUAT TOKEN"}

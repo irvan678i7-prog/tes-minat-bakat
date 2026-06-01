@@ -7,7 +7,7 @@ import { generateTokenCode } from "@/lib/token";
 const Body = z.object({
   testKind: z.enum(["MINAT", "BAKAT"]),
   count: z.number().int().min(1).max(100).default(1),
-  ttlSec: z.number().int().min(60).max(60 * 60).default(300),
+  ttlSec: z.number().int().min(60).max(24 * 60 * 60).default(3600),
 });
 
 export async function POST(req: NextRequest) {
