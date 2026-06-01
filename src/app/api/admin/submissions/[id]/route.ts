@@ -10,10 +10,11 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
   const sub = await prisma.submission.findUnique({ where: { id }, select: { id: true, fullName: true } });
   if (!sub) return NextResponse.json({ error: "Data peserta tidak ditemukan" }, { status: 404 });
 
-  // Cascade: result → answers → submission
+  // Cascade: result → answers → subtestProgress → submission
   await prisma.$transaction([
     prisma.result.deleteMany({ where: { submissionId: id } }),
     prisma.answer.deleteMany({ where: { submissionId: id } }),
+    prisma.subtestProgress.deleteMany({ where: { submissionId: id } }),
     prisma.submission.delete({ where: { id } }),
   ]);
 
