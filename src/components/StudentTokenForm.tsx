@@ -24,7 +24,7 @@ export default function StudentTokenForm() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(data.error || "Gagal validasi token");
+        toast.error(data.error || `Gagal validasi token (HTTP ${res.status})`);
         return;
       }
       if (data.finishedAt) {

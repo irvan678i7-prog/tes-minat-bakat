@@ -42,97 +42,106 @@ function expiresInToSeconds(v: string | number): number {
 }
 
 export async function POST(req: NextRequest) {
-  const ip = getClientIp(req);
-  const rl = rateLimit(`student-redeem:${ip}`, REDEEM_LIMIT, REDEEM_WINDOW_MS);
-  if (!rl.ok) {
-    const retry = Math.max(1, Math.ceil((rl.resetAt - Date.now()) / 1000));
-    return NextResponse.json(
-      { error: "Terlalu banyak percobaan. Coba lagi nanti." },
-      {
-        status: 429,
-        headers: {
-          "Retry-After": String(retry),
-          "X-RateLimit-Limit": String(REDEEM_LIMIT),
-          "X-RateLimit-Remaining": "0",
+  try {
+    const ip = getClientIp(req);
+    const rl = rateLimit(`student-redeem:${ip}`, REDEEM_LIMIT, REDEEM_WINDOW_MS);
+    if (!rl.ok) {
+      const retry = Math.max(1, Math.ceil((rl.resetAt - Date.now()) / 1000));
+      return NextResponse.json(
+        { error: "Terlalu banyak percobaan. Coba lagi nanti." },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(retry),
+            "X-RateLimit-Limit": String(REDEEM_LIMIT),
+            "X-RateLimit-Remaining": "0",
+          },
         },
-      },
-    );
-  }
-
-  const parsed = Body.safeParse(await req.json().catch(() => ({})));
-  if (!parsed.success) return NextResponse.json({ error: "Invalid input" }, { status: 400 });
-  const code = parsed.data.code.trim().toUpperCase();
-  const requestedKind = parsed.data.testKind;
-  const tok = await prisma.accessToken.findUnique({ where: { code } });
-  if (!tok) return NextResponse.json({ error: "Token tidak ditemukan" }, { status: 404 });
-
-  // Validasi testKind sebelum set cookie. Tolak bila mismatch.
-  if (requestedKind && requestedKind !== tok.testKind) {
-    return NextResponse.json(
-      { error: `Token ini untuk ${tok.testKind}, bukan ${requestedKind}.`, testKind: tok.testKind },
-      { status: 409 },
-    );
-  }
-
-  // Class/broadcast token: 1 token = banyak siswa. Tiap browser baru → submission
-  // baru. Browser yang sama (refresh) → resume submission lama lewat cookie
-  // student JWT (sub = submissionId). Token expired hanya melarang submission
-  // BARU; resume submission lama yang sudah jalan tetap diizinkan.
-  // forceNew: abaikan cookie, selalu buat submission baru (peserta
-  // bergantian di browser/HP yang sama).
-  const existing = parsed.data.forceNew ? null : getStudentFromRequest(req);
-  let submission =
-    existing && existing.tokenId === tok.id
-      ? await prisma.submission.findUnique({ where: { id: existing.sub } })
-      : null;
-  // Cookie kadaluarsa / submission dihapus / token beda → buat baru.
-  if (submission && submission.tokenId !== tok.id) submission = null;
-
-  if (!submission) {
-    if (tok.expiresAt < new Date()) {
-      return NextResponse.json({ error: "Token sudah kadaluarsa" }, { status: 410 });
+      );
     }
-    submission = await prisma.submission.create({
-      data: {
-        tokenId: tok.id,
-        testKind: tok.testKind,
-        randomSeed: randomUUID(),
-      },
-    });
-    // Tandai waktu redeem pertama kali (sekedar informasi untuk admin —
-    // tidak meng-lock token). updateMany dengan filter redeemedAt=null
-    // memastikan idempoten kalau token sudah pernah dipakai siswa lain.
-    if (!tok.redeemedAt) {
-      await prisma.accessToken.updateMany({
-        where: { id: tok.id, redeemedAt: null },
-        data: { redeemedAt: new Date() },
+
+    const parsed = Body.safeParse(await req.json().catch(() => ({})));
+    if (!parsed.success) return NextResponse.json({ error: "Input tidak valid. Pastikan kode token terisi." }, { status: 400 });
+    const code = parsed.data.code.trim().toUpperCase();
+    const requestedKind = parsed.data.testKind;
+    const tok = await prisma.accessToken.findUnique({ where: { code } });
+    if (!tok) return NextResponse.json({ error: `Token "${code}" tidak ditemukan. Periksa kembali kode token.` }, { status: 404 });
+
+    // Validasi testKind bila dikirim. Kalau tidak dikirim, server pakai testKind dari token.
+    if (requestedKind && requestedKind !== tok.testKind) {
+      return NextResponse.json(
+        { error: `Token ini untuk ${tok.testKind}, bukan ${requestedKind}.`, testKind: tok.testKind },
+        { status: 409 },
+      );
+    }
+
+    // Class/broadcast token: 1 token = banyak siswa. Tiap browser baru → submission
+    // baru. Browser yang sama (refresh) → resume submission lama lewat cookie
+    // student JWT (sub = submissionId). Token expired hanya melarang submission
+    // BARU; resume submission lama yang sudah jalan tetap diizinkan.
+    // forceNew: abaikan cookie, selalu buat submission baru (peserta
+    // bergantian di browser/HP yang sama).
+    const existing = parsed.data.forceNew ? null : getStudentFromRequest(req);
+    let submission =
+      existing && existing.tokenId === tok.id
+        ? await prisma.submission.findUnique({ where: { id: existing.sub } })
+        : null;
+    // Cookie kadaluarsa / submission dihapus / token beda → buat baru.
+    if (submission && submission.tokenId !== tok.id) submission = null;
+
+    if (!submission) {
+      if (tok.expiresAt < new Date()) {
+        return NextResponse.json({ error: "Token sudah kadaluarsa. Minta token baru ke admin." }, { status: 410 });
+      }
+      submission = await prisma.submission.create({
+        data: {
+          tokenId: tok.id,
+          testKind: tok.testKind,
+          randomSeed: randomUUID(),
+        },
       });
+      // Tandai waktu redeem pertama kali (sekedar informasi untuk admin —
+      // tidak meng-lock token). updateMany dengan filter redeemedAt=null
+      // memastikan idempoten kalau token sudah pernah dipakai siswa lain.
+      if (!tok.redeemedAt) {
+        await prisma.accessToken.updateMany({
+          where: { id: tok.id, redeemedAt: null },
+          data: { redeemedAt: new Date() },
+        });
+      }
     }
-  }
 
-  const jwtTok = signStudentToken({
-    sub: submission.id,
-    role: "student",
-    testKind: tok.testKind,
-    tokenId: tok.id,
-  });
-  const res = NextResponse.json({
-    ok: true,
-    submissionId: submission.id,
-    testKind: tok.testKind,
-    profileFilled: !!submission.fullName,
-    fullName: submission.fullName ?? null,
-    finishedAt: submission.finishedAt,
-  });
-  res.cookies.set(STUDENT_COOKIE, jwtTok, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    // Sinkron dengan masa berlaku JWT student (default 3 jam, bisa di-override
-    // via env STUDENT_JWT_EXPIRES_IN). Cukup untuk semua subtes BAKAT + buffer
-    // — sebelumnya 12 jam terlalu panjang dari sisi keamanan.
-    maxAge: expiresInToSeconds(STUDENT_JWT_EXPIRES_IN),
-  });
-  return res;
+    const jwtTok = signStudentToken({
+      sub: submission.id,
+      role: "student",
+      testKind: tok.testKind,
+      tokenId: tok.id,
+    });
+    const res = NextResponse.json({
+      ok: true,
+      submissionId: submission.id,
+      testKind: tok.testKind,
+      profileFilled: !!submission.fullName,
+      fullName: submission.fullName ?? null,
+      finishedAt: submission.finishedAt,
+    });
+    res.cookies.set(STUDENT_COOKIE, jwtTok, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      // Sinkron dengan masa berlaku JWT student (default 3 jam, bisa di-override
+      // via env STUDENT_JWT_EXPIRES_IN). Cukup untuk semua subtes BAKAT + buffer
+      // — sebelumnya 12 jam terlalu panjang dari sisi keamanan.
+      maxAge: expiresInToSeconds(STUDENT_JWT_EXPIRES_IN),
+    });
+    return res;
+  } catch (err) {
+    console.error("[redeem] unhandled error:", err);
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    return NextResponse.json(
+      { error: `Terjadi kesalahan server: ${msg}` },
+      { status: 500 },
+    );
+  }
 }
