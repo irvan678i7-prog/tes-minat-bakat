@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition, Fragment } from "react";
 import toast from "react-hot-toast";
+import { useBrutConfirm } from "@/components/BrutConfirm";
 
 type PerSubtest = {
   code: string;
@@ -159,9 +160,9 @@ export default function AdminTokens() {
   const [, setTick] = useState(0);
   const [expandedToken, setExpandedToken] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<number>(0);
-  // window.location.origin di-baca lazy saat user klik tombol SALIN LINK,
-  // bukan disimpan ke state — supaya tidak memicu re-render dari useEffect.
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const [deletingToken, setDeletingToken] = useState<string | null>(null);
+  const [deletingSub, setDeletingSub] = useState<string | null>(null);
+  const { confirm, ConfirmModal } = useBrutConfirm();
 
   const load = () =>
     fetch(`/api/admin/tokens${includeRedeemed ? "?all=1" : ""}`, { cache: "no-store" })
@@ -223,13 +224,53 @@ export default function AdminTokens() {
     return rows;
   }, [tokens]);
 
-  const copyLink = async (code: string) => {
-    const link = `${origin || ""}/k/${code}`;
+  const deleteToken = async (t: Token) => {
+    const label = `${t.code} (${t.testKind})`;
+    const ok = await confirm({
+      title: "Hapus Token",
+      message: `Hapus token ${label}?\n${t.participantCount > 0 ? `${t.participantCount} peserta dan semua datanya juga akan dihapus.` : "Token belum ada peserta."}\nTindakan ini permanen dan tidak bisa dibatalkan.`,
+      confirmLabel: "HAPUS",
+      cancelLabel: "Batal",
+      tone: "danger",
+    });
+    if (!ok) return;
+    setDeletingToken(t.id);
     try {
-      await navigator.clipboard.writeText(link);
-      toast.success("Link kelas disalin");
-    } catch {
-      toast.error("Gagal menyalin — copy manual: " + link);
+      const res = await fetch(`/api/admin/tokens/${t.id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "Gagal menghapus token");
+        return;
+      }
+      toast.success(`Token ${t.code} dihapus`);
+      load();
+    } finally {
+      setDeletingToken(null);
+    }
+  };
+
+  const deleteSub = async (sub: Submission, tokenCode: string) => {
+    const label = sub.fullName || tokenCode;
+    const ok = await confirm({
+      title: "Hapus Peserta",
+      message: `Hapus data peserta "${label}"?\nSemua jawaban dan hasil akan dihapus permanen.`,
+      confirmLabel: "HAPUS",
+      cancelLabel: "Batal",
+      tone: "danger",
+    });
+    if (!ok) return;
+    setDeletingSub(sub.id);
+    try {
+      const res = await fetch(`/api/admin/submissions/${sub.id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "Gagal menghapus data");
+        return;
+      }
+      toast.success(`Data "${label}" dihapus`);
+      load();
+    } finally {
+      setDeletingSub(null);
     }
   };
 
@@ -237,6 +278,7 @@ export default function AdminTokens() {
 
   return (
     <div className="space-y-6">
+      {ConfirmModal}
       <div className="brut-card" style={{ background: "#a3e635" }}>
         <h2 className="text-2xl font-black uppercase mb-3">Generate Token Kelas</h2>
         <p className="text-xs font-bold mb-3 opacity-80">
@@ -433,12 +475,12 @@ export default function AdminTokens() {
                       <div className="flex flex-col gap-1">
                         <button
                           className="brut-btn"
-                          style={{ padding: "4px 8px", fontSize: 11 }}
-                          onClick={() => copyLink(t.code)}
-                          disabled={expired && !hasParticipants}
-                          title="Salin link kelas untuk dibagikan ke grup"
+                          style={{ padding: "4px 8px", fontSize: 11, background: "#ff4d8d", color: "#fff" }}
+                          onClick={() => deleteToken(t)}
+                          disabled={deletingToken === t.id}
+                          title="Hapus token dan semua data peserta di dalamnya"
                         >
-                          SALIN LINK
+                          {deletingToken === t.id ? "..." : "HAPUS"}
                         </button>
                         {hasParticipants && (
                           <button
@@ -557,12 +599,13 @@ export default function AdminTokens() {
               <th>Mulai</th>
               <th>Selesai</th>
               <th>Pelanggaran</th>
+              <th>Aksi</th>
             </tr>
           </thead>
           <tbody>
             {statusRows.length === 0 && (
               <tr>
-                <td colSpan={10} className="text-center font-bold py-6">
+                <td colSpan={11} className="text-center font-bold py-6">
                   Belum ada siswa yang mengerjakan.
                 </td>
               </tr>
@@ -624,6 +667,17 @@ export default function AdminTokens() {
                   <td className="text-xs">{fmtShort(sub.finishedAt)}</td>
                   <td>
                     <ViolationBadge count={sub.violationCount} flagged={sub.flaggedCheating} />
+                  </td>
+                  <td>
+                    <button
+                      className="brut-btn text-xs"
+                      style={{ padding: "4px 8px", background: "#ff4d8d", color: "#fff" }}
+                      onClick={() => deleteSub(sub, t.code)}
+                      disabled={deletingSub === sub.id}
+                      title="Hapus data peserta ini"
+                    >
+                      {deletingSub === sub.id ? "..." : "HAPUS"}
+                    </button>
                   </td>
                 </tr>
               );

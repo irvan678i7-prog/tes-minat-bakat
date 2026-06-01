@@ -16,6 +16,9 @@ const Body = z.object({
   // cookie TIDAK diset — mencegah peserta yang salah klik kartu tetap
   // masuk ke jenis tes yang salah.
   testKind: z.enum(["MINAT", "BAKAT"]).optional(),
+  // forceNew = true → abaikan cookie yang ada, buat submission baru.
+  // Dipakai saat 2+ siswa bergantian di browser yang sama.
+  forceNew: z.boolean().optional(),
 });
 
 // 20 percobaan redeem / 5 menit per IP. Token 8 karakter dari alfabet 32 huruf
@@ -75,7 +78,9 @@ export async function POST(req: NextRequest) {
   // baru. Browser yang sama (refresh) → resume submission lama lewat cookie
   // student JWT (sub = submissionId). Token expired hanya melarang submission
   // BARU; resume submission lama yang sudah jalan tetap diizinkan.
-  const existing = getStudentFromRequest(req);
+  // forceNew: abaikan cookie, selalu buat submission baru (peserta
+  // bergantian di browser/HP yang sama).
+  const existing = parsed.data.forceNew ? null : getStudentFromRequest(req);
   let submission =
     existing && existing.tokenId === tok.id
       ? await prisma.submission.findUnique({ where: { id: existing.sub } })
@@ -116,6 +121,7 @@ export async function POST(req: NextRequest) {
     submissionId: submission.id,
     testKind: tok.testKind,
     profileFilled: !!submission.fullName,
+    fullName: submission.fullName ?? null,
     finishedAt: submission.finishedAt,
   });
   res.cookies.set(STUDENT_COOKIE, jwtTok, {
