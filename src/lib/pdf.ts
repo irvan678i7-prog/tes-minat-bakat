@@ -220,11 +220,11 @@ function drawBakat(
   y = (doc.lastAutoTable?.finalY ?? y) + 6;
 
   // ── IQ + Top Profil (side-by-side) ──
-  y = sectionTitle(doc, "IQ PREDIKSI & PROFIL BAKAT TERATAS", margin, y, innerW);
+  y = sectionTitle(doc, "EKIU PREDIKSI & PROFIL BAKAT TERATAS", margin, y, innerW);
   const halfW = (innerW - 8) / 2;
   const blockH = 56;
 
-  // IQ box (left)
+  // EKIU box (left)
   doc.setFillColor(CYAN);
   doc.rect(margin, y, halfW, blockH, "F");
   doc.setLineWidth(1.2);
