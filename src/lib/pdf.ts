@@ -68,7 +68,7 @@ type SubmissionInfo = {
   testKind: "MINAT" | "BAKAT";
 };
 
-// ── PALETTE ─────────────────────────────────────────────────────────────
+// ── PALETTE ────────────────────────────────────��──────────────────────
 const INK = "#0F172A";        // primary text (slate-900)
 const SOFT_INK = "#475569";   // secondary text (slate-600)
 const HAIRLINE = "#CBD5E1";   // borders (slate-300)
@@ -251,7 +251,7 @@ export function buildReportPDF(submission: SubmissionInfo, payload: ScoringPaylo
   return Buffer.from(doc.output("arraybuffer"));
 }
 
-// ── HEADER ──────────────────────────────────────────────────────────────
+// ── HEADER ───────────────────────────────────────────────────────────
 function drawHeader(doc: jsPDF, sub: SubmissionInfo, margin: number, pageW: number): void {
   // Aksen kuning tipis di atas
   setFillHex(doc, ACCENT);
@@ -313,7 +313,7 @@ function drawHeader(doc: jsPDF, sub: SubmissionInfo, margin: number, pageW: numb
   doc.line(margin, 80, pageW - margin, 80);
 }
 
-// ── IDENTITAS ───────────────────────────────────────────────────────────
+// ── IDENTITAS ──────────────────────────────────────────────────────────
 function drawIdentity(
   doc: jsPDF,
   sub: SubmissionInfo,
@@ -547,12 +547,12 @@ function drawIqCard(
   setTextHex(doc, SOFT_INK);
   const formula =
     fsiq?.formula ??
-    "IQ = (0.30 \u00D7 Penalaran) + (0.25 \u00D7 Verbal) + (0.25 \u00D7 Kuantitatif) + (0.20 \u00D7 Spasial)";
+    "EKIU = (0.30 \u00D7 Penalaran) + (0.25 \u00D7 Verbal) + (0.25 \u00D7 Kuantitatif) + (0.20 \u00D7 Spasial)";
   const fLines = wrapClamp(doc, formula, rightW, 1);
   doc.text(fLines, rightX, y + 62);
   doc.setFontSize(7.4);
   doc.text(
-    "hasil dikonversi ke skala IQ (M=100, SD=15).",
+    "hasil dikonversi ke skala EKIU (M=100, SD=15).",
     rightX,
     y + 76,
     { maxWidth: rightW },
@@ -612,10 +612,12 @@ function drawIqCategoryTable(
     alternateRowStyles: { fillColor: hexToRGB(STRIPE) },
     margin: { left: margin, right: margin },
   });
-  return nextY(doc, yIn + 4) + 10;
+  // @ts-expect-error - jspdf-autotable extends jsPDF instance with lastAutoTable
+  const y = (doc.lastAutoTable?.finalY ?? yIn) + 6;
+  return y;
 }
 
-// ── SUBTEST TABLE ───────────────────────────────────────────────────────
+// ── SKOR PER SUBTES ────────────────────────────────────────────────────────
 function drawSubtestTable(
   doc: jsPDF,
   payload: ScoringPayload,
@@ -1005,7 +1007,7 @@ function drawDisclaimerOneLine(
   pageH: number,
 ): void {
   const text =
-    "Disclaimer: laporan ini bersifat skrining minat & bakat (BUKAN diagnosis klinis). Skor IQ adalah estimasi profil dengan formula 0.30 Penalaran + 0.25 Verbal + 0.25 Kuantitatif + 0.20 Spasial, dikonversi ke skala IQ (M=100, SD=15). Untuk diagnosis klinis konsultasikan dengan psikolog berlisensi.";
+    "Disclaimer: laporan ini bersifat skrining minat & bakat (BUKAN diagnosis klinis). Skor EKIU adalah estimasi profil dengan formula 0.30 Penalaran + 0.25 Verbal + 0.25 Kuantitatif + 0.20 Spasial, dikonversi ke M=100, SD=15.";
   const boxY = pageH - 56;
   setFillHex(doc, "#FEF3C7");
   doc.rect(margin, boxY, pageW - margin * 2, 22, "F");
@@ -1025,7 +1027,7 @@ function drawDisclaimerOneLine(
   doc.text(lines.slice(0, 2), margin + 70, boxY + 9);
 }
 
-// ── FOOTER ──────────────────────────────────────────────────────────────
+// ── FOOTER ───────────────────────────────────────────────────────────
 function drawFooter(doc: jsPDF, margin: number, pageW: number, pageH: number): void {
   setDrawHex(doc, HAIRLINE);
   doc.setLineWidth(0.4);

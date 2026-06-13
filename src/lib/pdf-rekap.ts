@@ -113,7 +113,7 @@ function drawBakatTable(doc: jsPDF, rows: SubmissionRow[], margin: number, yIn: 
   };
   const head = [
     [
-      "No", "Nama", "Kelas", "JK", "Usia", "IQ",
+      "No", "Nama", "Kelas", "JK", "Usia", "EKIU",
       ...subtestCodes.map((c) => subShort[c] || c),
       "Top Profil", "IPA", "IPS", "Penjurusan",
     ],
@@ -266,16 +266,16 @@ function drawIqDistribution(
   doc.setTextColor(WHITE);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
-  doc.text("DISTRIBUSI IQ (PERSENTASE)", margin + 6, y + 13);
+  doc.text("DISTRIBUSI EKIU (PERSENTASE)", margin + 6, y + 13);
   doc.setTextColor(BLACK);
   y += 26;
   const total = iqs.length;
   const avg = Math.round(iqs.reduce((a, b) => a + b, 0) / total);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
-  doc.text(`Rata-rata IQ kelas: ${avg}    •    n = ${total}`, margin, y);
+  doc.text(`Rata-rata EKIU kelas: ${avg}    •    n = ${total}`, margin, y);
   y += 14;
-  const head = [["Kategori IQ", "Jumlah", "%"]];
+  const head = [["Kategori EKIU", "Jumlah", "%"]];
   const body = buckets.map((b) => {
     const c = iqs.filter((iq) => iq >= b.min && iq <= b.max).length;
     return [b.label, String(c), pct(c, total)];
