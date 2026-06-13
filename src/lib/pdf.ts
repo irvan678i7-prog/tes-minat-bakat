@@ -219,7 +219,7 @@ function drawBakat(
   // @ts-expect-error - jspdf-autotable extends jsPDF instance with lastAutoTable
   y = (doc.lastAutoTable?.finalY ?? y) + 6;
 
-  // ── IQ + Top Profil (side-by-side) ──
+  // ── EKIU + Top Profil (side-by-side) ──
   y = sectionTitle(doc, "EKIU PREDIKSI & PROFIL BAKAT TERATAS", margin, y, innerW);
   const halfW = (innerW - 8) / 2;
   const blockH = 56;
