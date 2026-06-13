@@ -6,8 +6,14 @@ import { getStudentFromRequest } from "@/lib/auth";
 const Body = z.object({
   fullName: z.string().min(1),
   gender: z.string().min(1),
+  jenjang: z.enum(["SMP", "SMA", "SMK"]),
   birthPlace: z.string().optional(),
-  birthDate: z.string().optional(),
+  birthDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Tanggal lahir harus format YYYY-MM-DD")
+    .refine((s) => !Number.isNaN(new Date(s).getTime()), "Tanggal lahir tidak valid")
+    .optional()
+    .or(z.literal("")),
   age: z.number().int().min(5).max(99).optional(),
   grade: z.string().optional(),
   school: z.string().min(1),
@@ -29,6 +35,7 @@ export async function POST(req: NextRequest) {
     data: {
       fullName: d.fullName,
       gender: d.gender,
+      jenjang: d.jenjang,
       birthPlace: d.birthPlace || null,
       birthDate: d.birthDate ? new Date(d.birthDate) : null,
       age: d.age || null,
@@ -45,6 +52,24 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const student = getStudentFromRequest(req);
   if (!student) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const sub = await prisma.submission.findUnique({ where: { id: student.sub } });
+  const sub = await prisma.submission.findUnique({
+    where: { id: student.sub },
+    select: {
+      id: true,
+      testKind: true,
+      fullName: true,
+      gender: true,
+      jenjang: true,
+      birthPlace: true,
+      birthDate: true,
+      age: true,
+      grade: true,
+      school: true,
+      major: true,
+      phone: true,
+      email: true,
+      finishedAt: true,
+    },
+  });
   return NextResponse.json({ submission: sub });
 }

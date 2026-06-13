@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import { Toaster } from "react-hot-toast";
 import "./globals.css";
@@ -15,8 +15,16 @@ const monoFont = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TES MINAT & BAKAT — SMK",
-  description: "Aplikasi tes minat & bakat untuk SMK. Brutalism UI.",
+  title: "EKIU — Estimasi Kemampuan Intelektual Umum",
+  description:
+    "EKIU (Estimasi Kemampuan Intelektual Umum) — aplikasi tes minat & bakat untuk SMK. Brutalism UI.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  userScalable: true,
 };
 
 export default function RootLayout({

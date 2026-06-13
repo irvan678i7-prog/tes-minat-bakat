@@ -54,6 +54,20 @@ html, body {
   box-shadow: 4px 4px 0 0 #000;
   transform: translate(-1px, -1px);
 }
+/* Kunci jawaban cell — no shadow / translate on focus so admin can type
+   single letter without visual jitter or accidental clipping in tight grid. */
+.kunci-input {
+  border: 3px solid #000;
+  background: #fff;
+  padding: 8px 4px;
+  font-weight: 800;
+  font-size: 18px;
+  outline: none;
+}
+.kunci-input:focus {
+  background: #fef9c3;
+  outline: none;
+}
 .brut-btn {
   border: 4px solid #000;
   box-shadow: 6px 6px 0 0 #000;

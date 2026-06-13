@@ -1,6 +1,8 @@
 // Test configuration based on the SMK Bakat & Minat book.
 // All durations are admin-configurable in DB (Subtest.durationSec); these are seed defaults.
 
+export type InputMode = "CHOICE" | "TEXT";
+
 export type SubtestSeed = {
   code: string;
   testKind: "BAKAT" | "MINAT";
@@ -9,8 +11,10 @@ export type SubtestSeed = {
   durationSec: number;
   orderIndex: number;
   expectedQuestions: number;
-  parts: 1 | 2 | 3;
+  parts: number;
   optionLabels: string[]; // labels used for options (multi-choice keys)
+  defaultInputMode?: InputMode; // CHOICE (default) or TEXT (typed answer)
+  partLabels?: string[]; // labels for multi-part TEXT inputs (e.g. ["I","II","III"])
 };
 
 export const BAKAT_SUBTESTS: SubtestSeed[] = [
@@ -36,6 +40,7 @@ export const BAKAT_SUBTESTS: SubtestSeed[] = [
     expectedQuestions: 20,
     parts: 1,
     optionLabels: [],
+    defaultInputMode: "TEXT",
   },
   {
     code: "BAKAT_3_VERBAL",
@@ -52,46 +57,55 @@ export const BAKAT_SUBTESTS: SubtestSeed[] = [
     code: "BAKAT_4_URUTAN",
     testKind: "BAKAT",
     name: "Penalaran Urutan",
-    description: "Mengisi 2 bentuk yang hilang dari deret gambar.",
+    description: "Mengisi 2 bentuk yang hilang dari deret. Ketik isian untuk bagian 1 dan 2.",
     durationSec: 7 * 60,
     orderIndex: 4,
     expectedQuestions: 20,
     parts: 2,
-    optionLabels: ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K"],
+    optionLabels: [],
+    defaultInputMode: "TEXT",
+    partLabels: ["1", "2"],
   },
   {
     code: "BAKAT_5_SPASIAL",
     testKind: "BAKAT",
     name: "Pengenalan Spasial",
-    description: "Memutar objek 2D — tentukan apakah pilihan serupa (B) atau berbeda (S).",
+    description:
+      "Memutar objek 2D. Tiap soal = 1 gambar berisi 5 bentuk (1-5) — pilih B (sama) atau S (beda) untuk masing-masing.",
     durationSec: 10 * 60,
     orderIndex: 5,
-    expectedQuestions: 70,
-    parts: 1,
+    expectedQuestions: 14,
+    parts: 5,
     optionLabels: ["B", "S"],
+    partLabels: ["1", "2", "3", "4", "5"],
   },
   {
     code: "BAKAT_6_3DIMENSI",
     testKind: "BAKAT",
     name: "Tiga Dimensi",
     description:
-      "Membayangkan sisi tersembunyi dari tumpukan balok — 3 sisi (I, II, III) per soal.",
+      "Membayangkan sisi tersembunyi dari tumpukan balok — 3 sisi (I, II, III) per soal. Ketik isian per sisi.",
     durationSec: 8 * 60,
     orderIndex: 6,
     expectedQuestions: 10,
     parts: 3,
-    optionLabels: ["A", "B", "C", "D", "E"],
+    optionLabels: [],
+    defaultInputMode: "TEXT",
+    partLabels: ["I", "II", "III"],
   },
   {
     code: "BAKAT_7_SISTEMATISASI",
     testKind: "BAKAT",
     name: "Sistematisasi",
-    description: "Tes klerikal cepat; pasangkan simbol dengan huruf.",
+    description:
+      "Tes klerikal cepat; tiap soal menampilkan 1 gambar berisi sejumlah simbol/posisi — ketik 1 jawaban per posisi. Jumlah posisi per gambar bisa berbeda (admin tentukan via kolom parts; max 12).",
     durationSec: 4 * 60,
     orderIndex: 7,
-    expectedQuestions: 150,
-    parts: 1,
-    optionLabels: ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X"],
+    expectedQuestions: 13,
+    parts: 12,
+    optionLabels: [],
+    defaultInputMode: "TEXT",
+    partLabels: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"],
   },
   {
     code: "BAKAT_8_KOSAKATA",
@@ -108,12 +122,13 @@ export const BAKAT_SUBTESTS: SubtestSeed[] = [
     code: "BAKAT_9_FIGURAL",
     testKind: "BAKAT",
     name: "Figural Angka",
-    description: "Aritmatika cepat: desimal, persen, pembagian. Tanpa kalkulator.",
+    description: "Aritmatika cepat: desimal, persen, pembagian — ketik angka jawaban.",
     durationSec: 7 * 60,
     orderIndex: 9,
     expectedQuestions: 25,
     parts: 1,
     optionLabels: [],
+    defaultInputMode: "TEXT",
   },
 ];
 
@@ -128,7 +143,7 @@ export const MINAT_SUBTESTS: SubtestSeed[] = [
     orderIndex: 1,
     expectedQuestions: 28,
     parts: 1,
-    optionLabels: ["A", "B", "C", "D", "E", "F", "G", "H"],
+    optionLabels: ["A", "B"],
   },
   {
     code: "MINAT_PROG_A",
@@ -139,7 +154,7 @@ export const MINAT_SUBTESTS: SubtestSeed[] = [
     orderIndex: 2,
     expectedQuestions: 28,
     parts: 1,
-    optionLabels: ["A", "B", "C", "D", "E", "F", "G", "H"],
+    optionLabels: ["A", "B"],
   },
   {
     code: "MINAT_PROG_B",
@@ -150,7 +165,7 @@ export const MINAT_SUBTESTS: SubtestSeed[] = [
     orderIndex: 3,
     expectedQuestions: 28,
     parts: 1,
-    optionLabels: ["A", "B", "C", "D", "E", "F", "G", "H"],
+    optionLabels: ["A", "B"],
   },
   {
     code: "MINAT_PROG_C",
@@ -161,7 +176,7 @@ export const MINAT_SUBTESTS: SubtestSeed[] = [
     orderIndex: 4,
     expectedQuestions: 28,
     parts: 1,
-    optionLabels: ["A", "B", "C", "D", "E", "F", "G", "H"],
+    optionLabels: ["A", "B"],
   },
   {
     code: "MINAT_PROG_D",
@@ -172,7 +187,7 @@ export const MINAT_SUBTESTS: SubtestSeed[] = [
     orderIndex: 5,
     expectedQuestions: 28,
     parts: 1,
-    optionLabels: ["A", "B", "C", "D", "E", "F", "G", "H"],
+    optionLabels: ["A", "B"],
   },
   {
     code: "MINAT_PROG_E",
@@ -183,7 +198,7 @@ export const MINAT_SUBTESTS: SubtestSeed[] = [
     orderIndex: 6,
     expectedQuestions: 28,
     parts: 1,
-    optionLabels: ["A", "B", "C", "D", "E", "F", "G", "H"],
+    optionLabels: ["A", "B"],
   },
   {
     code: "MINAT_PROG_F",
@@ -195,7 +210,7 @@ export const MINAT_SUBTESTS: SubtestSeed[] = [
     orderIndex: 7,
     expectedQuestions: 28,
     parts: 1,
-    optionLabels: ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"],
+    optionLabels: ["A", "B"],
   },
   {
     code: "MINAT_PROG_G",
@@ -206,7 +221,7 @@ export const MINAT_SUBTESTS: SubtestSeed[] = [
     orderIndex: 8,
     expectedQuestions: 28,
     parts: 1,
-    optionLabels: ["A", "B", "C", "D", "E", "F", "G", "H"],
+    optionLabels: ["A", "B"],
   },
   {
     code: "MINAT_PROG_H",
@@ -218,7 +233,7 @@ export const MINAT_SUBTESTS: SubtestSeed[] = [
     orderIndex: 9,
     expectedQuestions: 28,
     parts: 1,
-    optionLabels: ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"],
+    optionLabels: ["A", "B"],
   },
 ];
 
@@ -286,38 +301,38 @@ export type ProfileDef = {
 export const APTITUDE_PROFILES: ProfileDef[] = [
   { name: "Akuntansi dan Keuangan", aspects: [TAG.Num, TAG.Sis, TAG.Fig], description: "Bekerja sistematis dengan angka, laporan, dan pembukuan.", majors: ["Akuntansi", "Manajemen Keuangan"], careers: ["Akuntan", "Auditor", "Analis Keuangan"] },
   { name: "Agrikultur dan Manajemen Tanah", aspects: [TAG.Spa, TAG["3D"], TAG.Vis], description: "Kemampuan visual dan spasial untuk mengelola lahan dan agribisnis.", majors: ["Agronomi", "Manajemen Sumberdaya Lahan"], careers: ["Petani Modern", "Manajer Perkebunan"] },
-  { name: "Arsitektur", aspects: [TAG["3D"], TAG.Spa, TAG.Num], description: "Visualisasi tiga dimensi & numerik untuk desain bangunan.", majors: ["Arsitektur", "Teknik Sipil"], careers: ["Arsitek", "Desainer Interior"] },
+  { name: "Arsitektur", aspects: [TAG["3D"], TAG.Spa, TAG.Num, TAG.Vis], description: "Visualisasi tiga dimensi & numerik untuk desain bangunan.", majors: ["Arsitektur", "Teknik Sipil"], careers: ["Arsitek", "Desainer Interior"] },
   { name: "Desain dan Seni", aspects: [TAG.Spa, TAG.Vis, TAG["3D"]], description: "Kepekaan estetika dan komposisi visual.", majors: ["Desain Komunikasi Visual", "Seni Rupa"], careers: ["Desainer Grafis", "Ilustrator"] },
   { name: "Sejarah Seni", aspects: [TAG.Ver, TAG.Spa, TAG.Kos], description: "Verbal & visual untuk analisis karya seni dari masa ke masa.", majors: ["Sejarah Seni", "Kuratorial"], careers: ["Kurator", "Penulis Seni"] },
-  { name: "Biologi", aspects: [TAG.Vis, TAG.Num, TAG.Ver], description: "Pengamatan & analisis terhadap fenomena makhluk hidup.", majors: ["Biologi", "Bioteknologi"], careers: ["Peneliti Biologi", "Ahli Lingkungan"] },
-  { name: "Katering", aspects: [TAG.Spa, TAG["3D"], TAG.Vis], description: "Tata sajian makanan & manajemen dapur.", majors: ["Tata Boga", "Manajemen Katering"], careers: ["Chef", "Manajer Katering"] },
+  { name: "Biologi", aspects: [TAG.Vis, TAG.Num, TAG.Ver, TAG.Fig], description: "Pengamatan & analisis terhadap fenomena makhluk hidup.", majors: ["Biologi", "Bioteknologi"], careers: ["Peneliti Biologi", "Ahli Lingkungan"] },
+  { name: "Katering", aspects: [TAG.Spa, TAG["3D"], TAG.Vis, TAG.Urt], description: "Tata sajian makanan & manajemen dapur.", majors: ["Tata Boga", "Manajemen Katering"], careers: ["Chef", "Manajer Katering"] },
   { name: "Kimia", aspects: [TAG.Vis, TAG.Num, TAG.Urt], description: "Eksperimen & perhitungan terstruktur.", majors: ["Kimia", "Teknik Kimia"], careers: ["Analis Lab", "Quality Control"] },
   { name: "Sastra", aspects: [TAG.Kos, TAG.Ver, TAG.Urt], description: "Olah kata & narasi.", majors: ["Sastra Indonesia", "Sastra Inggris"], careers: ["Penulis", "Editor"] },
-  { name: "IT dan Komputer", aspects: [TAG.Vis, TAG.Num, TAG.Urt], description: "Algoritma, logika, dan pola.", majors: ["Teknik Informatika", "Sistem Informasi"], careers: ["Programmer", "Data Engineer", "Analis Sistem"] },
+  { name: "IT dan Komputer", aspects: [TAG.Vis, TAG.Num, TAG.Urt, TAG.Spa], description: "Algoritma, logika, dan pola.", majors: ["Teknik Informatika", "Sistem Informasi"], careers: ["Programmer", "Data Engineer", "Analis Sistem"] },
   { name: "Keterampilan dan Kerajinan Tangan", aspects: [TAG["3D"], TAG.Spa, TAG.Vis], description: "Karya dengan tangan & material.", majors: ["Kriya"], careers: ["Pengrajin", "Pengusaha Kriya"] },
-  { name: "Tarian", aspects: [TAG.Spa, TAG.Vis, TAG.Ver], description: "Koordinasi gerak & ekspresi.", majors: ["Seni Tari"], careers: ["Penari", "Koreografer"] },
+  { name: "Tarian", aspects: [TAG.Spa, TAG.Vis, TAG.Ver, TAG.Urt], description: "Koordinasi gerak & ekspresi.", majors: ["Seni Tari"], careers: ["Penari", "Koreografer"] },
   { name: "Drama", aspects: [TAG.Ver, TAG.Kos, TAG.Vis], description: "Olah peran dan komunikasi panggung.", majors: ["Seni Teater"], careers: ["Aktor", "Sutradara"] },
   { name: "Ekologi dan Ilmu Lingkungan", aspects: [TAG.Vis, TAG.Num, TAG.Urt], description: "Analisis ekosistem & data lingkungan.", majors: ["Biologi", "Ilmu Lingkungan"], careers: ["Konsultan Lingkungan", "Peneliti Ekologi"] },
   { name: "Ekonomi", aspects: [TAG.Num, TAG.Ver, TAG.Fig], description: "Berpikir kuantitatif & verbal.", majors: ["Ekonomi", "Manajemen"], careers: ["Analis Ekonomi", "Manajer"] },
-  { name: "Permesinan", aspects: [TAG.Num, TAG["3D"], TAG.Vis], description: "Mengoperasikan & merancang mesin.", majors: ["Teknik Mesin"], careers: ["Insinyur Mesin", "Operator Pabrik"] },
+  { name: "Permesinan", aspects: [TAG.Num, TAG["3D"], TAG.Vis, TAG.Fig], description: "Mengoperasikan & merancang mesin.", majors: ["Teknik Mesin"], careers: ["Insinyur Mesin", "Operator Pabrik"] },
   { name: "Bahasa Inggris", aspects: [TAG.Ver, TAG.Kos, TAG.Urt], description: "Penguasaan bahasa lisan & tulis.", majors: ["Pendidikan/ Sastra Inggris"], careers: ["Penerjemah", "Guru Bahasa Inggris"] },
   { name: "Fashion", aspects: [TAG.Spa, TAG.Vis, TAG["3D"]], description: "Desain busana & visual.", majors: ["Tata Busana", "Desain Mode"], careers: ["Desainer Mode", "Stylist"] },
   { name: "Geografi", aspects: [TAG.Spa, TAG.Vis, TAG.Num], description: "Pemetaan & analisis spasial.", majors: ["Geografi", "Geomatika"], careers: ["Surveyor", "Analis GIS"] },
   { name: "Sejarah", aspects: [TAG.Vis, TAG.Ver, TAG.Kos], description: "Analisis naratif lintas waktu.", majors: ["Sejarah"], careers: ["Sejarawan", "Guide Museum"] },
-  { name: "Manajemen Hotel", aspects: [TAG.Urt, TAG.Fig, TAG.Num], description: "Operasional layanan & perhitungan.", majors: ["Manajemen Perhotelan"], careers: ["Manajer Hotel", "F&B Supervisor"] },
+  { name: "Manajemen Hotel", aspects: [TAG.Urt, TAG.Fig, TAG.Num, TAG.Spa], description: "Operasional layanan & perhitungan.", majors: ["Manajemen Perhotelan"], careers: ["Manajer Hotel", "F&B Supervisor"] },
   { name: "Tata Bahasa", aspects: [TAG.Ver, TAG.Kos, TAG.Fig], description: "Logika kebahasaan.", majors: ["Linguistik"], careers: ["Editor", "Proofreader"] },
   { name: "Hukum", aspects: [TAG.Ver, TAG.Kos, TAG.Fig], description: "Argumentasi & ketelitian aturan.", majors: ["Ilmu Hukum"], careers: ["Pengacara", "Notaris"] },
   { name: "Perpustakaan dan Ilmu Informasi", aspects: [TAG.Vis, TAG.Ver, TAG.Kos], description: "Klasifikasi & manajemen informasi.", majors: ["Ilmu Perpustakaan"], careers: ["Pustakawan", "Information Specialist"] },
   { name: "Matematika dan Statistika", aspects: [TAG.Num, TAG.Fig, TAG["3D"]], description: "Perhitungan abstrak & data.", majors: ["Matematika", "Statistika"], careers: ["Aktuaris", "Data Analyst"] },
   { name: "Media dan Komunikasi", aspects: [TAG.Ver, TAG.Vis, TAG.Spa], description: "Kreatif & ekspresif.", majors: ["Ilmu Komunikasi", "Broadcasting"], careers: ["Reporter", "Content Creator"] },
-  { name: "Musik", aspects: [TAG.Urt, TAG.Spa, TAG.Vis], description: "Pola ritmis & nada.", majors: ["Seni Musik"], careers: ["Musisi", "Komposer"] },
+  { name: "Musik", aspects: [TAG.Urt, TAG.Spa, TAG.Vis, TAG.Kos], description: "Pola ritmis & nada.", majors: ["Seni Musik"], careers: ["Musisi", "Komposer"] },
   { name: "Keperawatan", aspects: [TAG.Vis, TAG.Urt, TAG["3D"]], description: "Telaten & sistematis dalam perawatan.", majors: ["Keperawatan"], careers: ["Perawat", "Bidan"] },
   { name: "Filsafat dan Studi Keagamaan", aspects: [TAG.Ver, TAG.Kos, TAG.Urt], description: "Pemikiran reflektif.", majors: ["Filsafat", "Studi Agama"], careers: ["Akademisi", "Ulama/Pemuka Agama"] },
   { name: "Fisika", aspects: [TAG.Num, TAG.Fig, TAG["3D"]], description: "Hukum alam & matematika.", majors: ["Fisika", "Teknik Fisika"], careers: ["Peneliti Fisika", "Engineer R&D"] },
   { name: "Politik dan Hubungan Internasional", aspects: [TAG.Ver, TAG.Kos, TAG.Vis], description: "Argumen & wawasan global.", majors: ["Hubungan Internasional", "Ilmu Politik"], careers: ["Diplomat", "Analis Kebijakan"] },
-  { name: "Psikologi", aspects: [TAG.Vis, TAG.Num, TAG.Ver], description: "Memahami perilaku manusia.", majors: ["Psikologi"], careers: ["Psikolog", "HRD"] },
+  { name: "Psikologi", aspects: [TAG.Vis, TAG.Num, TAG.Ver, TAG.Urt], description: "Memahami perilaku manusia.", majors: ["Psikologi"], careers: ["Psikolog", "HRD"] },
   { name: "Sosiologi", aspects: [TAG.Vis, TAG.Ver, TAG.Kos], description: "Analisis struktur sosial.", majors: ["Sosiologi"], careers: ["Peneliti Sosial", "CSR Officer"] },
-  { name: "Olah Raga dan Penelitian Rekreasi", aspects: [TAG.Vis, TAG.Spa, TAG.Urt], description: "Koordinasi tubuh & strategi.", majors: ["Pendidikan Olahraga"], careers: ["Atlet", "Pelatih", "Manajer Event"] },
+  { name: "Olah Raga dan Penelitian Rekreasi", aspects: [TAG.Vis, TAG.Spa, TAG.Urt, TAG.Fig], description: "Koordinasi tubuh & strategi.", majors: ["Pendidikan Olahraga"], careers: ["Atlet", "Pelatih", "Manajer Event"] },
   { name: "Teknologi Tekstil", aspects: [TAG.Num, TAG.Spa, TAG.Fig], description: "Material & ukuran tekstil.", majors: ["Teknik Tekstil"], careers: ["Engineer Tekstil", "Quality Control Garment"] },
 ];
 
@@ -449,11 +464,15 @@ export function estimateIQ(perSubtest: Record<string, { raw: number; max: number
   return Math.max(70, Math.min(145, Math.round(iq)));
 }
 
+// Kategori IQ mengikuti tabel "Penggolongan IQ berdasarkan skala David
+// Wechsler" (Suryani dkk., SNIMed 2019): 7 kategori dengan batas
+// ≥130, 120–129, 110–119, 90–109, 80–89, 70–79, ≤69.
 export function iqInterpretation(iq: number): { band: string; description: string } {
-  if (iq >= 130) return { band: "Sangat Superior", description: "Kemampuan kognitif jauh di atas rata-rata." };
-  if (iq >= 120) return { band: "Superior", description: "Kemampuan kognitif di atas rata-rata." };
-  if (iq >= 110) return { band: "Di Atas Rata-rata", description: "Kemampuan kognitif sedikit di atas rata-rata." };
-  if (iq >= 90) return { band: "Rata-rata", description: "Kemampuan kognitif setara dengan rata-rata populasi." };
-  if (iq >= 80) return { band: "Di Bawah Rata-rata", description: "Kemampuan kognitif sedikit di bawah rata-rata." };
-  return { band: "Rendah", description: "Kemampuan kognitif perlu pendampingan tambahan." };
+  if (iq >= 130) return { band: "Sangat Superior", description: "IQ ≥ 130 — kemampuan kognitif jauh di atas rata-rata." };
+  if (iq >= 120) return { band: "Superior", description: "IQ 120–129 — kemampuan kognitif di atas rata-rata." };
+  if (iq >= 110) return { band: "Di Atas Rata-rata", description: "IQ 110–119 — kemampuan kognitif sedikit di atas rata-rata." };
+  if (iq >= 90) return { band: "Rata-rata", description: "IQ 90–109 — kemampuan kognitif setara dengan rata-rata populasi." };
+  if (iq >= 80) return { band: "Di Bawah Rata-rata", description: "IQ 80–89 — kemampuan kognitif sedikit di bawah rata-rata." };
+  if (iq >= 70) return { band: "Lambat Belajar", description: "IQ 70–79 — cukup di bawah rata-rata, perlu pendampingan belajar." };
+  return { band: "Keterbelakangan Mental", description: "IQ ≤ 69 — jauh di bawah rata-rata, perlu evaluasi profesional." };
 }

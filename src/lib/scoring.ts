@@ -4,9 +4,14 @@ import {
   CATEGORY_LABEL,
   MINAT_BIDANG_TO_PROGRAM,
   categorize,
-  estimateIQ,
-  iqInterpretation,
 } from "./test-config";
+import {
+  computeProBakat,
+  type CompositeIndex,
+  type FSIQResult,
+  type IqCategoryScore,
+  type ProSubtestScore,
+} from "./scoring-pro";
 import {
   hitungPenjurusan,
   type PenjurusanResult,
@@ -24,10 +29,20 @@ export type ScoringPayload = {
       max: number;
       categoryCode?: string;
       categoryLabel?: string;
+      // Skoring profesional (Wechsler-style). Optional supaya tetap kompatibel
+      // dengan payload lama yang tersimpan di DB (Result.payload Json).
+      zScore?: number;
+      tScore?: number;
+      percentile?: number;
+      stanine?: number;
     }
   >;
   bakat?: {
     topProfiles: { name: string; description: string; majors: string[]; careers: string[]; matchScore: number }[];
+    composites?: CompositeIndex[];
+    iqCategories?: IqCategoryScore[];
+    fsiq?: FSIQResult;
+    narrative?: string;
   };
   minat?: {
     bidangScores: Record<Letter, number>;
@@ -40,6 +55,111 @@ export type ScoringPayload = {
   penjurusan?: PenjurusanResult & { minatSource: "cross-link" | null };
 };
 
+type AnswerRow = {
+  selected: unknown;
+  question: {
+    subtestId: string;
+    subtest: { code: string; name: string };
+    parts: number;
+    correct: unknown;
+    scoringTag: string | null;
+    inputMode?: string;
+  };
+};
+
+/**
+ * Total skor maksimum per subtes berdasarkan SELURUH bank soal subtes
+ * (bukan hanya soal yang dijawab). Wajib dikirim oleh caller agar
+ * perbandingan raw/max dan estimasi IQ tidak bisa "diakali" dengan
+ * menjawab sebagian soal.
+ *
+ * - totalParts: jumlah part / sel "lembar jawaban" gabungan dari semua
+ *   non-example question pada subtes (untuk BAKAT yang punya
+ *   parts > 1 seperti SPASIAL & 3DIMENSI).
+ * - totalQuestions: jumlah baris soal (1 baris = 1 question, terlepas
+ *   dari parts). Dipakai sebagai max untuk MINAT, di mana 1 jawaban =
+ *   1 keterisian.
+ */
+export type SubtestMeta = {
+  code: string;
+  name: string;
+  totalParts: number;
+  totalQuestions: number;
+};
+
+export async function loadSubtestMeta(testKind: "BAKAT" | "MINAT"): Promise<SubtestMeta[]> {
+  const subtests = await prisma.subtest.findMany({
+    where: { testKind },
+    orderBy: { orderIndex: "asc" },
+    include: {
+      questions: {
+        where: { isExample: false },
+        select: { parts: true },
+      },
+    },
+  });
+  return subtests.map((s) => ({
+    code: s.code,
+    name: s.name,
+    totalQuestions: s.questions.length,
+    totalParts: s.questions.reduce((a, q) => a + Math.max(1, q.parts || 1), 0),
+  }));
+}
+
+function normalizeText(v: unknown): string {
+  return String(v ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toUpperCase();
+}
+
+type SubWithAnswers = {
+  testKind: "BAKAT" | "MINAT";
+  answers: AnswerRow[];
+  // Identitas peserta (opsional) — kalau ada dan ini BAKAT, dipakai untuk
+  // cross-link ke submission MINAT milik orang yang sama supaya skor minat
+  // bisa mengoreksi penjurusan IPA / IPS.
+  fullName?: string | null;
+  school?: string | null;
+  grade?: string | null;
+};
+
+/**
+ * Compute per-answer correctness in memory (no DB writes). Returns
+ * { isCorrect, partialScore } for each input answer in the same order.
+ */
+function gradeAnswerRows(answers: AnswerRow[]): { isCorrect: boolean; partialScore: number }[] {
+  return answers.map((ans) => {
+    const correct = ans.question.correct as unknown;
+    const selected = ans.selected as unknown;
+    const parts = ans.question.parts || 1;
+    let isCorrect = false;
+    let partialScore = 0;
+    // TEXT and CHOICE both compare normalized strings (uppercase, trimmed,
+    // collapsed whitespace). Empty correct => MINAT-style "every answered counts".
+    if (parts > 1 && Array.isArray(correct) && Array.isArray(selected)) {
+      let okCount = 0;
+      for (let i = 0; i < correct.length; i++) {
+        const c = normalizeText(correct[i]);
+        const s = normalizeText(selected[i]);
+        if (c && c === s) okCount += 1;
+      }
+      partialScore = okCount;
+      isCorrect = okCount === correct.length;
+    } else if (typeof correct === "string" || typeof correct === "number") {
+      const c = normalizeText(correct);
+      const s = normalizeText(Array.isArray(selected) ? selected[0] : selected);
+      isCorrect = c.length > 0 && c === s;
+      partialScore = isCorrect ? 1 : 0;
+    } else if (correct == null || (Array.isArray(correct) && correct.length === 0)) {
+      const s = String(Array.isArray(selected) ? selected[0] : selected ?? "").trim();
+      isCorrect = s.length > 0;
+      partialScore = isCorrect ? 1 : 0;
+    }
+    return { isCorrect, partialScore };
+  });
+}
+
 export async function scoreSubmission(submissionId: string): Promise<ScoringPayload> {
   const sub = await prisma.submission.findUniqueOrThrow({
     where: { id: submissionId },
@@ -47,22 +167,38 @@ export async function scoreSubmission(submissionId: string): Promise<ScoringPayl
       answers: { include: { question: { include: { subtest: true } } } },
     },
   });
-
+  const subtestMeta = await loadSubtestMeta(sub.testKind);
   if (sub.testKind === "BAKAT") {
     const minatBidang = await findMatchingMinatBidangScores({
       fullName: sub.fullName,
       school: sub.school,
       grade: sub.grade,
     });
-    return scoreBakat(sub, minatBidang);
+    return computeScoringPayload(
+      {
+        testKind: sub.testKind,
+        answers: sub.answers,
+        fullName: sub.fullName,
+        school: sub.school,
+        grade: sub.grade,
+      },
+      subtestMeta,
+      minatBidang,
+    );
   }
-  return scoreMinat(sub);
+  return computeScoringPayload(
+    {
+      testKind: sub.testKind,
+      answers: sub.answers,
+    },
+    subtestMeta,
+  );
 }
 
 // Cross-link: cari submission MINAT milik peserta yang sama (fullName +
 // school + grade, case-insensitive). Bila ada, ambil distribusi bidang
 // minat-nya untuk dijadikan koreksi pada penjurusan IPA / IPS.
-async function findMatchingMinatBidangScores(idents: {
+export async function findMatchingMinatBidangScores(idents: {
   fullName: string | null;
   school: string | null;
   grade: string | null;
@@ -99,40 +235,97 @@ async function findMatchingMinatBidangScores(idents: {
   const scores: Record<string, number> = {};
   for (const ans of m.answers) {
     if (ans.question.subtest.code !== "MINAT_BIDANG") continue;
-    const raw = ans.selected;
-    const sel = String(Array.isArray(raw) ? (raw[0] as string) : raw).trim().toUpperCase();
+    const sel = pickAnswerLetter(ans.selected);
     if (sel) scores[sel] = (scores[sel] || 0) + 1;
   }
   return Object.keys(scores).length > 0 ? scores : null;
 }
 
-type SubWithAnswers = Awaited<ReturnType<typeof prisma.submission.findUniqueOrThrow>> & {
-  answers: { selected: unknown; partialScore: number; isCorrect: boolean; question: { subtestId: string; subtest: { code: string; name: string }; parts: number; correct: unknown; scoringTag: string | null } }[];
-};
+/**
+ * Compute the full scoring payload from a pre-loaded submission. No DB calls.
+ * Use this from the finish endpoint to avoid an extra round-trip.
+ *
+ * `subtestMeta` (WAJIB diisi caller, kecuali dengan sengaja mau pakai mode
+ * fallback "max dari answered") menyediakan total bank soal per subtes.
+ * Ini PENTING agar peserta yang skip sebagian soal tidak mendapat
+ * raw/max = 100% (yang menginflasi IQ).
+ *
+ * `minatBidang` (opsional) memuat skor bidang MINAT peserta yang sama untuk
+ * mengoreksi penjurusan IPA / IPS — caller wajib menyiapkannya bila ingin
+ * cross-link (mis. via `findMatchingMinatBidangScores`).
+ */
+export function computeScoringPayload(
+  sub: SubWithAnswers,
+  subtestMeta: SubtestMeta[] | null = null,
+  minatBidang: Record<string, number> | null = null,
+): ScoringPayload {
+  if (sub.testKind === "BAKAT") return scoreBakat(sub, subtestMeta, minatBidang);
+  return scoreMinat(sub, subtestMeta);
+}
 
 function scoreBakat(
   sub: SubWithAnswers,
+  subtestMeta: SubtestMeta[] | null,
   minatBidang: Record<string, number> | null,
 ): ScoringPayload {
-  // Aggregate raw counts per subtest from saved answers (we expect Answer.partialScore
-  // to already store the per-question score for parts>1 questions; otherwise use isCorrect).
+  const grades = gradeAnswerRows(sub.answers);
   const perSubtest: Record<string, { name: string; raw: number; max: number }> = {};
-  for (const ans of sub.answers) {
-    const code = ans.question.subtest.code;
-    if (!perSubtest[code]) perSubtest[code] = { name: ans.question.subtest.name, raw: 0, max: 0 };
-    perSubtest[code].max += Math.max(1, ans.question.parts || 1);
-    if (ans.question.parts && ans.question.parts > 1) {
-      perSubtest[code].raw += ans.partialScore || 0;
-    } else {
-      perSubtest[code].raw += ans.isCorrect ? 1 : 0;
+
+  // Seed dari subtestMeta supaya `max` = total bank soal real (bukan dari
+  // answered). Subtes yang tidak dikerjakan tetap muncul dengan raw=0,
+  // max=totalParts → ratio 0% → IQ-nya tidak bisa di-inflate.
+  if (subtestMeta) {
+    for (const m of subtestMeta) {
+      perSubtest[m.code] = { name: m.name, raw: 0, max: m.totalParts };
     }
   }
 
-  // Categorize
+  for (let i = 0; i < sub.answers.length; i++) {
+    const ans = sub.answers[i];
+    const g = grades[i];
+    const code = ans.question.subtest.code;
+    if (!perSubtest[code]) {
+      // Subtes asing (mis. data lama / mismatch testKind, atau
+      // subtestMeta tidak diberikan untuk backward compat). Akumulasi
+      // max dari parts answered — perilaku lama.
+      perSubtest[code] = { name: ans.question.subtest.name, raw: 0, max: 0 };
+    }
+    if (!subtestMeta) {
+      // Fallback mode (caller tidak menyediakan meta): max diakumulasi
+      // dari parts answered. Hanya untuk backward compat — caller
+      // produksi WAJIB mengirim subtestMeta.
+      perSubtest[code].max += Math.max(1, ans.question.parts || 1);
+    }
+    if (ans.question.parts && ans.question.parts > 1) {
+      perSubtest[code].raw += g.partialScore || 0;
+    } else {
+      perSubtest[code].raw += g.isCorrect ? 1 : 0;
+    }
+  }
+
+  // Skoring profesional: hitung z, T, percentile, stanine + komposit + FSIQ.
+  const subtestArr = Object.entries(perSubtest).map(([code, v]) => ({
+    code,
+    name: v.name,
+    raw: v.raw,
+    max: v.max,
+  }));
+  const pro = computeProBakat(subtestArr, categorize, CATEGORY_LABEL);
+  const proByCode = new Map<string, ProSubtestScore>(pro.subtests.map((s) => [s.code, s]));
+
+  // Merge: pakai categoryCode/Label dari pro (yang juga lewat `categorize`).
   const out: ScoringPayload["perSubtest"] = {};
   for (const [code, v] of Object.entries(perSubtest)) {
-    const cat = categorize(code, v.raw);
-    out[code] = { ...v, categoryCode: cat, categoryLabel: CATEGORY_LABEL[cat] };
+    const p = proByCode.get(code);
+    out[code] = {
+      ...v,
+      categoryCode: p?.categoryCode,
+      categoryLabel: p?.categoryLabel,
+      zScore: p?.zScore,
+      tScore: p?.tScore,
+      percentile: p?.percentile,
+      stanine: p?.stanine,
+    };
   }
 
   // Top 3 subtests by raw score (per buku: pilih 3 subtes tertinggi → cocokan profil)
@@ -150,8 +343,13 @@ function scoreBakat(
     .sort((a, b) => b.matchScore - a.matchScore)
     .slice(0, 5);
 
-  const iq = estimateIQ(perSubtest);
-  const interp = iqInterpretation(iq);
+  // IQ yang ditampilkan di seluruh app (admin list, PDF, dst) sekarang pakai
+  // FSIQ Wechsler-style dari scoring-pro — mean 100, SD 15, dengan CI ±5.
+  const iq = pro.fsiq.score;
+  const interp = {
+    band: pro.fsiq.band.label,
+    description: pro.fsiq.band.descId,
+  };
 
   const majors = Array.from(new Set(profileMatches.flatMap((p) => p.majors))).slice(0, 8);
   const careers = Array.from(new Set(profileMatches.flatMap((p) => p.careers))).slice(0, 8);
@@ -169,6 +367,10 @@ function scoreBakat(
         careers: p.careers,
         matchScore: p.matchScore,
       })),
+      composites: pro.composites,
+      iqCategories: pro.iqCategories,
+      fsiq: pro.fsiq,
+      narrative: pro.narrative,
     },
     iqEstimate: iq,
     iqInterpretation: interp,
@@ -180,20 +382,56 @@ function scoreBakat(
   };
 }
 
-function scoreMinat(sub: SubWithAnswers): ScoringPayload {
+/**
+ * Ambil huruf jawaban yang valid (uppercase, single character A-Z) dari
+ * `selected`. Mengembalikan empty string kalau jawaban kosong / null / array
+ * kosong / nilai tidak valid. Dipakai di scoreMinat supaya tally bidang &
+ * program tidak ter-pollusi oleh jawaban kosong (yang bisa muncul sebagai
+ * "" atau "UNDEFINED" lewat String(undefined)).
+ */
+function pickAnswerLetter(selected: unknown): string {
+  let raw: unknown = selected;
+  if (Array.isArray(raw)) {
+    raw = raw.length > 0 ? raw[0] : "";
+  }
+  if (raw == null) return "";
+  const s = String(raw).trim().toUpperCase();
+  // Hanya terima huruf tunggal A-Z. Jawaban "UNDEFINED", "", "1", dll. ditolak.
+  return /^[A-Z]$/.test(s) ? s : "";
+}
+
+function scoreMinat(
+  sub: SubWithAnswers,
+  subtestMeta: SubtestMeta[] | null,
+): ScoringPayload {
   // Bidang counts: tally letters chosen on MINAT_BIDANG subtest.
   const bidangScores: Record<Letter, number> = {};
   const programLetterCounts: Record<string, Record<Letter, number>> = {};
   const perSubtest: Record<string, { name: string; raw: number; max: number }> = {};
 
+  // Seed perSubtest dengan max = total soal subtes (dari bank), bukan dari
+  // jumlah jawaban. Subtes tanpa jawaban tetap muncul dengan raw=0.
+  if (subtestMeta) {
+    for (const m of subtestMeta) {
+      perSubtest[m.code] = { name: m.name, raw: 0, max: m.totalQuestions };
+    }
+  }
+
   for (const ans of sub.answers) {
     const code = ans.question.subtest.code;
-    if (!perSubtest[code]) perSubtest[code] = { name: ans.question.subtest.name, raw: 0, max: 0 };
-    perSubtest[code].max += 1;
-    perSubtest[code].raw += 1; // every answered counts
-    const raw = ans.selected;
-    const sel = String(Array.isArray(raw) ? (raw[0] as string) : raw).trim().toUpperCase();
+    if (!perSubtest[code]) {
+      perSubtest[code] = { name: ans.question.subtest.name, raw: 0, max: 0 };
+    }
+    if (!subtestMeta) {
+      // Fallback (caller tidak kirim meta): max ikut +1 setiap jawaban.
+      perSubtest[code].max += 1;
+    }
+    const sel = pickAnswerLetter(ans.selected);
+    // Hanya tally jawaban yang valid. Tanpa guard ini, jawaban kosong /
+    // "UNDEFINED" akan masuk sebagai "key" di bidangScores → bisa muncul
+    // sebagai top bidang kosong di hasil tes peserta.
     if (!sel) continue;
+    perSubtest[code].raw += 1;
     if (code === "MINAT_BIDANG") {
       bidangScores[sel] = (bidangScores[sel] || 0) + 1;
     } else if (code.startsWith("MINAT_PROG_")) {
@@ -212,7 +450,7 @@ function scoreMinat(sub: SubWithAnswers): ScoringPayload {
     const code = `MINAT_PROG_${b}`;
     const counts = programLetterCounts[code] || {};
     const ranking = Object.entries(counts)
-      .sort((x, y) => y[1] - x[1])
+      .sort((a, b2) => b2[1] - a[1])
       .slice(0, 3);
     const map = MINAT_BIDANG_TO_PROGRAM[b];
     const topAnswers = ranking.map(([letter, count]) => {
@@ -236,49 +474,4 @@ function scoreMinat(sub: SubWithAnswers): ScoringPayload {
     minat: { bidangScores, topBidang, programs },
     recommendations: { majors, careers },
   };
-}
-
-/** Update Answer rows so partialScore/isCorrect reflect grading vs. correct keys. */
-export async function gradeAnswers(submissionId: string): Promise<void> {
-  const sub = await prisma.submission.findUniqueOrThrow({
-    where: { id: submissionId },
-    include: { answers: { include: { question: true } } },
-  });
-
-  for (const ans of sub.answers) {
-    const correct = ans.question.correct as unknown;
-    const selected = ans.selected as unknown;
-    const parts = ans.question.parts || 1;
-
-    let isCorrect = false;
-    let partialScore = 0;
-
-    if (parts > 1 && Array.isArray(correct) && Array.isArray(selected)) {
-      let okCount = 0;
-      for (let i = 0; i < correct.length; i++) {
-        const c = String(correct[i] ?? "").trim().toUpperCase();
-        const s = String(selected[i] ?? "").trim().toUpperCase();
-        if (c && c === s) okCount += 1;
-      }
-      partialScore = okCount;
-      // Tandai isCorrect hanya bila ada kunci dan semua slot benar (jangan
-      // sampai correct=[] menghasilkan isCorrect=true).
-      isCorrect = correct.length > 0 && okCount === correct.length;
-    } else if (typeof correct === "string" || typeof correct === "number") {
-      const c = String(correct).trim().toUpperCase();
-      const s = String(Array.isArray(selected) ? selected[0] : selected ?? "").trim().toUpperCase();
-      isCorrect = c.length > 0 && c === s;
-      partialScore = isCorrect ? 1 : 0;
-    } else if (correct == null) {
-      // No correct key (e.g., MINAT subtests). Mark "answered" as a soft success.
-      const s = String(Array.isArray(selected) ? selected[0] : selected ?? "").trim();
-      isCorrect = s.length > 0;
-      partialScore = isCorrect ? 1 : 0;
-    }
-
-    await prisma.answer.update({
-      where: { id: ans.id },
-      data: { isCorrect, partialScore },
-    });
-  }
 }
