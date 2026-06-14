@@ -258,13 +258,13 @@ export type WechslerBand =
 // Wechsler" (Suryani dkk., SNIMed 2019). Batas IQ: ≥130, 120–129, 110–119,
 // 90–109, 80–89, 70–79, ≤69.
 export function wechslerBand(score: number): WechslerBandInfo {
-  if (score >= 130) return { code: "Very Superior", label: "Sangat Superior", descId: "IQ ≥ 130 — jauh di atas rata-rata populasi." };
-  if (score >= 120) return { code: "Superior", label: "Superior", descId: "IQ 120–129 — di atas rata-rata populasi." };
-  if (score >= 110) return { code: "High Average", label: "Di Atas Rata-rata", descId: "IQ 110–119 — sedikit di atas rata-rata populasi." };
-  if (score >= 90) return { code: "Average", label: "Rata-rata", descId: "IQ 90–109 — sebanding dengan rata-rata populasi seusia." };
-  if (score >= 80) return { code: "Low Average", label: "Di Bawah Rata-rata", descId: "IQ 80–89 — sedikit di bawah rata-rata populasi." };
-  if (score >= 70) return { code: "Borderline", label: "Lambat Belajar", descId: "IQ 70–79 — cukup di bawah rata-rata, perlu pendampingan belajar." };
-  return { code: "Extremely Low", label: "Keterbelakangan Mental", descId: "IQ ≤ 69 — jauh di bawah rata-rata, perlu evaluasi profesional." };
+  if (score >= 130) return { code: "Very Superior", label: "Sangat Superior", descId: "EKIU ≥ 130 — jauh di atas rata-rata populasi." };
+  if (score >= 120) return { code: "Superior", label: "Superior", descId: "EKIU 120–129 — di atas rata-rata populasi." };
+  if (score >= 110) return { code: "High Average", label: "Di Atas Rata-rata", descId: "EKIU 110–119 — sedikit di atas rata-rata populasi." };
+  if (score >= 90) return { code: "Average", label: "Rata-rata", descId: "EKIU 90–109 — sebanding dengan rata-rata populasi seusia." };
+  if (score >= 80) return { code: "Low Average", label: "Di Bawah Rata-rata", descId: "EKIU 80–89 — sedikit di bawah rata-rata populasi." };
+  if (score >= 70) return { code: "Borderline", label: "Lambat Belajar", descId: "EKIU 70–79 — cukup di bawah rata-rata, perlu pendampingan belajar." };
+  return { code: "Extremely Low", label: "Keterbelakangan Mental", descId: "EKIU ≤ 69 — jauh di bawah rata-rata, perlu evaluasi profesional." };
 }
 
 // ── Full Scale IQ ─────────────────────────────────────────────────────────
@@ -395,7 +395,7 @@ export function computeProBakat(
     band: wechslerBand(fsiqScore),
     percentile: scoreToPercentile(fsiqScore),
     formula:
-      "IQ = (0.30 \u00D7 Penalaran) + (0.25 \u00D7 Verbal) + (0.25 \u00D7 Kuantitatif) + (0.20 \u00D7 Spasial)",
+      "EKIU = (0.30 \u00D7 Penalaran) + (0.25 \u00D7 Verbal) + (0.25 \u00D7 Kuantitatif) + (0.20 \u00D7 Spasial)",
     categories: iqCategories,
   };
 

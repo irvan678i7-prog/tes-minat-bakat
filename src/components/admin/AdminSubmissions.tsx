@@ -316,7 +316,7 @@ export default function AdminSubmissions() {
               <th>Kelas</th>
               <th>Mulai</th>
               <th>Selesai</th>
-              <th>IQ</th>
+              <th>EKIU</th>
               <th>Pelanggaran</th>
               <th>Aksi</th>
             </tr>

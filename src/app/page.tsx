@@ -64,7 +64,7 @@ export default function Home() {
             </p>
             <ul className="font-semibold list-disc list-inside text-sm">
               <li>Tiap subtes punya batas waktu</li>
-              <li>Hasil: profil bakat + IQ prediksi + rekomendasi</li>
+              <li>Hasil: profil bakat + EKIU prediksi + rekomendasi</li>
             </ul>
           </div>
         </section>
