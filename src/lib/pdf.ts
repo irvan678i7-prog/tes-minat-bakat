@@ -514,7 +514,7 @@ function drawIqCard(
     doc.text(`Percentile: ${fsiq.percentile}`, margin + 10, y + 76);
   } else {
     doc.text("Berbasis 8 subtes Bakat.", margin + 10, y + 68);
-    doc.text("Bukan IQ klinis.", margin + 10, y + 76);
+    doc.text("Bukan EKIU klinis.", margin + 10, y + 76);
   }
 
   // Bagian kanan
@@ -585,7 +585,7 @@ function drawIqCategoryTable(
 
   autoTable(doc, {
     startY: yIn + 4,
-    head: [["Kategori", "Bobot", "Skor (M=100)", "Percentile", "Kategori IQ"]],
+    head: [["Kategori", "Bobot", "Skor (M=100)", "Percentile", "Kategori EKIU"]],
     body: rows,
     theme: "plain",
     styles: {
