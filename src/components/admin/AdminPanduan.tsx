@@ -156,7 +156,7 @@ export default function AdminPanduan() {
         <p className="text-sm font-semibold mb-2">Tambahan:</p>
         <ul className="list-disc pl-5 text-sm font-semibold space-y-1">
           <li>
-            <strong>Estimasi IQ</strong> dihitung dari rata-rata persentase benar 9 subtes
+            <strong>Estimasi EKIU</strong> dihitung dari rata-rata persentase benar 9 subtes
             Bakat.
           </li>
           <li>
