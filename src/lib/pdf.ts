@@ -514,7 +514,7 @@ function drawIqCard(
     doc.text(`Percentile: ${fsiq.percentile}`, margin + 10, y + 76);
   } else {
     doc.text("Berbasis 8 subtes Bakat.", margin + 10, y + 68);
-    doc.text("Bukan EKIU klinis.", margin + 10, y + 76);
+    doc.text("Estimasi, bukan tes klinis.", margin + 10, y + 76);
   }
 
   // Bagian kanan
