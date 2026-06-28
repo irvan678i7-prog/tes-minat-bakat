@@ -402,32 +402,104 @@ function drawBakatBody(
 	}
 
 	// 5) Rekomendasi (2 kolom) — bentuk menyesuaikan jenjang.
-	y = drawRecommendationsByJenjang(
-		doc,
-		payload,
-		jenjang,
-		margin,
-		y,
-		pageW,
-		pageH,
-	);
+function drawRecommendationsByJenjang(
+	doc: jsPDF,
+	payload: ScoringPayload,
+	jenjang: Jenjang | null,
+	margin: number,
+	yIn: number,
+	pageW: number,
+	pageH: number,
+	reserveBelow = 0,
+): number {
+	const { title, left, right } = recommendationLayout(payload, jenjang);
 
-	// 6) Narasi singkat — hanya digambar bila masih muat penuh di atas band
-	//    disclaimer.
-	const narrative = payload.bakat?.narrative;
-	if (narrative) {
-		doc.setFont("helvetica", "normal");
-		doc.setFontSize(8.4);
-		const narrativeLines = doc.splitTextToSize(narrative, pageW - margin * 2);
-		if (y + 12 + narrativeLines.length * 10 + 4 < pageH - 64) {
-			y = drawNarrative(doc, narrative, margin, y, pageW);
-		}
-	}
+	// Hanya tampilkan TOP 3 (ranking 1–3) per kolom.
+	const TOP_N = 3;
+	const leftItems = left.items.slice(0, TOP_N);
+	const rightItems = right.items.slice(0, TOP_N);
+	if (leftItems.length === 0 && rightItems.length === 0) return yIn;
 
-	// 7) Disclaimer ringkas.
-	if (doc.getNumberOfPages() > 1) doc.setPage(1);
-	drawDisclaimerOneLine(doc, margin, pageW, pageH);
-	return y;
+	setTextHex(doc, INK);
+	doc.setFont("helvetica", "bold");
+	doc.setFontSize(9);
+	doc.text(title, margin, yIn);
+
+	const colW = (pageW - margin * 2 - 12) / 2;
+	const yStart = yIn + 4;
+	const rankW = 26; // lebar kolom ranking
+	const baseStyles = {
+		font: "helvetica",
+		fontSize: 8.4,
+		lineWidth: 0.3,
+		lineColor: hexToRGB(HAIRLINE),
+		textColor: hexToRGB(INK),
+		cellPadding: { top: 3, bottom: 3, left: 8, right: 8 },
+		overflow: "ellipsize" as const,
+	};
+
+	// Baris dengan nomor ranking di kolom pertama.
+	const toRankedRows = (items: string[]): string[][] =>
+		items.length > 0
+			? items.map((v, i) => [String(i + 1), v])
+			: [["—", "—"]];
+
+	// Kolom ranking: nomor besar tebal di tengah, sedikit menonjol.
+	const rankColumnStyles = {
+		0: {
+			cellWidth: rankW,
+			halign: "center" as const,
+			valign: "middle" as const,
+			fontStyle: "bold" as const,
+			textColor: hexToRGB(INK),
+			fillColor: hexToRGB(PANEL),
+		},
+		1: { cellWidth: colW - rankW, halign: "left" as const },
+	};
+
+	// KIRI
+	autoTable(doc, {
+		startY: yStart,
+		head: [["#", left.header]],
+		body: toRankedRows(leftItems),
+		theme: "plain",
+		styles: baseStyles,
+		headStyles: {
+			fillColor: hexToRGB(left.fill),
+			textColor: hexToRGB(left.headerText),
+			fontStyle: "bold",
+			fontSize: 8,
+			halign: "left",
+		},
+		columnStyles: rankColumnStyles,
+		alternateRowStyles: { fillColor: hexToRGB(STRIPE) },
+		margin: { left: margin, right: margin + colW + 12 },
+		tableWidth: colW,
+	});
+	const leftEndY = nextY(doc, yStart);
+
+	// KANAN
+	autoTable(doc, {
+		startY: yStart,
+		head: [["#", right.header]],
+		body: toRankedRows(rightItems),
+		theme: "plain",
+		styles: baseStyles,
+		headStyles: {
+			fillColor: hexToRGB(right.fill),
+			textColor: hexToRGB(right.headerText),
+			fontStyle: "bold",
+			fontSize: 8,
+			halign: "left",
+		},
+		columnStyles: rankColumnStyles,
+		alternateRowStyles: { fillColor: hexToRGB(STRIPE) },
+		margin: { left: margin + colW + 12, right: margin },
+		tableWidth: colW,
+	});
+	const rightEndY = nextY(doc, yStart);
+
+	return Math.max(leftEndY, rightEndY) + 8;
 }
 
 // ── NARASI SINGKAT ──────────────────────────────────────────────────────────
