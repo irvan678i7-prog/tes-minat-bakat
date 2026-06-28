@@ -1,23 +1,4 @@
 // Laporan EKIU — 1 lembar A4 portrait, kompak tapi lengkap.
-//
-// Konten BAKAT (urut atas → bawah):
-//   1. Header: brand EKIU + judul laporan + kode laporan
-//   2. Identitas peserta (kompak, 1 tabel hairline)
-//   3. Kartu EKIU: skor IQ + band + CI + formula
-//   4. Tabel 4 Kategori Akumulasi (Penalaran/Verbal/Kuantitatif/Spasial)
-//   5. Tabel skor per subtes + visual bar mini
-//   6. Penjurusan IPA/IPS (2 kolom kompak)
-//   7. Rekomendasi jurusan & karir (2 kolom)
-//   8. Disclaimer + footer
-//
-// Konten MINAT (urut):
-//   1. Header
-//   2. Identitas peserta
-//   3. Kartu 3 bidang minat dominan
-//   4. Tabel skor bidang minat
-//   5. Program keahlian terekomendasi (kompak)
-//   6. Rekomendasi jurusan & karir
-//   7. Disclaimer & footer
 
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -69,21 +50,20 @@ type SubmissionInfo = {
 };
 
 // ── PALETTE ──────────────────────────────────────────────────────────────
-const INK = "#0F172A";         // primary text (slate-900)
-const SOFT_INK = "#475569";    // secondary text (slate-600)
-const HAIRLINE = "#CBD5E1";    // borders (slate-300)
-const STRIPE = "#F8FAFC";      // alt row (slate-50)
-const PANEL = "#F1F5F9";       // soft panel (slate-100)
+const INK = "#0F172A";
+const SOFT_INK = "#475569";
+const HAIRLINE = "#CBD5E1";
+const STRIPE = "#F8FAFC";
+const PANEL = "#F1F5F9";
 const WHITE = "#FFFFFF";
-const ACCENT = "#FACC15";      // brand yellow
-const ACCENT_DEEP = "#CA8A04"; // brand yellow darker
-const PRIMARY = "#0EA5E9";     // sky-500
-const SUCCESS = "#16A34A";     // green-600
-const WARN = "#F97316";        // orange-500
-const DANGER = "#DC2626";      // red-600
+const ACCENT = "#FACC15";
+const ACCENT_DEEP = "#CA8A04";
+const PRIMARY = "#0EA5E9";
+const SUCCESS = "#16A34A";
+const WARN = "#F97316";
+const DANGER = "#DC2626";
 const VIOLET = "#7C3AED";
 
-// Tier colors for category chips
 const TIER_COLORS: Record<string, string> = {
 	BR: DANGER,
 	RR: WARN,
@@ -92,8 +72,6 @@ const TIER_COLORS: Record<string, string> = {
 	LB: SUCCESS,
 };
 
-// Selalu render di zona waktu Asia/Jakarta (WIB) supaya waktu di laporan
-// konsisten dengan waktu siswa di Indonesia — bukan UTC server.
 function fmtDate(d?: Date | null): string {
 	if (!d) return "—";
 	return (
@@ -125,23 +103,19 @@ function hexToRGB(hex: string): [number, number, number] {
 	return [r, g, b];
 }
 
-// jsPDF default Helvetica encodes to WinAnsi (CP1252). Most typographic
-// punctuation renders fine, but a handful of math/arrow symbols are outside
-// CP1252 and render as garbage glyphs. Hanya yang TERBUKTI rusak yang
-// di-substitusi, supaya tipografi karakter lain tetap natural.
 const GLYPH_FIX: Record<string, string> = {
-	"\u2212": "-", //  −  minus
-	"\u2192": "->", // →  right arrow
-	"\u2190": "<-", // ←  left arrow
-	"\u2264": "<=", // ≤  less or equal
-	"\u2265": ">=", // ≥  greater or equal
-	"\u2260": "!=", // ≠  not equal
-	"\u2248": "~", //  ≈  approx
-	"\u221A": "sqrt", // √
-	"\u221E": "inf", // ∞
-	"\u2032": "'", //  ′  prime
-	"\u25CF": "\u2022", // ● → •
-	"\u25CB": "o", //  ○
+	"\u2212": "-",
+	"\u2192": "->",
+	"\u2190": "<-",
+	"\u2264": "<=",
+	"\u2265": ">=",
+	"\u2260": "!=",
+	"\u2248": "~",
+	"\u221A": "sqrt",
+	"\u221E": "inf",
+	"\u2032": "'",
+	"\u25CF": "\u2022",
+	"\u25CB": "o",
 };
 const GLYPH_FIX_RE = new RegExp(`[${Object.keys(GLYPH_FIX).join("")}]`, "g");
 function safe(s: string): string {
@@ -149,8 +123,6 @@ function safe(s: string): string {
 	return s.replace(GLYPH_FIX_RE, (c) => GLYPH_FIX[c] ?? c);
 }
 
-// Patch jsPDF.text + splitTextToSize so SEMUA tulisan otomatis lewat safe() —
-// termasuk yang ditulis oleh jspdf-autotable.
 function installSafeTextPatches(doc: jsPDF): void {
 	const origText = doc.text.bind(doc);
 	const origSplit = doc.splitTextToSize.bind(doc);
@@ -172,8 +144,6 @@ function installSafeTextPatches(doc: jsPDF): void {
 		)) as typeof doc.splitTextToSize;
 }
 
-// Wrap `s` to `maxW` and return at most `maxLines` lines; the final line is
-// truncated with an ellipsis if more wrapped lines were dropped.
 function wrapClamp(
 	doc: jsPDF,
 	s: string,
@@ -222,7 +192,6 @@ export function buildReportPDF(
 
 	drawHeader(doc, submission, margin, pageW);
 
-	// Identitas peserta — kompak 4 baris × 4 sel.
 	const y = drawIdentity(doc, submission, margin, 88);
 
 	const jenjang = normJenjang(submission.jenjang);
@@ -232,10 +201,8 @@ export function buildReportPDF(
 		drawMinatBody(doc, payload, jenjang, margin, y, pageW, pageH);
 	}
 
-	// Disclaimer + footer selalu di halaman 1.
 	if (doc.getNumberOfPages() > 1) doc.setPage(1);
 	drawFooter(doc, margin, pageW, pageH);
-	// Safety net: laporan WAJIB 1 halaman.
 	while (doc.getNumberOfPages() > 1) doc.deletePage(doc.getNumberOfPages());
 	return Buffer.from(doc.output("arraybuffer"));
 }
@@ -247,11 +214,9 @@ function drawHeader(
 	margin: number,
 	pageW: number,
 ): void {
-	// Aksen kuning tipis di atas
 	setFillHex(doc, ACCENT);
 	doc.rect(0, 0, pageW, 4, "F");
 
-	// Brand mark kotak hitam-kuning
 	setFillHex(doc, INK);
 	doc.rect(margin, 14, 22, 22, "F");
 	setFillHex(doc, ACCENT);
@@ -266,7 +231,6 @@ function drawHeader(
 	doc.setFontSize(7.6);
 	doc.text("ESTIMASI KEMAMPUAN INTELEKTUAL UMUM", margin + 30, 35);
 
-	// Judul laporan
 	setTextHex(doc, INK);
 	doc.setFont("helvetica", "bold");
 	doc.setFontSize(18);
@@ -282,7 +246,6 @@ function drawHeader(
 		70,
 	);
 
-	// Badge ID di kanan (kompak)
 	const badgeW = 110;
 	const badgeH = 50;
 	const badgeX = pageW - margin - badgeW;
@@ -302,7 +265,6 @@ function drawHeader(
 	doc.setFontSize(7);
 	doc.text("Rahasia • Internal", badgeX + 10, badgeY + 44);
 
-	// Hairline divider
 	setDrawHex(doc, HAIRLINE);
 	doc.setLineWidth(0.5);
 	doc.line(margin, 80, pageW - margin, 80);
@@ -383,25 +345,19 @@ function drawBakatBody(
 ): number {
 	let y = yIn;
 
-	// 1) Kartu EKIU
 	y = drawIqCard(doc, payload, margin, y, pageW);
 
-	// 2) Akumulasi 4 Kategori
 	const cats = payload.bakat?.iqCategories ?? [];
 	if (cats.length > 0) {
 		y = drawIqCategoryTable(doc, cats, margin, y);
 	}
 
-	// 3) Skor per subtes
 	y = drawSubtestTable(doc, payload, margin, y);
 
-	// 4) Penjurusan IPA / IPS — blok analisis lengkap hanya untuk SMA dan data
-	//    lama tanpa jenjang.
 	if (payload.penjurusan && (jenjang === "SMA" || jenjang === null)) {
 		y = drawPenjurusanBakat(doc, payload, margin, y, pageW);
 	}
 
-	// 5) Rekomendasi (2 kolom) — bentuk menyesuaikan jenjang.
 	y = drawRecommendationsByJenjang(
 		doc,
 		payload,
@@ -412,8 +368,6 @@ function drawBakatBody(
 		pageH,
 	);
 
-	// 6) Narasi singkat — hanya digambar bila masih muat penuh di atas band
-	//    disclaimer.
 	const narrative = payload.bakat?.narrative;
 	if (narrative) {
 		doc.setFont("helvetica", "normal");
@@ -424,7 +378,6 @@ function drawBakatBody(
 		}
 	}
 
-	// 7) Disclaimer ringkas.
 	if (doc.getNumberOfPages() > 1) doc.setPage(1);
 	drawDisclaimerOneLine(doc, margin, pageW, pageH);
 	return y;
@@ -471,7 +424,6 @@ function drawIqCard(
 	doc.setLineWidth(0.5);
 	doc.rect(margin, y, pageW - margin * 2, cardH);
 
-	// Panel skor di kiri
 	const scoreW = 120;
 	setFillHex(doc, INK);
 	doc.rect(margin, y, scoreW, cardH, "F");
@@ -499,7 +451,6 @@ function drawIqCard(
 		doc.text("Berbasis 8 subtes Bakat.", margin + 10, y + 60);
 	}
 
-	// Bagian kanan
 	const rightX = margin + scoreW + 12;
 	const rightW = pageW - margin * 2 - scoreW - 22;
 
@@ -511,7 +462,6 @@ function drawIqCard(
 	);
 	doc.text(bandLabel, rightX, y + 16, { maxWidth: rightW });
 
-	// Deskripsi maks 2 baris.
 	doc.setFont("helvetica", "normal");
 	setTextHex(doc, SOFT_INK);
 	doc.setFontSize(8.2);
@@ -519,7 +469,6 @@ function drawIqCard(
 	const descLines = wrapClamp(doc, desc, rightW, 2);
 	doc.text(descLines, rightX, y + 28);
 
-	// Formula box
 	setTextHex(doc, INK);
 	doc.setFont("helvetica", "bold");
 	doc.setFontSize(7.2);
@@ -680,8 +629,8 @@ function drawSubtestTable(
 }
 
 // ── PENJURUSAN IPA / IPS (KOMPAK 2 KOLOM) ────────────────────────────────────
-const IPA_FILL = PRIMARY; // biru langit
-const IPS_FILL = "#EC4899"; // pink-500
+const IPA_FILL = PRIMARY;
+const IPS_FILL = "#EC4899";
 
 function drawPenjurusanBakat(
 	doc: jsPDF,
@@ -700,12 +649,11 @@ function drawPenjurusanBakat(
 
 	const innerW = pageW - margin * 2;
 	const gap = 12;
-	const leftW = Math.round((innerW - gap) * 0.56); // tabel komponen
+	const leftW = Math.round((innerW - gap) * 0.56);
 	const rightX = margin + leftW + gap;
 	const rightW = innerW - leftW - gap;
 	const top = yIn + 4;
 
-	// KIRI: tabel komponen + bobot (kolom "IPA"/"IPS" dipendekkan).
 	const order: KomponenKode[] = ["KUA", "PEN", "SPA", "MEK", "VER", "BHS", "KLE"];
 	const compRows = order.map((k) => [
 		KOMPONEN_LABEL[k],
@@ -744,7 +692,6 @@ function drawPenjurusanBakat(
 	});
 	const leftEndY = nextY(doc, top);
 
-	// KANAN: dua kotak skor final berdampingan + banner rekomendasi.
 	const boxGap = 8;
 	const boxW = (rightW - boxGap) / 2;
 	const boxH = 46;
@@ -796,7 +743,6 @@ function drawPenjurusanBakat(
 
 	let y = Math.max(leftEndY, rightEndY) + 8;
 
-	// Satu caption ringkas (maks 2 baris) menggantikan paragraf panjang.
 	setTextHex(doc, SOFT_INK);
 	doc.setFont("helvetica", "normal");
 	doc.setFontSize(7);
@@ -837,7 +783,7 @@ function drawPenjurusanScoreBox(
 	doc.text(lines, x + 6, y + 41);
 }
 
-// ── REKOMENDASI (2 kolom, menyesuaikan jenjang) ──────────────────────────────
+// ── REKOMENDASI (2 kolom + ranking 1–3) ──────────────────────────────────────
 type RecColumn = {
 	header: string;
 	items: string[];
@@ -845,7 +791,6 @@ type RecColumn = {
 	headerText: string;
 };
 
-// Arah lanjut sekolah untuk peserta SMP.
 function buildArahLanjut(payload: ScoringPayload): string[] {
 	const isBakat = payload.testKind === "BAKAT";
 	let peminatan = "IPA / IPS (fleksibel)";
@@ -868,7 +813,6 @@ function buildArahLanjut(payload: ScoringPayload): string[] {
 	return [`SMA - Peminatan ${peminatan}`, `SMK - ${smk}`];
 }
 
-// Bangun judul + 2 kolom rekomendasi sesuai jenjang peserta.
 function recommendationLayout(
 	payload: ScoringPayload,
 	jenjang: Jenjang | null,
@@ -903,7 +847,6 @@ function recommendationLayout(
 			right: { header: "PEKERJAAN", items: careers, ...blue },
 		};
 	}
-	// Tanpa jenjang (data lama): pertahankan format lama.
 	return {
 		title: "REKOMENDASI",
 		left: { header: "JURUSAN", items: majors, ...yellow },
@@ -918,21 +861,14 @@ function drawRecommendationsByJenjang(
 	margin: number,
 	yIn: number,
 	pageW: number,
-	pageH: number,
-	reserveBelow = 0,
+	_pageH: number,
 ): number {
 	const { title, left, right } = recommendationLayout(payload, jenjang);
 
-	// Hitung baris maksimum yang masih masuk halaman sebelum kotak disclaimer.
-	const rowH = 13;
-	const headerH = 18;
-	const reserved = 64 + 8 + reserveBelow; // disclaimer + napas + ruang bawah
-	const available = pageH - reserved - (yIn + 4) - headerH;
-	const maxRows = Math.max(1, Math.floor(available / rowH));
-	// Penjurusan sudah dipadatkan → jamin minimal 5 baris bila ruang cukup.
-	const cap = Math.min(7, Math.max(5, maxRows));
-	const leftItems = left.items.slice(0, cap);
-	const rightItems = right.items.slice(0, cap);
+	// Hanya tampilkan TOP 3 (ranking 1–3) per kolom.
+	const TOP_N = 3;
+	const leftItems = left.items.slice(0, TOP_N);
+	const rightItems = right.items.slice(0, TOP_N);
 	if (leftItems.length === 0 && rightItems.length === 0) return yIn;
 
 	setTextHex(doc, INK);
@@ -942,19 +878,36 @@ function drawRecommendationsByJenjang(
 
 	const colW = (pageW - margin * 2 - 12) / 2;
 	const yStart = yIn + 4;
+	const rankW = 26;
 	const baseStyles = {
 		font: "helvetica",
 		fontSize: 8.4,
 		lineWidth: 0.3,
 		lineColor: hexToRGB(HAIRLINE),
 		textColor: hexToRGB(INK),
-		cellPadding: { top: 2.5, bottom: 2.5, left: 8, right: 8 },
+		cellPadding: { top: 3, bottom: 3, left: 8, right: 8 },
 		overflow: "ellipsize" as const,
 	};
+
+	const toRankedRows = (items: string[]): string[][] =>
+		items.length > 0 ? items.map((v, i) => [String(i + 1), v]) : [["—", "—"]];
+
+	const rankColumnStyles = {
+		0: {
+			cellWidth: rankW,
+			halign: "center" as const,
+			valign: "middle" as const,
+			fontStyle: "bold" as const,
+			textColor: hexToRGB(INK),
+			fillColor: hexToRGB(PANEL),
+		},
+		1: { cellWidth: colW - rankW, halign: "left" as const },
+	};
+
 	autoTable(doc, {
 		startY: yStart,
-		head: [[left.header]],
-		body: leftItems.length > 0 ? leftItems.map((m) => [m]) : [["—"]],
+		head: [["#", left.header]],
+		body: toRankedRows(leftItems),
 		theme: "plain",
 		styles: baseStyles,
 		headStyles: {
@@ -962,16 +915,19 @@ function drawRecommendationsByJenjang(
 			textColor: hexToRGB(left.headerText),
 			fontStyle: "bold",
 			fontSize: 8,
+			halign: "left",
 		},
+		columnStyles: rankColumnStyles,
 		alternateRowStyles: { fillColor: hexToRGB(STRIPE) },
 		margin: { left: margin, right: margin + colW + 12 },
 		tableWidth: colW,
 	});
 	const leftEndY = nextY(doc, yStart);
+
 	autoTable(doc, {
 		startY: yStart,
-		head: [[right.header]],
-		body: rightItems.length > 0 ? rightItems.map((c) => [c]) : [["—"]],
+		head: [["#", right.header]],
+		body: toRankedRows(rightItems),
 		theme: "plain",
 		styles: baseStyles,
 		headStyles: {
@@ -979,12 +935,15 @@ function drawRecommendationsByJenjang(
 			textColor: hexToRGB(right.headerText),
 			fontStyle: "bold",
 			fontSize: 8,
+			halign: "left",
 		},
+		columnStyles: rankColumnStyles,
 		alternateRowStyles: { fillColor: hexToRGB(STRIPE) },
 		margin: { left: margin + colW + 12, right: margin },
 		tableWidth: colW,
 	});
 	const rightEndY = nextY(doc, yStart);
+
 	return Math.max(leftEndY, rightEndY) + 8;
 }
 
@@ -1051,7 +1010,6 @@ function drawMinatBody(
 ): number {
 	let y = yIn;
 
-	// Kartu 3 Bidang Minat Tertinggi
 	setTextHex(doc, INK);
 	doc.setFont("helvetica", "bold");
 	doc.setFontSize(9);
@@ -1099,7 +1057,6 @@ function drawMinatBody(
 	);
 	y = cardY + cardH + 10;
 
-	// Skor Bidang Minat (tabel kompak)
 	setTextHex(doc, INK);
 	doc.setFont("helvetica", "bold");
 	doc.setFontSize(9);
@@ -1142,7 +1099,6 @@ function drawMinatBody(
 	});
 	y = nextY(doc, y + 4) + 10;
 
-	// Program rekomendasi (kompak: 1 baris per bidang)
 	const programs = payload.minat?.programs ?? [];
 	if (programs.length > 0) {
 		setTextHex(doc, INK);
@@ -1186,7 +1142,6 @@ function drawMinatBody(
 		y = nextY(doc, y + 4) + 10;
 	}
 
-	// Rekomendasi jurusan & karir — bentuk menyesuaikan jenjang.
 	y = drawRecommendationsByJenjang(
 		doc,
 		payload,
@@ -1197,7 +1152,6 @@ function drawMinatBody(
 		pageH,
 	);
 
-	// Disclaimer + footer.
 	if (doc.getNumberOfPages() > 1) doc.setPage(1);
 	drawDisclaimerOneLine(doc, margin, pageW, pageH);
 	return y;
