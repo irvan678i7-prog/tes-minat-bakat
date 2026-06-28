@@ -478,7 +478,7 @@ function drawIqCard(
   doc.text("ESTIMASI KEMAMPUAN INTELEKTUAL UMUM (EKIU)", margin, yIn);
 
   const y = yIn + 4;
-  const cardH = 82;
+  const cardH = 66;
   setFillHex(doc, PANEL);
   doc.rect(margin, y, pageW - margin * 2, cardH, "F");
   setDrawHex(doc, HAIRLINE);
@@ -504,7 +504,7 @@ function drawIqCard(
   );
   doc.text(ekiuLabelLines, margin + 10, y + 12);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(36);
+  doc.setFontSize(28);
   const score = fsiq?.score ?? payload.iqEstimate ?? null;
   doc.text(score != null ? String(score) : "—", margin + 10, y + 56);
   doc.setFont("helvetica", "normal");
@@ -938,12 +938,12 @@ function drawRecommendationsByJenjang(
   // yang akan menyeret disclaimer + footer ikut ke halaman 2 (lalu
   // terbuang oleh safety net 1-halaman).  `reserveBelow` menyisakan ruang
   // untuk elemen setelah rekomendasi (mis. RINGKASAN) agar tidak menabrak.
-  const rowH = 16;
+  const rowH = 13;
   const headerH = 18;
   const reserved = 56 + 8 + reserveBelow; // disclaimer + napas + ruang bawah
   const available = pageH - reserved - (yIn + 4) - headerH;
   const maxRows = Math.max(1, Math.floor(available / rowH));
-  const cap = Math.min(6, maxRows);
+  const cap = Math.min(7, maxRows);
   const leftItems = left.items.slice(0, cap);
   const rightItems = right.items.slice(0, cap);
   if (leftItems.length === 0 && rightItems.length === 0) return yIn;
