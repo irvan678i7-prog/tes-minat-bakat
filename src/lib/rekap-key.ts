@@ -1,40 +1,37 @@
 // src/lib/rekap-key.ts
 // Util normalisasi untuk pengelompokan rekap (sekolah / kelas / jurusan).
-// Tujuan: variasi penulisan ("SMA 1 metro" vs "SMAN 1 METRO") tidak lagi
-// terpisah saat difilter / direkap.
-//
-// PENTING: nilai "key" di sini HANYA untuk MENGELOMPOKKAN & MEMBANDINGKAN,
-// bukan untuk ditampilkan. Nama tampilan dipilih terpisah via pickDisplay().
 
 function baseClean(raw: string | null | undefined): string {
 	return String(raw ?? "")
 		.toLowerCase()
 		.normalize("NFKD")
-		.replace(/[\u0300-\u036f]/g, "") // buang aksen
-		.replace(/[.,'"()\-/]/g, " ") // tanda baca -> spasi
+		.replace(/[\u0300-\u036f]/g, "")
+		.replace(/[.,'"()\-/]/g, " ")
 		.replace(/\s+/g, " ")
 		.trim();
 }
 
 // ── SEKOLAH ──────────────────────────────────────────────────────────────
+// Strategi: samakan jenis sekolah ke bentuk dasar (sma/smk/smp/sd/ma/mts),
+// BUANG kata "negeri"/"swasta" supaya "SMK 1" = "SMKN 1" = "SMK Negeri 1".
 export function schoolKey(raw: string | null | undefined): string {
 	let s = baseClean(raw);
 	const rules: Array<[RegExp, string]> = [
-		[/\bsekolah dasar\b/g, "sd"],
-		[/\bsmp negeri\b|\bsmpn\b/g, "smp negeri"],
-		[/\bsma negeri\b|\bsman\b/g, "sma negeri"],
-		[/\bsmk negeri\b|\bsmkn\b/g, "smk negeri"],
-		[/\bmadrasah aliyah\b|\bman\b|\bma\b/g, "ma"],
+		[/\bsekolah dasar\b|\bsdn\b/g, "sd"],
+		[/\bsmk negeri\b|\bsmkn\b/g, "smk"],
+		[/\bsma negeri\b|\bsman\b/g, "sma"],
+		[/\bsmp negeri\b|\bsmpn\b/g, "smp"],
+		[/\bmadrasah aliyah\b|\bman\b/g, "ma"],
 		[/\bmadrasah tsanawiyah\b|\bmtsn\b|\bmts\b/g, "mts"],
-		[/\bnegeri\b|\bneg\b/g, "negeri"],
-		[/\bswasta\b|\bswt\b/g, "swasta"],
+		[/\bmadrasah ibtidaiyah\b|\bmin\b/g, "mi"],
+		[/\bnegeri\b|\bneg\b/g, ""], // buang sisa kata "negeri"
+		[/\bswasta\b|\bswt\b/g, ""], // buang kata "swasta"
 	];
 	for (const [re, to] of rules) s = s.replace(re, to);
 	return s.replace(/\s+/g, " ").trim();
 }
 
 // ── KELAS ────────────────────────────────────────────────────────────────
-// Output seragam dalam ANGKA: "7".."12" | "" (kosong kalau tak terbaca).
 const ROMAN_TO_NUM: Record<string, string> = {
 	vii: "7",
 	viii: "8",
@@ -59,8 +56,8 @@ export function gradeKey(raw: string | null | undefined): string {
 export function majorKey(raw: string | null | undefined): string {
 	let s = baseClean(raw);
 	const rules: Array<[RegExp, string]> = [
-		[/\bm ?ipa\b|\bipa\b/g, "ipa"], // IPA / MIPA
-		[/\bi ?is\b|\bips\b/g, "ips"], // IPS / IIS
+		[/\bm ?ipa\b|\bipa\b/g, "ipa"],
+		[/\bi ?is\b|\bips\b/g, "ips"],
 		[/\bbahasa( dan budaya)?\b|\bbb\b/g, "bahasa"],
 		[/\bpemasaran\b|\bpms\b|\bbdp\b/g, "pemasaran"],
 		[/\bakuntansi\b|\bakl\b|\bakt\b/g, "akuntansi"],
@@ -82,9 +79,6 @@ export function rekapKey(d: {
 }
 
 // ── PEMILIH NAMA TAMPILAN ───────────────────────────────────────────────────
-// Dari beberapa variasi penulisan untuk satu key, pilih yang paling "rapi":
-// prioritaskan yang terpanjang (biasanya paling lengkap), lalu yang punya
-// huruf kapital (lebih manusiawi). Dipakai di langkah berikutnya.
 export function pickDisplay(candidates: Array<string | null | undefined>): string {
 	const list = candidates.map((c) => (c ?? "").trim()).filter(Boolean);
 	if (list.length === 0) return "";
