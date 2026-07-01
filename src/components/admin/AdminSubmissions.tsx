@@ -160,6 +160,7 @@ export default function AdminSubmissions() {
 	const [openLogId, setOpenLogId] = useState<string | null>(null);
 	const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
 	const [rekapBusy, setRekapBusy] = useState(false);
+const [rekapFullBusy, setRekapFullBusy] = useState(false);
 	const [lastSync, setLastSync] = useState<number>(0);
 	const [, setTick] = useState(0);
 	const { confirm, ConfirmModal } = useBrutConfirm();
@@ -255,13 +256,39 @@ export default function AdminSubmissions() {
 		}
 	};
 
-	const filteredItems = items.filter(
-		(s) =>
-			(!filterSchool || schoolKey(s.school) === filterSchool) &&
-			(!filterGrade || gradeKey(s.grade) === filterGrade) &&
-			(!filterKind || s.testKind === filterKind) &&
-			(!onlyFlagged || s.flaggedCheating || s.violationCount >= 5),
-	);
+const onDownloadRekapFull = async () => {
+  if (!filterKind || rekapFullBusy) return;
+  setRekapFullBusy(true);
+  try {
+    const params = new URLSearchParams({
+      testKind: filterKind,
+      school: filterSchool,
+      grade: filterGrade,
+    });
+    const safe = (filterSchool || "semua").replace(/[^A-Za-z0-9]+/g, "_").slice(0, 30);
+    const safeGrade = (filterGrade || "semua").replace(/[^A-Za-z0-9]+/g, "_").slice(0, 20);
+    await downloadPdf(
+      `/api/admin/rekap-full?${params.toString()}`,
+      `rekap-lengkap-${filterKind}-${safe}-${safeGrade}.pdf`,
+    );
+    toast.success("Rekap + laporan individu berhasil diunduh");
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : "Gagal mengunduh rekap lengkap");
+  } finally {
+    setRekapFullBusy(false);
+  }
+};
+	const filteredItems = items
+  .filter(
+    (s) =>
+      (!filterSchool || s.school === filterSchool) &&
+      (!filterGrade || s.grade === filterGrade) &&
+      (!filterKind || s.testKind === filterKind) &&
+      (!onlyFlagged || s.flaggedCheating || s.violationCount >= 5),
+  )
+  .sort((a, b) =>
+    (a.fullName || "").localeCompare(b.fullName || "", "id", { sensitivity: "base" }),
+  );
 	const flaggedCount = items.filter((s) => s.flaggedCheating || s.violationCount >= 5).length;
 
 	// Opsi unik berdasarkan kunci kanonik: value = key, label = nama tampilan rapi.
@@ -344,6 +371,13 @@ export default function AdminSubmissions() {
 					>
 						{rekapBusy ? "MEMPROSES..." : "UNDUH REKAP PDF"}
 					</button>
+					<button
+  onClick={onDownloadRekap}
+  disabled={!filterKind || rekapBusy}
+  ...
+>
+  {rekapBusy ? "MEMPROSES..." : "UNDUH REKAP PDF"}
+</button>
 				</div>
 			</div>
 
