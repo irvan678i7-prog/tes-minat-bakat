@@ -6,12 +6,15 @@ import { getAdminFromRequest } from "@/lib/auth";
 import { buildRekapPDF } from "@/lib/pdf-rekap";
 import { buildReportPDF } from "@/lib/pdf";
 import { scoreSubmission, type ScoringPayload } from "@/lib/scoring";
+import { schoolKey, gradeKey } from "@/lib/rekap-key";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// Gabungan rekap + SEMUA laporan individu lebih berat dari rekap biasa.
-// Vercel Hobby tetap dibatasi 10 detik; untuk kelas besar (>~25 peserta)
-// sebaiknya unduh per-kelas atau upgrade ke Vercel Pro (60 detik).
+// Gabungan rekap + SEMUA laporan individu jauh lebih berat dari rekap biasa.
+// Kalau saat DEPLOY muncul error soal "maxDuration" (plan membatasi), ganti
+// angka 60 di bawah menjadi 10. Konsekuensinya: kelas besar (>~25 peserta)
+// bisa timeout — solusinya unduh per-kelas/sekolah lebih kecil, atau upgrade
+// Vercel Pro.
 export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
@@ -19,33 +22,31 @@ export async function GET(req: NextRequest) {
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const url = new URL(req.url);
-  const school = url.searchParams.get("school") || "";
-  const grade = url.searchParams.get("grade") || "";
+  const schoolK = url.searchParams.get("schoolKey") || "";
+  const gradeK = url.searchParams.get("gradeKey") || "";
+  const schoolLabel = url.searchParams.get("schoolLabel") || "";
+  const gradeLabel = url.searchParams.get("gradeLabel") || "";
   const testKind = (url.searchParams.get("testKind") as "MINAT" | "BAKAT" | null) || "BAKAT";
 
-  const where: {
-    testKind: "MINAT" | "BAKAT";
-    finishedAt: { not: null };
-    school?: string;
-    grade?: string;
-  } = {
-    testKind,
-    finishedAt: { not: null },
-  };
-  if (school) where.school = school;
-  if (grade) where.grade = grade;
-
+  // Ambil semua peserta yang sudah selesai untuk jenis tes ini, lalu filter
+  // pakai KEY kanonik (sama persis dengan tabel di dasbor admin).
   const subs = await prisma.submission.findMany({
-    where,
+    where: { testKind, finishedAt: { not: null } },
     include: { result: true },
   });
 
-  // Urutkan ABJAD berdasarkan nama (locale Indonesia, case-insensitive).
-  subs.sort((a, b) =>
-    (a.fullName || "").localeCompare(b.fullName || "", "id", { sensitivity: "base" }),
-  );
+  const filtered = subs
+    .filter(
+      (s) =>
+        (!schoolK || schoolKey(s.school) === schoolK) &&
+        (!gradeK || gradeKey(s.grade) === gradeK),
+    )
+    // Urut ABJAD berdasarkan nama (locale Indonesia, case-insensitive).
+    .sort((a, b) =>
+      (a.fullName || "").localeCompare(b.fullName || "", "id", { sensitivity: "base" }),
+    );
 
-  if (subs.length === 0) {
+  if (filtered.length === 0) {
     return NextResponse.json(
       { error: "Belum ada peserta yang selesai untuk filter ini." },
       { status: 404 },
@@ -53,8 +54,7 @@ export async function GET(req: NextRequest) {
   }
 
   // Pastikan tiap peserta punya payload hasil; hitung lazily bila belum ada.
-  // Sengaja dibuat berurutan (bukan Promise.all) supaya tidak membebani
-  // koneksi database sekaligus.
+  // Sengaja berurutan (bukan Promise.all) supaya tidak membebani koneksi DB.
   const rekapRows: {
     id: string;
     fullName: string | null;
@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
   }[] = [];
   const reports: { sub: (typeof subs)[number]; payload: ScoringPayload }[] = [];
 
-  for (const s of subs) {
+  for (const s of filtered) {
     let payload = s.result?.payload as unknown as ScoringPayload | null;
     let iq = s.result?.iqEstimate ?? null;
     if (!payload) {
@@ -88,6 +88,8 @@ export async function GET(req: NextRequest) {
         update: {
           payload: payload as unknown as Prisma.InputJsonValue,
           iqEstimate: payload.iqEstimate ?? null,
+          topProfiles: topProfiles ?? Prisma.JsonNull,
+          topPrograms: topPrograms ?? Prisma.JsonNull,
         },
       });
       iq = payload.iqEstimate ?? null;
@@ -104,53 +106,57 @@ export async function GET(req: NextRequest) {
       iqEstimate: iq,
       payload,
     });
-    reports.push({ sub: s, payload });
+    reports.push({ sub: s, payload: payload as ScoringPayload });
   }
 
-  // 1) Rekap presentasi — nomor halaman dimatikan (akan dinomori ulang
-  //    berlanjut untuk seluruh dokumen gabungan).
+  // 1) Rekap presentasi (label sekolah/kelas pakai nama tampilan yang rapi).
   const rekapBuf = buildRekapPDF(
-    { school, grade, testKind, generatedAt: new Date() },
+    { school: schoolLabel, grade: gradeLabel, testKind, generatedAt: new Date() },
     rekapRows,
-    { showPageNumber: false },
   );
 
   // 2) Gabungkan: rekap dulu, lalu laporan individu (urut abjad).
   const merged = await PDFDocument.create();
 
   const rekapDoc = await PDFDocument.load(rekapBuf);
-  const rekapPages = await merged.copyPages(rekapDoc, rekapDoc.getPageIndices());
-  rekapPages.forEach((p) => merged.addPage(p));
+  (await merged.copyPages(rekapDoc, rekapDoc.getPageIndices())).forEach((p) => merged.addPage(p));
 
   for (const { sub, payload } of reports) {
-    const buf = buildReportPDF(sub, payload, { showPageNumber: false });
+    const buf = buildReportPDF(sub, payload);
     const doc = await PDFDocument.load(buf);
-    const pages = await merged.copyPages(doc, doc.getPageIndices());
-    pages.forEach((p) => merged.addPage(p));
+    (await merged.copyPages(doc, doc.getPageIndices())).forEach((p) => merged.addPage(p));
   }
 
-  // 3) Nomor halaman BERLANJUT di seluruh dokumen. Dipasang sebagai chip
-  //    hitam kecil di kanan-bawah supaya kontras di halaman rekap
-  //    (landscape) maupun laporan individu (portrait).
-  const font = await merged.embedFont(StandardFonts.Helvetica);
+  // 3) Nomor halaman BERLANJUT di seluruh dokumen. Nomor bawaan tiap bagian
+  //    ditutup dulu, lalu ditimpa nomor gabungan di kanan-bawah.
+  //    - Halaman rekap = landscape, sudah ada bar hitam di bawah -> tulis putih.
+  //    - Halaman individu = portrait, background putih -> tulis gelap.
+  const font = await merged.embedFont(StandardFonts.HelveticaBold);
   const total = merged.getPageCount();
   merged.getPages().forEach((page, i) => {
-    const { width } = page.getSize();
-    const labelText = `Hal ${i + 1} / ${total}`;
-    const size = 8;
-    const tw = font.widthOfTextAtSize(labelText, size);
-    const padX = 6;
-    const boxW = tw + padX * 2;
-    const boxH = 13;
-    const x = width - 24 - boxW;
-    const y = 6;
-    page.drawRectangle({ x, y, width: boxW, height: boxH, color: rgb(0, 0, 0) });
-    page.drawText(labelText, { x: x + padX, y: y + 3.5, size, font, color: rgb(1, 1, 1) });
+    const { width, height } = page.getSize();
+    const isLandscape = width > height;
+    const label = `Hal ${i + 1} / ${total}`;
+    const size = 9;
+    const tw = font.widthOfTextAtSize(label, size);
+    if (isLandscape) {
+      page.drawRectangle({ x: width - 180, y: 0, width: 180, height: 22, color: rgb(0, 0, 0) });
+      page.drawText(label, { x: width - 36 - tw, y: 7, size, font, color: rgb(1, 1, 1) });
+    } else {
+      page.drawRectangle({ x: width - 130, y: 5, width: 110, height: 18, color: rgb(1, 1, 1) });
+      page.drawText(label, {
+        x: width - 28 - tw,
+        y: 8,
+        size,
+        font,
+        color: rgb(0.06, 0.09, 0.16),
+      });
+    }
   });
 
   const out = await merged.save();
-  const safe = (school || "semua").replace(/[^A-Za-z0-9]+/g, "_").slice(0, 30);
-  const safeGrade = (grade || "semua").replace(/[^A-Za-z0-9]+/g, "_").slice(0, 20);
+  const safe = (schoolK || "semua").replace(/[^A-Za-z0-9]+/g, "_").slice(0, 30);
+  const safeGrade = (gradeK || "semua").replace(/[^A-Za-z0-9]+/g, "_").slice(0, 20);
   return new NextResponse(new Uint8Array(out), {
     status: 200,
     headers: {
