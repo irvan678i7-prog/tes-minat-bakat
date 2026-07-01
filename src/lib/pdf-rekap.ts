@@ -31,7 +31,9 @@ function pct(n: number, d: number): string {
 export function buildRekapPDF(
   meta: { school: string; grade: string; testKind: "MINAT" | "BAKAT"; generatedAt: Date },
   rows: SubmissionRow[],
+  opts?: { showPageNumber?: boolean },
 ): Buffer {
+  const showPageNumber = opts?.showPageNumber !== false;
   const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "landscape" });
   const pageW = doc.internal.pageSize.getWidth();
   const margin = 36;
@@ -58,7 +60,7 @@ export function buildRekapPDF(
     minute: "2-digit",
     timeZone: "Asia/Jakarta",
   });
-  const subtitle = `Kelas: ${meta.grade || "Semua Kelas"}    •    Total Peserta: ${rows.length}    •    Dicetak: ${printedAt} WIB`;
+  const subtitle = `Kelas: ${meta.grade || "Semua Kelas"} • Total Peserta: ${rows.length} • Dicetak: ${printedAt} WIB`;
   doc.text(subtitle, margin, y);
   y += 18;
 
@@ -85,7 +87,7 @@ export function buildRekapPDF(
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
     doc.text("REKAP HASIL TES — DICETAK OTOMATIS — RAHASIA", margin, pageH - 8);
-    doc.text(`Hal. ${i} / ${totalPages}`, pageW - margin - 60, pageH - 8);
+    if (showPageNumber) doc.text(`Hal. ${i} / ${totalPages}`, pageW - margin - 60, pageH - 8);
   }
   return Buffer.from(doc.output("arraybuffer"));
 }
@@ -273,7 +275,7 @@ function drawIqDistribution(
   const avg = Math.round(iqs.reduce((a, b) => a + b, 0) / total);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
-  doc.text(`Rata-rata EKIU kelas: ${avg}    •    n = ${total}`, margin, y);
+  doc.text(`Rata-rata EKIU kelas: ${avg} • n = ${total}`, margin, y);
   y += 14;
   const head = [["Kategori EKIU", "Jumlah", "%"]];
   const body = buckets.map((b) => {
@@ -381,7 +383,7 @@ function drawPenjurusanDistribution(
   doc.setFontSize(10);
   if (nScore > 0) {
     doc.text(
-      `Rata-rata skor: IPA ${(sumIPA / nScore).toFixed(1)}    •    IPS ${(sumIPS / nScore).toFixed(1)}    •    n = ${nScore}`,
+      `Rata-rata skor: IPA ${(sumIPA / nScore).toFixed(1)} • IPS ${(sumIPS / nScore).toFixed(1)} • n = ${nScore}`,
       margin, y,
     );
   }
