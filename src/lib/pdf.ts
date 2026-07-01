@@ -206,8 +206,9 @@ function matchPct(rank: number, name: string): number {
 }
 
 export function buildReportPDF(
-	submission: SubmissionInfo,
-	payload: ScoringPayload,
+  submission: SubmissionInfo,
+  payload: ScoringPayload,
+  opts?: { showPageNumber?: boolean },
 ): Buffer {
 	const doc = new jsPDF({ unit: "pt", format: "a4" });
 	installSafeTextPatches(doc);
@@ -227,7 +228,7 @@ export function buildReportPDF(
 	}
 
 	if (doc.getNumberOfPages() > 1) doc.setPage(1);
-	drawFooter(doc, margin, pageW, pageH);
+	drawFooter(doc, margin, pageW, pageH, opts?.showPageNumber !== false);
 	while (doc.getNumberOfPages() > 1) doc.deletePage(doc.getNumberOfPages());
 	return Buffer.from(doc.output("arraybuffer"));
 }
@@ -1035,26 +1036,26 @@ function drawDisclaimerOneLine(
 }
 
 // ── FOOTER ─────────────────────────────────────────────────────────────────
-function drawFooter(
-	doc: jsPDF,
-	margin: number,
-	pageW: number,
-	pageH: number,
-): void {
-	setDrawHex(doc, HAIRLINE);
-	doc.setLineWidth(0.4);
-	doc.line(margin, pageH - 24, pageW - margin, pageH - 24);
-	setTextHex(doc, SOFT_INK);
-	doc.setFont("helvetica", "normal");
-	doc.setFontSize(7.6);
-	doc.text(
-		"EKIU \u2014 Estimasi Kemampuan Intelektual Umum  \u2022  Rahasia & untuk keperluan internal.",
-		margin,
-		pageH - 12,
-	);
-	doc.setFont("helvetica", "bold");
-	setTextHex(doc, INK);
-	doc.text("Hal 1 / 1", pageW - margin - doc.getTextWidth("Hal 1 / 1"), pageH - 12);
+function drawFooter(doc: jsPDF, margin: number, pageW: number, pageH: number, showPageNumber = true): void {
+  setDrawHex(doc, HAIRLINE);
+  doc.setLineWidth(0.4);
+  doc.line(margin, pageH - 24, pageW - margin, pageH - 24);
+  setTextHex(doc, SOFT_INK);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.6);
+  doc.text(
+    "EKIU — Estimasi Kemampuan Intelektual Umum • Rahasia & untuk keperluan internal.",
+    margin,
+    pageH - 12,
+  );
+  if (showPageNumber) {
+    doc.setFont("helvetica", "bold");
+    setTextHex(doc, INK);
+    const totalPages = doc.getNumberOfPages();
+    const txt = `Hal 1 / ${totalPages}`;
+    const w = doc.getTextWidth(txt);
+    doc.text(txt, pageW - margin - w, pageH - 12);
+  }
 }
 
 // ── MINAT BODY (1 PAGE) ──────────────────────────────────────────────────────
