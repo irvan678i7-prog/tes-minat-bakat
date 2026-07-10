@@ -20,7 +20,6 @@ type Sub = {
   hasResult: boolean;
   violationCount: number;
   flaggedCheating: boolean;
-  violationLog?: ViolationEntry[];
 };
 
 type ClassRow = {
@@ -127,7 +126,6 @@ async function downloadPdf(url: string, fallbackFilename: string): Promise<void>
     const data = await res.json().catch(() => ({}));
     throw new Error((data as { error?: string }).error || `Gagal mengunduh PDF (${res.status}).`);
   }
-  // Ambil filename dari Content-Disposition kalau ada.
   const cd = res.headers.get("Content-Disposition") || "";
   const m = /filename="?([^";]+)"?/i.exec(cd);
   const filename = m?.[1] || fallbackFilename;
@@ -139,14 +137,13 @@ async function downloadPdf(url: string, fallbackFilename: string): Promise<void>
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  // Bebaskan memori setelah browser sempat baca URL-nya.
   setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
 }
 
-// Polling refresh tiap 3 detik supaya dasbor peserta tampak mendekati
-// real-time tanpa membebani server. UI tick di 1 detik supaya label
-// "sync x detik lalu" bergerak halus.
-const REFRESH_INTERVAL_MS = 3000;
+// Auto-refresh dasbor. Dinaikkan dari 3 detik -> 15 detik untuk MENGHEMAT
+// egress database (dasbor menarik data lebih jarang). UI tick tetap 1 detik
+// supaya label "sync x detik lalu" bergerak halus.
+const REFRESH_INTERVAL_MS = 15000;
 
 export default function AdminSubmissions() {
   const [items, setItems] = useState<Sub[]>([]);
@@ -157,6 +154,8 @@ export default function AdminSubmissions() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [onlyFlagged, setOnlyFlagged] = useState(false);
   const [openLogId, setOpenLogId] = useState<string | null>(null);
+  const [logCache, setLogCache] = useState<Record<string, ViolationEntry[]>>({});
+  const [logLoadingId, setLogLoadingId] = useState<string | null>(null);
   const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
   const [rekapBusy, setRekapBusy] = useState(false);
   const [rekapFullBusy, setRekapFullBusy] = useState(false);
@@ -165,8 +164,6 @@ export default function AdminSubmissions() {
   const { confirm, ConfirmModal } = useBrutConfirm();
 
   const refresh = () => {
-    // cache: no-store supaya CDN/Browser tidak nge-cache hasil polling —
-    // dasbor admin harus selalu lihat data terbaru tiap siklus.
     Promise.allSettled([
       fetch("/api/admin/submissions", { cache: "no-store" })
         .then((r) => r.json())
@@ -179,7 +176,6 @@ export default function AdminSubmissions() {
 
   useEffect(() => {
     refresh();
-    // Auto-refresh data peserta + tick 1 detik untuk label "x detik lalu".
     const refreshId = setInterval(refresh, REFRESH_INTERVAL_MS);
     const tickId = setInterval(() => setTick((n) => n + 1), 1000);
     return () => {
@@ -210,6 +206,29 @@ export default function AdminSubmissions() {
       setItems((prev) => prev.filter((it) => it.id !== s.id));
     } finally {
       setDeleting(null);
+    }
+  };
+
+  // Ambil detail log pelanggaran HANYA saat baris di-klik, lalu simpan di
+  // cache supaya tidak diminta ulang. Ini kunci penghematan egress.
+  const toggleLog = async (s: Sub) => {
+    if (openLogId === s.id) {
+      setOpenLogId(null);
+      return;
+    }
+    setOpenLogId(s.id);
+    if (s.violationCount > 0 && !logCache[s.id]) {
+      setLogLoadingId(s.id);
+      try {
+        const res = await fetch(`/api/admin/submissions/${s.id}`, { cache: "no-store" });
+        const data = await res.json().catch(() => ({}));
+        const log: ViolationEntry[] = Array.isArray(data.violationLog) ? data.violationLog : [];
+        setLogCache((prev) => ({ ...prev, [s.id]: log }));
+      } catch {
+        toast.error("Gagal memuat detail pelanggaran");
+      } finally {
+        setLogLoadingId(null);
+      }
     }
   };
 
@@ -293,7 +312,6 @@ export default function AdminSubmissions() {
     );
   const flaggedCount = items.filter((s) => s.flaggedCheating || s.violationCount >= 5).length;
 
-  // Opsi unik berdasarkan kunci kanonik: value = key, label = nama tampilan rapi.
   const schoolOptions = Array.from(
     new Map(
       classes
@@ -435,7 +453,7 @@ export default function AdminSubmissions() {
             {filteredItems.map((s) => {
               const isFlagged = s.flaggedCheating || s.violationCount >= 5;
               const isOpen = openLogId === s.id;
-              const log = Array.isArray(s.violationLog) ? s.violationLog : [];
+              const log = logCache[s.id] || [];
               return (
                 <Fragment key={s.id}>
                   <tr style={isFlagged ? flaggedRowStyle : undefined}>
@@ -450,7 +468,7 @@ export default function AdminSubmissions() {
                     <td>
                       <button
                         type="button"
-                        onClick={() => setOpenLogId(isOpen ? null : s.id)}
+                        onClick={() => toggleLog(s)}
                         title={
                           s.violationCount > 0
                             ? "Klik untuk lihat detail log pelanggaran"
@@ -493,40 +511,48 @@ export default function AdminSubmissions() {
                       </div>
                     </td>
                   </tr>
-                  {isOpen && log.length > 0 && (
+                  {isOpen && (
                     <tr>
                       <td colSpan={10} style={detailRowStyle}>
                         <div className="p-3">
-                          <p className="text-xs font-black uppercase mb-2">
-                            Detail Pelanggaran ({log.length})
-                          </p>
-                          <div style={detailScrollStyle}>
-                            <table className="brut-table" style={detailTableStyle}>
-                              <thead>
-                                <tr>
-                                  <th>Waktu</th>
-                                  <th>Subtes</th>
-                                  <th>Jenis</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {[...log]
-                                  .slice(-50)
-                                  .reverse()
-                                  .map((v, i) => (
-                                    <tr key={i}>
-                                      <td className="font-mono">{fmt(v.at)}</td>
-                                      <td className="font-mono">{v.subtestCode || "—"}</td>
-                                      <td className="font-bold">{violationLabel(v.type)}</td>
+                          {logLoadingId === s.id ? (
+                            <p className="text-xs font-bold">Memuat detail pelanggaran…</p>
+                          ) : log.length === 0 ? (
+                            <p className="text-xs font-bold">Tidak ada detail pelanggaran.</p>
+                          ) : (
+                            <>
+                              <p className="text-xs font-black uppercase mb-2">
+                                Detail Pelanggaran ({log.length})
+                              </p>
+                              <div style={detailScrollStyle}>
+                                <table className="brut-table" style={detailTableStyle}>
+                                  <thead>
+                                    <tr>
+                                      <th>Waktu</th>
+                                      <th>Subtes</th>
+                                      <th>Jenis</th>
                                     </tr>
-                                  ))}
-                              </tbody>
-                            </table>
-                          </div>
-                          <p className="text-xs font-semibold opacity-70 mt-2">
-                            Menampilkan 50 entri terakhir. Total: {log.length}.
-                            {isFlagged && " Siswa otomatis ditandai karena ≥ 5 pelanggaran."}
-                          </p>
+                                  </thead>
+                                  <tbody>
+                                    {[...log]
+                                      .slice(-50)
+                                      .reverse()
+                                      .map((v, i) => (
+                                        <tr key={i}>
+                                          <td className="font-mono">{fmt(v.at)}</td>
+                                          <td className="font-mono">{v.subtestCode || "—"}</td>
+                                          <td className="font-bold">{violationLabel(v.type)}</td>
+                                        </tr>
+                                      ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                              <p className="text-xs font-semibold opacity-70 mt-2">
+                                Menampilkan 50 entri terakhir. Total: {log.length}.
+                                {isFlagged && " Siswa otomatis ditandai karena ≥ 5 pelanggaran."}
+                              </p>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
