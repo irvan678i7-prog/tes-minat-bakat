@@ -94,8 +94,11 @@ function buildDummies(): Array<{ sub: CfitPdfSubmission; result: CfitPdfResult }
 	});
 }
 
-function pdfResponse(buf: Uint8Array, filename: string): NextResponse {
-	return new NextResponse(buf, {
+// new Uint8Array(...) wajib di sini: menyalin ke Uint8Array ber-backing
+// ArrayBuffer murni supaya cocok dengan tipe BodyInit milik NextResponse
+// (Buffer / hasil pdf-lib bertipe Uint8Array<ArrayBufferLike> dan ditolak TS).
+function pdfResponse(buf: Buffer | Uint8Array, filename: string): NextResponse {
+	return new NextResponse(new Uint8Array(buf), {
 		status: 200,
 		headers: {
 			"Content-Type": "application/pdf",
@@ -113,8 +116,7 @@ export async function GET(req: NextRequest) {
 
 	if (jenis === "individu") {
 		const { sub, result } = dummies[0];
-		const buf = buildCfitReportPDF(sub, result);
-		return pdfResponse(new Uint8Array(buf), "contoh-laporan-IQ-CFIT-individu.pdf");
+		return pdfResponse(buildCfitReportPDF(sub, result), "contoh-laporan-IQ-CFIT-individu.pdf");
 	}
 
 	const rows: CfitRekapRow[] = dummies.map(({ sub, result }) => ({
@@ -140,7 +142,7 @@ export async function GET(req: NextRequest) {
 	);
 
 	if (jenis === "rekap") {
-		return pdfResponse(new Uint8Array(rekapBuf), "contoh-rekap-IQ-CFIT.pdf");
+		return pdfResponse(rekapBuf, "contoh-rekap-IQ-CFIT.pdf");
 	}
 
 	// jenis === "lengkap": rekap + semua laporan individu dummy.
