@@ -588,5 +588,187 @@ function QuestionEditor({
   };
 
   const onSave = async () => {
-    if (options.length < 2) return void toast.error("Minimal 2 opsi.");
-    
+    if (options.length < 2) {
+      toast.error("Minimal 2 opsi.");
+      return;
+    }
+    const keys = options.map((o) => o.key.trim().toLowerCase());
+    if (keys.some((k) => !k)) {
+      toast.error("Setiap opsi harus punya huruf.");
+      return;
+    }
+    if (new Set(keys).size !== keys.length) {
+      toast.error("Ada huruf opsi yang duplikat.");
+      return;
+    }
+    const correctArr = correct
+      .toLowerCase()
+      .split(/[,;|/\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (correctArr.length === 0) {
+      toast.error("Isi kunci jawaban (mis. c — atau b;d untuk 2 kunci).");
+      return;
+    }
+    const invalid = correctArr.filter((c) => !keys.includes(c));
+    if (invalid.length > 0) {
+      toast.error(`Kunci '${invalid.join(", ")}' tidak ada di daftar opsi.`);
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/admin/cfit/questions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: q.id,
+          subtestCode,
+          questionNo,
+          prompt,
+          imageUrl: imageUrl.trim() || null,
+          options: options.map((o) => ({
+            key: o.key.trim().toLowerCase(),
+            label: o.label,
+            imageUrl: o.imageUrl.trim() || null,
+          })),
+          correct: correctArr.length === 1 ? correctArr[0] : correctArr,
+          isExample,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "Gagal menyimpan soal");
+        return;
+      }
+      toast.success("Soal disimpan");
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="brut-card space-y-3" style={{ background: "#fff7ed" }}>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="brut-tag" style={{ background: "#000", color: "#fff" }}>
+          EDIT {q.isExample ? "CONTOH" : "NO"} {q.questionNo}
+        </span>
+        <label className="flex items-center gap-2 text-xs font-black uppercase ml-auto">
+          <input type="checkbox" checked={isExample} onChange={(e) => setIsExample(e.target.checked)} />
+          Soal contoh (tidak dinilai)
+        </label>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+        <label className="text-xs font-black uppercase">
+          Nomor
+          <input
+            type="number"
+            min={1}
+            className="brut-input w-full mt-1"
+            value={questionNo}
+            onChange={(e) => setQuestionNo(parseInt(e.target.value || "1", 10) || 1)}
+          />
+        </label>
+        <label className="text-xs font-black uppercase md:col-span-3">
+          Prompt (teks opsional — soal CFIT biasanya murni gambar)
+          <input
+            type="text"
+            className="brut-input w-full mt-1"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="(kosongkan jika soal murni gambar)"
+          />
+        </label>
+      </div>
+
+      <label className="text-xs font-black uppercase block">
+        URL gambar soal (stem / deret gambar)
+        <input
+          type="text"
+          className="brut-input w-full mt-1"
+          value={imageUrl}
+          onChange={(e) => setImageUrl(e.target.value)}
+          placeholder="https://... (upload lewat kartu 'Upload Gambar Soal')"
+        />
+      </label>
+      {imageUrl.trim() ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={imageUrl.trim()} alt="Preview soal" className="border-2 border-black max-h-48 bg-white" />
+      ) : null}
+
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-xs font-black uppercase">Pilihan jawaban (tiap pilihan = gambar)</p>
+          <button type="button" className="brut-btn brut-btn-white text-xs" onClick={addOption}>
+            + OPSI
+          </button>
+        </div>
+        <div className="space-y-2">
+          {options.map((o, i) => (
+            <div key={i} className="border-2 border-black p-2 bg-white space-y-1">
+              <div className="flex gap-2 items-center">
+                <input
+                  type="text"
+                  className="brut-input w-14 text-center font-black uppercase"
+                  value={o.key}
+                  maxLength={2}
+                  onChange={(e) => setOpt(i, { key: e.target.value })}
+                  title="Huruf opsi"
+                />
+                <input
+                  type="text"
+                  className="brut-input flex-1"
+                  value={o.imageUrl}
+                  onChange={(e) => setOpt(i, { imageUrl: e.target.value })}
+                  placeholder="URL gambar pilihan ini (https://...)"
+                />
+                <button
+                  type="button"
+                  className="brut-btn brut-btn-pink text-xs"
+                  onClick={() => removeOption(i)}
+                  title="Hapus opsi ini"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="flex gap-2 items-center">
+                <input
+                  type="text"
+                  className="brut-input flex-1"
+                  value={o.label}
+                  onChange={(e) => setOpt(i, { label: e.target.value })}
+                  placeholder="Label teks opsional"
+                />
+                {o.imageUrl.trim() ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={o.imageUrl.trim()} alt={`Opsi ${o.key}`} className="border-2 border-black max-h-16 bg-white" />
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <label className="text-xs font-black uppercase block">
+        Kunci jawaban (huruf; pisahkan dengan ; untuk 2 kunci — mis. b;d)
+        <input
+          type="text"
+          className="brut-input w-full mt-1 lowercase"
+          value={correct}
+          onChange={(e) => setCorrect(e.target.value)}
+          placeholder="c"
+        />
+      </label>
+
+      <div className="flex gap-2 justify-end">
+        <button type="button" className="brut-btn brut-btn-white" onClick={onCancel} disabled={saving}>
+          BATAL
+        </button>
+        <button type="button" className="brut-btn brut-btn-black" onClick={onSave} disabled={saving}>
+          {saving ? "MENYIMPAN..." : "SIMPAN SOAL"}
+        </button>
+      </div>
+    </div>
+  );
+}
