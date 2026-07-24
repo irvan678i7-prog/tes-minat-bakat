@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const questions = await prisma.cfitQuestion.findMany({
+  const rows = await prisma.cfitQuestion.findMany({
     where: { subtestId: subtest.id },
     orderBy: [{ isExample: "desc" }, { questionNo: "asc" }],
     select: {
@@ -56,13 +56,20 @@ export async function POST(req: NextRequest) {
       imageUrl: true,
       options: true,
       isExample: true,
-      // KUNCI JAWABAN (`correct`) SENGAJA TIDAK DIKIRIM ke peserta.
+      correct: true,
     },
   });
 
+  // KUNCI JAWABAN (`correct`) SENGAJA TIDAK DIKIRIM ke peserta — hanya
+  // jumlah jawaban yang diminta (expectedAnswers) untuk soal multi-jawaban.
+  const questions = rows.map(({ correct, ...q }) => ({
+    ...q,
+    expectedAnswers: Array.isArray(correct) ? (correct as unknown[]).length : 1,
+  }));
+
   // Jawaban yang sudah tersimpan (resume setelah refresh).
   const saved = await prisma.cfitAnswer.findMany({
-    where: { submissionId: submission.id, questionId: { in: questions.map((q) => q.id) } },
+    where: { submissionId: submission.id, questionId: { in: rows.map((q) => q.id) } },
     select: { questionId: true, selected: true },
   });
 
