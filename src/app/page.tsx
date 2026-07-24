@@ -1,5 +1,6 @@
 import Link from "next/link";
 import StudentTokenForm from "@/components/StudentTokenForm";
+import CfitTokenForm from "@/components/cfit/CfitTokenForm";
 
 export default function Home() {
   return (
@@ -26,14 +27,40 @@ export default function Home() {
             Masukkan <span className="bg-pink-400 px-2 border-4 border-black">TOKEN</span>
           </h2>
           <p className="mt-3 text-lg font-semibold max-w-2xl">
-            Masukkan token yang diberikan oleh admin / guru pembimbing.
-            Jenis tes (Minat atau Bakat) otomatis terdeteksi dari token.
+            Masukkan token yang diberikan oleh admin / guru pembimbing pada kartu
+            yang sesuai: Tes Minat / Bakat, atau Tes IQ (CFIT).
           </p>
         </section>
 
-        <section className="max-w-md">
+        <section className="grid md:grid-cols-2 gap-8 max-w-4xl">
           <div className="brut-card" style={{ background: "#facc15" }}>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-lg font-black uppercase">Tes Minat / Bakat</h3>
+              <span className="brut-tag text-xs" style={{ background: "#000", color: "#fff" }}>
+                OTOMATIS
+              </span>
+            </div>
             <StudentTokenForm />
+            <p className="text-xs font-semibold mt-2">
+              Jenis tes (Minat atau Bakat) otomatis terdeteksi dari token.
+            </p>
+          </div>
+
+          <div className="brut-card" style={{ background: "#22d3ee" }}>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-lg font-black uppercase">Tes IQ</h3>
+              <span className="brut-tag text-xs" style={{ background: "#000", color: "#fff" }}>
+                CFIT SKALA 3
+              </span>
+            </div>
+            <CfitTokenForm />
+            <p className="text-xs font-semibold mt-2">
+              Info subtes &amp; aturan lengkap ada di{" "}
+              <Link href="/cfit" className="underline font-black">
+                halaman Tes IQ
+              </Link>
+              .
+            </p>
           </div>
         </section>
 
