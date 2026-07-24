@@ -55,16 +55,12 @@ export default function Home() {
             </div>
             <CfitTokenForm />
             <p className="text-xs font-semibold mt-2">
-              Info subtes &amp; aturan lengkap ada di{" "}
-              <Link href="/cfit" className="underline font-black">
-                halaman Tes IQ
-              </Link>
-              .
+              Bentuk tes (3A / 3B / gabungan) otomatis terdeteksi dari token.
             </p>
           </div>
         </section>
 
-        <section className="grid md:grid-cols-2 gap-8 mt-10">
+        <section className="grid md:grid-cols-3 gap-8 mt-10">
           <div className="brut-card" style={{ background: "#22d3ee" }}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-2xl font-black uppercase">Tes Minat</h3>
@@ -94,13 +90,28 @@ export default function Home() {
               <li>Hasil: profil bakat + EKIU prediksi + rekomendasi</li>
             </ul>
           </div>
+
+          <div className="brut-card" style={{ background: "#ff4d8d" }}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-2xl font-black uppercase">Tes IQ</h3>
+              <span className="brut-tag" style={{ background: "#000", color: "#fff" }}>4 SUBTES</span>
+            </div>
+            <p className="font-semibold mb-2">
+              Mengukur kecerdasan umum secara culture-fair lewat soal gambar non-verbal
+              CFIT Skala 3: Series, Classification, Matrices, &amp; Conditions (bentuk A &amp; B).
+            </p>
+            <ul className="font-semibold list-disc list-inside text-sm">
+              <li>Semua soal berupa gambar, tiap subtes berbatas waktu</li>
+              <li>Hasil: skor IQ + klasifikasi (dilihat admin/guru)</li>
+            </ul>
+          </div>
         </section>
 
         <section className="mt-10 brut-card" style={{ background: "#fff" }}>
           <h3 className="text-2xl font-black uppercase mb-3">Bagaimana cara mengikuti tes?</h3>
           <ol className="list-decimal list-inside font-semibold space-y-2">
             <li>Minta token kepada admin / guru.</li>
-            <li>Masukkan token di atas.</li>
+            <li>Masukkan token di atas (kartu Minat/Bakat atau kartu Tes IQ).</li>
             <li>Isi data diri.</li>
             <li>Kerjakan soal sesuai waktu yang disediakan tiap subtes.</li>
             <li>Selesai. Hasil akan dilihat &amp; diunduh oleh admin/guru.</li>

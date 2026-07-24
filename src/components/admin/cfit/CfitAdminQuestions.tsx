@@ -22,6 +22,25 @@ type QuestionRow = {
   isExample: boolean;
 };
 
+// Jumlah soal & opsi standar CFIT Skala 3 per jenis subtes — dipakai tombol
+// “Buat Template”: kerangka soal dibuat otomatis, admin tinggal mengisi URL
+// gambar dan kunci jawaban tiap nomor.
+const TEMPLATE_COUNTS: Record<string, number> = {
+  SERIES: 13,
+  CLASSIFICATION: 14,
+  MATRICES: 13,
+  CONDITIONS: 10,
+};
+const TEMPLATE_OPTIONS: Record<string, string[]> = {
+  SERIES: ["a", "b", "c", "d", "e", "f"],
+  CLASSIFICATION: ["a", "b", "c", "d", "e"],
+  MATRICES: ["a", "b", "c", "d", "e", "f"],
+  CONDITIONS: ["a", "b", "c", "d", "e"],
+};
+function subtestKind(code: string): string {
+  return code.split("_").slice(1).join("_");
+}
+
 const EMPTY_FORM = {
   questionNo: "",
   prompt: "",
@@ -37,6 +56,7 @@ export default function CfitAdminQuestions() {
   const [questions, setQuestions] = useState<QuestionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
 
   const loadSummary = useCallback(async () => {
@@ -66,8 +86,52 @@ export default function CfitAdminQuestions() {
 
   const openSubtest = async (code: string) => {
     setSelected(code);
-    setForm({ ...EMPTY_FORM });
+    const opts = TEMPLATE_OPTIONS[subtestKind(code)] ?? ["a", "b", "c", "d", "e", "f"];
+    setForm({ ...EMPTY_FORM, options: opts.join(", ") });
     await loadQuestions(code);
+  };
+
+  // Buat kerangka semua nomor soal yang belum ada (template) — soal CFIT
+  // berupa gambar, jadi kerangka dibuat dulu lalu URL gambar & kunci diisi
+  // lewat tombol EDIT per nomor.
+  const generateTemplate = async () => {
+    if (!selected) return;
+    const kind = subtestKind(selected);
+    const count = TEMPLATE_COUNTS[kind] ?? 0;
+    const opts = TEMPLATE_OPTIONS[kind] ?? ["a", "b", "c", "d", "e", "f"];
+    if (count === 0) return void toast.error("Subtes tidak dikenali");
+    const existing = new Set(questions.filter((q) => !q.isExample).map((q) => q.questionNo));
+    const targets: number[] = [];
+    for (let no = 1; no <= count; no++) if (!existing.has(no)) targets.push(no);
+    if (targets.length === 0) {
+      return void toast(`Semua nomor 1–${count} sudah ada.`);
+    }
+    const yakin = window.confirm(
+      `Buat kerangka ${targets.length} soal (dari total ${count} nomor) dengan opsi ${opts.join(", ")}?\n\n` +
+        "Kunci sementara diisi \"a\" — WAJIB diganti saat mengisi gambar tiap nomor (tombol EDIT).",
+    );
+    if (!yakin) return;
+    setGenerating(true);
+    let ok = 0;
+    for (const no of targets) {
+      const res = await fetch("/api/admin/cfit/questions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subtestCode: selected,
+          questionNo: no,
+          prompt: "",
+          imageUrl: null,
+          options: opts,
+          correct: opts[0],
+          isExample: false,
+        }),
+      });
+      if (res.ok) ok++;
+    }
+    toast.success(`${ok} kerangka soal dibuat. Isi URL gambar & kunci tiap nomor lewat EDIT.`);
+    await Promise.all([loadQuestions(selected), loadSummary()]);
+    setGenerating(false);
   };
 
   const save = async () => {
@@ -113,7 +177,6 @@ export default function CfitAdminQuestions() {
       correct: Array.isArray(q.correct) ? q.correct.join(", ") : String(q.correct),
       isExample: q.isExample,
     });
-    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const remove = async (q: QuestionRow) => {
@@ -135,9 +198,10 @@ export default function CfitAdminQuestions() {
       <div className="space-y-4">
         <div className="brut-card" style={{ background: "#fef9c3" }}>
           <p className="font-bold text-sm">
-            Bank soal CFIT terpisah dari bank soal minat-bakat. Soal CFIT berupa gambar —
-            unggah gambar ke penyimpanan (mis. Supabase Storage) lalu tempel URL-nya di kolom
-            <span className="font-black"> URL Gambar</span>. Materi soal disediakan oleh pemilik lisensi CFIT.
+            Soal CFIT semuanya berupa <span className="font-black">gambar</span>. Alur cepat:
+            buka subtes → klik <span className="font-black">BUAT TEMPLATE</span> (kerangka semua
+            nomor + opsi standar dibuat otomatis) → EDIT tiap nomor untuk menempel URL gambar
+            (unggah dulu ke Supabase Storage) dan mengisi kunci jawaban.
           </p>
         </div>
         <div className="grid md:grid-cols-2 gap-4">
@@ -159,12 +223,18 @@ export default function CfitAdminQuestions() {
   }
 
   const meta = subtests.find((s) => s.code === selected);
+  const templateCount = TEMPLATE_COUNTS[subtestKind(selected)] ?? 0;
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h2 className="text-2xl font-black uppercase">{meta?.name ?? selected} <span className="brut-tag text-xs align-middle">{selected}</span></h2>
-        <button className="brut-btn brut-btn-white text-sm" onClick={() => setSelected(null)}>← SEMUA SUBTES</button>
+        <div className="flex gap-2">
+          <button className="brut-btn brut-btn-lime text-sm" onClick={() => void generateTemplate()} disabled={generating}>
+            {generating ? "MEMBUAT..." : `⚡ BUAT TEMPLATE (${templateCount} NOMOR)`}
+          </button>
+          <button className="brut-btn brut-btn-white text-sm" onClick={() => setSelected(null)}>← SEMUA SUBTES</button>
+        </div>
       </div>
 
       <div className="brut-card space-y-3" style={{ background: "#22d3ee" }}>
@@ -176,7 +246,7 @@ export default function CfitAdminQuestions() {
           </div>
           <div className="md:col-span-3">
             <label className="block text-xs font-black uppercase mb-1">URL Gambar Soal</label>
-            <input className="brut-input w-full" placeholder="https://..." value={form.imageUrl} onChange={(e) => setForm({ ...form, imageUrl: e.target.value })} />
+            <input className="brut-input w-full" placeholder="https://... (unggah ke Supabase Storage dulu)" value={form.imageUrl} onChange={(e) => setForm({ ...form, imageUrl: e.target.value })} />
           </div>
         </div>
         <div>
@@ -204,7 +274,10 @@ export default function CfitAdminQuestions() {
       </div>
 
       {questions.length === 0 ? (
-        <div className="brut-card font-bold">Belum ada soal untuk subtes ini.</div>
+        <div className="brut-card font-bold">
+          Belum ada soal untuk subtes ini. Klik <span className="font-black">⚡ BUAT TEMPLATE</span>
+          {" "}untuk membuat kerangka {templateCount} nomor sekaligus.
+        </div>
       ) : (
         <div className="overflow-x-auto">
           <table className="brut-table">
@@ -226,7 +299,7 @@ export default function CfitAdminQuestions() {
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={q.imageUrl} alt={`Soal ${q.questionNo}`} className="h-14 border-2 border-black object-contain bg-white" />
                     ) : (
-                      <span className="opacity-60">{q.prompt ? q.prompt.slice(0, 40) : "-"}</span>
+                      <span className="brut-tag text-xs" style={{ background: "#ff4d8d" }}>⚠ BELUM ADA GAMBAR</span>
                     )}
                   </td>
                   <td className="font-mono">{(q.options ?? []).join(" / ")}</td>
