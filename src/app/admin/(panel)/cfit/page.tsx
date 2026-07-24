@@ -2,15 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import AdminTokens from "@/components/admin/AdminTokens";
-import AdminQuestions from "@/components/admin/AdminQuestions";
-import AdminSubmissions from "@/components/admin/AdminSubmissions";
-import AdminPanduan from "@/components/admin/AdminPanduan";
+import CfitAdminTokens from "@/components/admin/cfit/CfitAdminTokens";
+import CfitAdminQuestions from "@/components/admin/cfit/CfitAdminQuestions";
+import CfitAdminResults from "@/components/admin/cfit/CfitAdminResults";
 
-type Tab = "tokens" | "questions" | "submissions" | "panduan";
-const TABS = ["tokens", "questions", "submissions", "panduan"] as const;
+type Tab = "tokens" | "questions" | "results";
+const TABS = ["tokens", "questions", "results"] as const;
 
-export default function AdminDashboard() {
+export default function CfitAdminPage() {
   const [tab, setTab] = useState<Tab>(() => {
     if (typeof window === "undefined") return "tokens";
     const fromHash = window.location.hash.replace("#", "") as Tab;
@@ -27,13 +26,19 @@ export default function AdminDashboard() {
 
   return (
     <div>
-      <h1 className="text-4xl font-black uppercase mb-6">Dashboard</h1>
-      <div className="flex flex-wrap gap-0 mb-6 items-center">
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+        <h1 className="text-4xl font-black uppercase">
+          Tes IQ <span className="bg-cyan-300 px-2 border-4 border-black">CFIT</span>
+        </h1>
+        <Link href="/admin" className="brut-btn brut-btn-white text-sm">
+          ← MINAT-BAKAT
+        </Link>
+      </div>
+      <div className="flex flex-wrap gap-0 mb-6">
         {([
           ["tokens", "Token"],
           ["questions", "Bank Soal"],
-          ["submissions", "Hasil"],
-          ["panduan", "Panduan"],
+          ["results", "Hasil"],
         ] as const).map(([k, l]) => (
           <button
             key={k}
@@ -46,14 +51,10 @@ export default function AdminDashboard() {
             {l}
           </button>
         ))}
-        <Link href="/admin/cfit" className="brut-tab" style={{ background: "#22d3ee" }}>
-          TES IQ (CFIT) →
-        </Link>
       </div>
-      {tab === "tokens" && <AdminTokens />}
-      {tab === "questions" && <AdminQuestions />}
-      {tab === "submissions" && <AdminSubmissions />}
-      {tab === "panduan" && <AdminPanduan />}
+      {tab === "tokens" && <CfitAdminTokens />}
+      {tab === "questions" && <CfitAdminQuestions />}
+      {tab === "results" && <CfitAdminResults />}
     </div>
   );
 }
