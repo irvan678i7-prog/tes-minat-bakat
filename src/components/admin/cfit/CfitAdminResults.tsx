@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
+import { schoolKey, gradeKey, pickDisplay } from "@/lib/rekap-key";
 
 type ResultRow = {
   id: string;
@@ -41,6 +42,8 @@ export default function CfitAdminResults() {
   const [rows, setRows] = useState<ResultRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [finishedOnly, setFinishedOnly] = useState(true);
+  const [selSchool, setSelSchool] = useState("");
+  const [selGrade, setSelGrade] = useState("");
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/admin/cfit/results${finishedOnly ? "" : "?finishedOnly=0"}`, { cache: "no-store" });
@@ -57,9 +60,56 @@ export default function CfitAdminResults() {
     void load();
   }, [load]);
 
+  // Opsi filter dibangun dari data, pakai kunci kanonik yang sama dengan
+  // minat-bakat supaya variasi penulisan ("SMA 1" vs "SMAN 1") tergabung.
+  const schoolOpts = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const r of rows) {
+      const k = schoolKey(r.school);
+      if (!k) continue;
+      map.set(k, [...(map.get(k) ?? []), r.school ?? ""]);
+    }
+    return [...map.entries()]
+      .map(([key, labels]) => ({ key, label: pickDisplay(labels) || key }))
+      .sort((a, b) => a.label.localeCompare(b.label, "id"));
+  }, [rows]);
+
+  const gradeOpts = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of rows) {
+      const k = gradeKey(r.grade);
+      if (k) set.add(k);
+    }
+    return [...set].sort((a, b) => Number(a) - Number(b));
+  }, [rows]);
+
+  const visible = useMemo(
+    () =>
+      rows.filter(
+        (r) =>
+          (!selSchool || schoolKey(r.school) === selSchool) &&
+          (!selGrade || gradeKey(r.grade) === selGrade),
+      ),
+    [rows, selSchool, selGrade],
+  );
+
+  const rekapQuery = useMemo(() => {
+    const q = new URLSearchParams();
+    if (selSchool) {
+      q.set("schoolKey", selSchool);
+      q.set("schoolLabel", schoolOpts.find((o) => o.key === selSchool)?.label ?? "");
+    }
+    if (selGrade) {
+      q.set("gradeKey", selGrade);
+      q.set("gradeLabel", `Kelas ${selGrade}`);
+    }
+    const s = q.toString();
+    return s ? `?${s}` : "";
+  }, [selSchool, selGrade, schoolOpts]);
+
   const exportCsv = () => {
     const header = ["Nama", "JK", "Usia", "Kelas", "Sekolah", "Bentuk", "RS A", "RS B", "RS Total", "IQ", "Klasifikasi", "Mulai", "Selesai", "Pelanggaran", "Token"];
-    const lines = rows.map((r) =>
+    const lines = visible.map((r) =>
       [
         r.fullName,
         r.gender,
@@ -91,20 +141,66 @@ export default function CfitAdminResults() {
 
   return (
     <div className="space-y-4">
+      {/* ── KARTU UNDUH LAPORAN PDF ── */}
+      <div className="brut-card space-y-3">
+        <div className="font-black uppercase">⬇ Unduh Laporan PDF (Tes IQ CFIT)</div>
+        <div className="flex flex-wrap items-center gap-2">
+          <select className="brut-input text-sm" value={selSchool} onChange={(e) => setSelSchool(e.target.value)}>
+            <option value="">Semua Sekolah</option>
+            {schoolOpts.map((o) => (
+              <option key={o.key} value={o.key}>{o.label}</option>
+            ))}
+          </select>
+          <select className="brut-input text-sm" value={selGrade} onChange={(e) => setSelGrade(e.target.value)}>
+            <option value="">Semua Kelas</option>
+            {gradeOpts.map((k) => (
+              <option key={k} value={k}>Kelas {k}</option>
+            ))}
+          </select>
+          <a className="brut-btn brut-btn-cyan text-sm" href={`/api/admin/cfit/rekap${rekapQuery}`}>
+            ⬇ REKAP PDF
+          </a>
+          <a className="brut-btn brut-btn-pink text-sm" href={`/api/admin/cfit/rekap-full${rekapQuery}`}>
+            ⬇ REKAP + SEMUA LAPORAN INDIVIDU
+          </a>
+        </div>
+        <div className="text-xs font-bold opacity-70">
+          REKAP = tabel ringkas semua peserta + statistik & distribusi klasifikasi IQ (landscape).
+          REKAP + INDIVIDU = rekap di halaman depan lalu laporan lengkap tiap peserta urut abjad dengan
+          nomor halaman menyambung — siap cetak sekali unduh. Filter sekolah/kelas juga berlaku ke tabel
+          di bawah dan ekspor CSV.
+        </div>
+        <div className="flex flex-wrap items-center gap-2 pt-2 border-t-2 border-black">
+          <span className="text-xs font-black uppercase">Contoh laporan (data dummy):</span>
+          <a className="brut-btn brut-btn-white text-xs px-2 py-1" href="/api/admin/cfit/report-contoh?jenis=individu">
+            ⬇ INDIVIDU
+          </a>
+          <a className="brut-btn brut-btn-white text-xs px-2 py-1" href="/api/admin/cfit/report-contoh?jenis=rekap">
+            ⬇ REKAP
+          </a>
+          <a className="brut-btn brut-btn-white text-xs px-2 py-1" href="/api/admin/cfit/report-contoh?jenis=lengkap">
+            ⬇ REKAP + INDIVIDU
+          </a>
+          <span className="text-xs font-bold opacity-60">8 peserta fiktif — tidak menyentuh database.</span>
+        </div>
+      </div>
+
       <div className="flex items-center justify-between flex-wrap gap-3">
         <label className="brut-checkbox">
           <input type="checkbox" checked={finishedOnly} onChange={(e) => setFinishedOnly(e.target.checked)} />
           Hanya yang sudah selesai
         </label>
-        <button className="brut-btn brut-btn-lime text-sm" onClick={exportCsv} disabled={rows.length === 0}>
-          ⬇ EKSPOR CSV ({rows.length})
+        <button className="brut-btn brut-btn-lime text-sm" onClick={exportCsv} disabled={visible.length === 0}>
+          ⬇ EKSPOR CSV ({visible.length})
         </button>
       </div>
 
       {loading ? (
         <div className="brut-card font-black uppercase brut-blink">Memuat...</div>
-      ) : rows.length === 0 ? (
-        <div className="brut-card font-bold">Belum ada hasil tes CFIT.</div>
+      ) : visible.length === 0 ? (
+        <div className="brut-card font-bold">
+          {rows.length === 0 ? "Belum ada hasil tes CFIT." : "Tidak ada hasil untuk filter sekolah/kelas ini."}
+        </div>
       ) : (
         <div className="overflow-x-auto">
           <table className="brut-table">
@@ -124,7 +220,7 @@ export default function CfitAdminResults() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {visible.map((r) => (
                 <tr key={r.id} style={r.flaggedCheating || r.violationCount >= 5 ? { background: "#ffe4e6" } : undefined}>
                   <td className="font-bold">
                     {r.fullName ?? "(tanpa nama)"}
