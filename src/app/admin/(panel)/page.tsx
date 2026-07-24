@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import AdminTokens from "@/components/admin/AdminTokens";
 import AdminQuestions from "@/components/admin/AdminQuestions";
 import AdminSubmissions from "@/components/admin/AdminSubmissions";
 import AdminPanduan from "@/components/admin/AdminPanduan";
+import CfitAdminPanel from "@/components/admin/cfit/CfitAdminPanel";
 
-type Tab = "tokens" | "questions" | "submissions" | "panduan";
-const TABS = ["tokens", "questions", "submissions", "panduan"] as const;
+type Tab = "tokens" | "questions" | "submissions" | "panduan" | "cfit";
+const TABS = ["tokens", "questions", "submissions", "panduan", "cfit"] as const;
 
 export default function AdminDashboard() {
   const [tab, setTab] = useState<Tab>(() => {
@@ -28,12 +28,13 @@ export default function AdminDashboard() {
   return (
     <div>
       <h1 className="text-4xl font-black uppercase mb-6">Dashboard</h1>
-      <div className="flex flex-wrap gap-0 mb-6 items-center">
+      <div className="flex flex-wrap gap-0 mb-6">
         {([
           ["tokens", "Token"],
           ["questions", "Bank Soal"],
           ["submissions", "Hasil"],
           ["panduan", "Panduan"],
+          ["cfit", "Tes IQ (CFIT)"],
         ] as const).map(([k, l]) => (
           <button
             key={k}
@@ -42,18 +43,17 @@ export default function AdminDashboard() {
               window.location.hash = k;
             }}
             className={`brut-tab ${tab === k ? "active" : ""}`}
+            style={k === "cfit" && tab !== "cfit" ? { background: "#22d3ee" } : undefined}
           >
             {l}
           </button>
         ))}
-        <Link href="/admin/cfit" className="brut-tab" style={{ background: "#22d3ee" }}>
-          TES IQ (CFIT) →
-        </Link>
       </div>
       {tab === "tokens" && <AdminTokens />}
       {tab === "questions" && <AdminQuestions />}
       {tab === "submissions" && <AdminSubmissions />}
       {tab === "panduan" && <AdminPanduan />}
+      {tab === "cfit" && <CfitAdminPanel />}
     </div>
   );
 }
