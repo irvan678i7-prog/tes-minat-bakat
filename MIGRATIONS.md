@@ -43,6 +43,7 @@ di DB, lalu menjalankan `ALTER TABLE` yang diperlukan secara otomatis.
 | `prisma/sql/0002_drop_stale_subtestprogress_userid.sql` | Drop kolom `userId` (peninggalan schema lama) dari `SubtestProgress` (fix error P2011 saat upsert) | applied |
 | `prisma/sql/0003_drop_stale_subtestprogress_updatedat.sql` | Drop kolom `updatedAt` (peninggalan schema lama) dari `SubtestProgress` (fix error P2011 saat upsert) | **PERLU DI-APPLY** |
 | `prisma/sql/0005_submission_jenjang.sql` | Tambah kolom `jenjang` (TEXT) di `Submission` untuk pilihan jenjang SMP/SMA/SMK | **PERLU DI-APPLY** |
+| `prisma/sql/0006_cfit_tables.sql` | Tes IQ CFIT Skala 3 (3A & 3B): tabel `Cfit*` (token, subtes, bank soal, submission, jawaban, hasil, norma) TERPISAH dari minat-bakat + seed 8 subtes & norma RS→IQ usia 17+ | **PERLU DI-APPLY** |
 
 Setiap SQL di folder `prisma/sql/` ditulis idempoten, jadi tidak masalah
 kalau kamu jalankan ulang.
