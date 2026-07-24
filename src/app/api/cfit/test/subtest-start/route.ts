@@ -9,6 +9,30 @@ export const dynamic = "force-dynamic";
 
 const Body = z.object({ subtestCode: z.string().min(1) });
 
+// Normalisasi opsi ke bentuk { key, label, imageUrl } — mendukung format lama
+// (array string huruf) dan format baru (array objek dengan gambar per opsi).
+type NormOption = { key: string; label: string; imageUrl: string | null };
+function normalizeOptions(raw: unknown): NormOption[] {
+  if (!Array.isArray(raw)) return [];
+  const out: NormOption[] = [];
+  for (const o of raw) {
+    if (typeof o === "string") {
+      if (o.trim()) out.push({ key: o.trim(), label: "", imageUrl: null });
+    } else if (o && typeof o === "object") {
+      const obj = o as Record<string, unknown>;
+      const key = String(obj.key ?? "").trim();
+      if (key) {
+        out.push({
+          key,
+          label: obj.label ? String(obj.label) : "",
+          imageUrl: obj.imageUrl ? String(obj.imageUrl) : null,
+        });
+      }
+    }
+  }
+  return out;
+}
+
 // Mulai (atau resume) satu subtes: nyalakan timer server-side lalu kirim
 // soal TANPA kunci jawaban. Kalau subtes sudah terkunci → 423.
 export async function POST(req: NextRequest) {
@@ -62,8 +86,9 @@ export async function POST(req: NextRequest) {
 
   // KUNCI JAWABAN (`correct`) SENGAJA TIDAK DIKIRIM ke peserta — hanya
   // jumlah jawaban yang diminta (expectedAnswers) untuk soal multi-jawaban.
-  const questions = rows.map(({ correct, ...q }) => ({
+  const questions = rows.map(({ correct, options, ...q }) => ({
     ...q,
+    options: normalizeOptions(options),
     expectedAnswers: Array.isArray(correct) ? (correct as unknown[]).length : 1,
   }));
 

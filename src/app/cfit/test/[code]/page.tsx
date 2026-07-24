@@ -4,12 +4,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 
+type Option = { key: string; label: string; imageUrl: string | null };
+
 type Question = {
   id: string;
   questionNo: number;
   prompt: string;
   imageUrl: string | null;
-  options: string[];
+  options: Option[];
   isExample: boolean;
   expectedAnswers: number;
 };
@@ -136,15 +138,15 @@ export default function CfitSubtestRunnerPage() {
     [finishSubtest],
   );
 
-  const choose = (q: Question, opt: string) => {
+  const choose = (q: Question, optKey: string) => {
     const cur = answers[q.id] ?? [];
     let next: string[];
     if (q.expectedAnswers > 1) {
       // Multi-jawaban: toggle; maksimal expectedAnswers pilihan (yang paling
       // lama diganti otomatis).
-      next = cur.includes(opt) ? cur.filter((o) => o !== opt) : [...cur, opt].slice(-q.expectedAnswers);
+      next = cur.includes(optKey) ? cur.filter((o) => o !== optKey) : [...cur, optKey].slice(-q.expectedAnswers);
     } else {
-      next = [opt];
+      next = [optKey];
     }
     setAnswers({ ...answers, [q.id]: next });
     if (next.length > 0) void saveAnswer(q, next);
@@ -160,6 +162,7 @@ export default function CfitSubtestRunnerPage() {
 
   const q = questions[idx];
   const timeLow = (remaining ?? 0) <= 30;
+  const hasOptionImages = q ? q.options.some((o) => o.imageUrl) : false;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -182,7 +185,7 @@ export default function CfitSubtestRunnerPage() {
 
       <main className="flex-1 max-w-4xl mx-auto px-4 md:px-6 py-6 w-full space-y-4">
         {subtest.instructions && idx === 0 ? (
-          <div className="brut-card text-sm font-semibold" style={{ background: "#fef9c3" }}>
+          <div className="brut-card text-sm font-semibold whitespace-pre-wrap" style={{ background: "#fef9c3" }}>
             {subtest.instructions}
           </div>
         ) : null}
@@ -210,17 +213,27 @@ export default function CfitSubtestRunnerPage() {
 
             {q.prompt ? <p className="font-semibold">{q.prompt}</p> : null}
 
-            <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
+            <div className={hasOptionImages ? "grid grid-cols-2 md:grid-cols-3 gap-3" : "grid grid-cols-3 md:grid-cols-6 gap-3"}>
               {q.options.map((opt) => {
-                const selected = (answers[q.id] ?? []).includes(opt);
+                const selected = (answers[q.id] ?? []).includes(opt.key);
                 return (
                   <button
-                    key={opt}
+                    key={opt.key}
                     type="button"
-                    className={`brut-checkbox justify-center text-lg font-black uppercase ${selected ? "selected-cyan selected" : ""}`}
-                    onClick={() => choose(q, opt)}
+                    className={`brut-checkbox flex-col items-center justify-center gap-1 text-lg font-black uppercase ${selected ? "selected-cyan selected" : ""}`}
+                    onClick={() => choose(q, opt.key)}
                   >
-                    {opt}
+                    {opt.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={opt.imageUrl}
+                        alt={`Pilihan ${opt.key}`}
+                        className="w-full max-h-28 object-contain bg-white"
+                        draggable={false}
+                      />
+                    ) : null}
+                    <span>{opt.key}</span>
+                    {opt.label ? <span className="text-xs font-bold normal-case">{opt.label}</span> : null}
                   </button>
                 );
               })}
