@@ -120,6 +120,7 @@ export default function CfitAdminResults() {
                 <th>IQ</th>
                 <th>Klasifikasi</th>
                 <th>Selesai</th>
+                <th>PDF</th>
               </tr>
             </thead>
             <tbody>
@@ -138,6 +139,19 @@ export default function CfitAdminResults() {
                   <td className="font-black text-lg">{r.result?.iq ?? "-"}</td>
                   <td className="font-bold">{r.result?.classification ?? "-"}</td>
                   <td>{fmtDate(r.finishedAt)}</td>
+                  <td>
+                    {r.result ? (
+                      <a
+                        className="brut-btn brut-btn-white text-xs px-2 py-1 inline-block"
+                        style={{ boxShadow: "3px 3px 0 0 #000" }}
+                        href={`/api/admin/cfit/results/${r.id}/pdf`}
+                      >
+                        ⬇ PDF
+                      </a>
+                    ) : (
+                      <span className="opacity-50 text-xs font-bold">-</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
