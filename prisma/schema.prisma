@@ -174,3 +174,146 @@ model Result {
   topPrograms     Json?
   generatedAt     DateTime    @default(now())
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CFIT SKALA 3 (BENTUK A & B) — TES IQ
+// Sengaja TERPISAH PENUH dari tabel minat-bakat di atas: bank soal, token,
+// submission, jawaban, dan hasil punya tabel sendiri (prefix `Cfit`).
+// Tidak ada relasi ke Subtest/Question/Submission/Result minat-bakat.
+// `createdById` di CfitAccessToken sengaja TANPA relasi Prisma ke AdminUser
+// agar model minat-bakat tidak perlu disentuh sama sekali.
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum CfitForm {
+  FORM_3A // hanya bentuk A (RS maks ± 50)
+  FORM_3B // hanya bentuk B
+  FORM_3AB // gabungan A + B (standar administrasi penuh)
+}
+
+// Token akses khusus CFIT — terpisah dari AccessToken minat-bakat.
+// Pola sama: satu kode bisa dipakai banyak peserta selama belum kadaluarsa.
+model CfitAccessToken {
+  id          String    @id @default(cuid())
+  code        String    @unique
+  form        CfitForm  @default(FORM_3AB)
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+  createdById String? // id AdminUser (tanpa FK, biar tabel lama tak tersentuh)
+  redeemedAt  DateTime?
+  submissions CfitSubmission[]
+
+  @@index([form])
+}
+
+// 4 subtes per bentuk: Series, Classification, Matrices, Conditions.
+model CfitSubtest {
+  id           String  @id @default(cuid())
+  code         String  @unique // mis. "3A_SERIES"
+  form         CfitForm
+  name         String
+  description  String  @default("")
+  instructions String  @default("")
+  durationSec  Int
+  orderIndex   Int     @default(0)
+  questions    CfitQuestion[]
+  progress     CfitSubtestProgress[]
+}
+
+// Bank soal CFIT — soal berbentuk gambar (imageUrl), opsi a-f.
+model CfitQuestion {
+  id         String      @id @default(cuid())
+  subtestId  String
+  subtest    CfitSubtest @relation(fields: [subtestId], references: [id], onDelete: Cascade)
+  questionNo Int
+  prompt     String      @default("")
+  imageUrl   String?
+  options    Json // mis. ["a","b","c","d","e","f"]
+  correct    Json // kunci jawaban; Conditions bisa >1 jawaban benar
+  isExample  Boolean     @default(false)
+  createdAt  DateTime    @default(now())
+  answers    CfitAnswer[]
+
+  @@unique([subtestId, questionNo, isExample])
+}
+
+model CfitSubmission {
+  id              String          @id @default(cuid())
+  tokenId         String
+  token           CfitAccessToken @relation(fields: [tokenId], references: [id])
+  form            CfitForm
+  fullName        String?
+  gender          String?
+  birthPlace      String?
+  birthDate       DateTime?
+  age             Int? // norma tabel saat ini: usia 17 th ke atas
+  grade           String?
+  school          String?
+  phone           String?
+  email           String?
+  startedAt       DateTime        @default(now())
+  finishedAt      DateTime?
+  randomSeed      String          @default("")
+  violationCount  Int             @default(0)
+  violationLog    Json            @default("[]")
+  flaggedCheating Boolean         @default(false)
+  answers         CfitAnswer[]
+  result          CfitResult?
+  subtestProgress CfitSubtestProgress[]
+
+  @@index([tokenId])
+  @@index([finishedAt])
+}
+
+// Lock per-subtes (server-authoritative timer), pola sama dgn SubtestProgress.
+model CfitSubtestProgress {
+  id           String         @id @default(cuid())
+  submissionId String
+  submission   CfitSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  subtestId    String
+  subtest      CfitSubtest    @relation(fields: [subtestId], references: [id], onDelete: Cascade)
+  startedAt    DateTime       @default(now())
+  finishedAt   DateTime?
+  finishReason String? // "MANUAL" | "TIME_UP" | "AUTO_FLAG"
+
+  @@unique([submissionId, subtestId])
+  @@index([submissionId])
+}
+
+model CfitAnswer {
+  id           String         @id @default(cuid())
+  submissionId String
+  submission   CfitSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  questionId   String
+  question     CfitQuestion   @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  selected     Json
+  isCorrect    Boolean        @default(false)
+  answeredAt   DateTime       @default(now())
+
+  @@unique([submissionId, questionId])
+}
+
+// Hasil final CFIT: RS per bentuk, RS total, IQ hasil konversi norma,
+// dan klasifikasi (mis. "Rata-rata", "Superior").
+model CfitResult {
+  id             String         @id @default(cuid())
+  submissionId   String         @unique
+  submission     CfitSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  rawScoreA      Int?
+  rawScoreB      Int?
+  rawScoreTotal  Int
+  iq             Int
+  classification String
+  payload        Json? // rincian per subtes, dsb.
+  generatedAt    DateTime       @default(now())
+}
+
+// Tabel norma konversi RS → IQ. `normGroup` menyiapkan kemungkinan norma
+// kelompok usia lain di masa depan; saat ini terisi "17+".
+model CfitNorm {
+  id        String @id @default(cuid())
+  normGroup String @default("17+")
+  rawScore  Int
+  iq        Int
+
+  @@unique([normGroup, rawScore])
+}
