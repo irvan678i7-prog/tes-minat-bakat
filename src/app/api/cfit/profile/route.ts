@@ -18,10 +18,24 @@ const Body = z.object({
   email: z.string().email().max(160).optional(),
 });
 
+// Usia dihitung SERVER-SIDE dari tanggal lahir terhadap tanggal tes
+// (tanggal token di-redeem). Nilai `age` kiriman klien hanya fallback.
+function computeAgeAt(birth: Date, ref: Date): number | null {
+  if (Number.isNaN(birth.getTime()) || Number.isNaN(ref.getTime())) return null;
+  let age = ref.getFullYear() - birth.getFullYear();
+  const m = ref.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && ref.getDate() < birth.getDate())) age--;
+  if (age < 0 || age > 130) return null;
+  return age;
+}
+
 export async function GET(req: NextRequest) {
   const p = getCfitFromRequest(req);
   if (!p) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const s = await prisma.cfitSubmission.findUnique({ where: { id: p.sub } });
+  const s = await prisma.cfitSubmission.findUnique({
+    where: { id: p.sub },
+    include: { token: { select: { redeemedAt: true } } },
+  });
   if (!s) return NextResponse.json({ error: "Submission tidak ditemukan" }, { status: 404 });
   return NextResponse.json({
     fullName: s.fullName,
@@ -35,6 +49,8 @@ export async function GET(req: NextRequest) {
     email: s.email,
     form: s.form,
     finishedAt: s.finishedAt,
+    // Tanggal tes = saat token di-redeem (fallback: saat submission dibuat).
+    testDate: s.token?.redeemedAt ?? s.startedAt,
   });
 }
 
@@ -45,6 +61,25 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return NextResponse.json({ error: "Input tidak valid" }, { status: 400 });
 
   const d = parsed.data;
+
+  const sub = await prisma.cfitSubmission.findUnique({
+    where: { id: p.sub },
+    include: { token: { select: { redeemedAt: true } } },
+  });
+  if (!sub) return NextResponse.json({ error: "Submission tidak ditemukan" }, { status: 404 });
+
+  const testDate = sub.token?.redeemedAt ?? sub.startedAt;
+
+  // Usia otomatis dari tanggal lahir (dihitung terhadap tanggal tes).
+  let age = d.age;
+  if (d.birthDate) {
+    const computed = computeAgeAt(new Date(d.birthDate), testDate);
+    if (computed == null || computed < 5 || computed > 99) {
+      return NextResponse.json({ error: "Tanggal lahir tidak valid" }, { status: 400 });
+    }
+    age = computed;
+  }
+
   const submission = await prisma.cfitSubmission.update({
     where: { id: p.sub },
     data: {
@@ -52,7 +87,7 @@ export async function POST(req: NextRequest) {
       gender: d.gender,
       birthPlace: d.birthPlace,
       birthDate: d.birthDate ? new Date(d.birthDate) : undefined,
-      age: d.age,
+      age,
       grade: d.grade,
       school: d.school,
       phone: d.phone,
@@ -63,9 +98,9 @@ export async function POST(req: NextRequest) {
   // Norma yang tersedia saat ini: usia 17 tahun ke atas. Usia < 17 tetap
   // boleh mengerjakan, tapi beri peringatan agar hasil ditafsirkan hati-hati.
   const normWarning =
-    typeof d.age === "number" && d.age < 17
+    typeof age === "number" && age < 17
       ? "Norma IQ yang tersedia saat ini untuk usia 17 tahun ke atas. Hasil peserta di bawah 17 tahun perlu ditafsirkan dengan hati-hati."
       : null;
 
-  return NextResponse.json({ ok: true, submissionId: submission.id, normWarning });
+  return NextResponse.json({ ok: true, submissionId: submission.id, age, normWarning });
 }
