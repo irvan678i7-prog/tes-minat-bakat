@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { schoolKey, gradeKey, pickDisplay } from "@/lib/rekap-key";
+import CfitConfirm from "@/components/cfit/CfitConfirm";
 
 type ResultRow = {
   id: string;
@@ -44,21 +45,40 @@ export default function CfitAdminResults() {
   const [finishedOnly, setFinishedOnly] = useState(true);
   const [selSchool, setSelSchool] = useState("");
   const [selGrade, setSelGrade] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<ResultRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/admin/cfit/results${finishedOnly ? "" : "?finishedOnly=0"}`, { cache: "no-store" });
     const data = await res.json().catch(() => ({}));
+    // setLoading(false) juga saat error — tanpa ini tampilan macet di
+    // "Memuat..." selamanya kalau fetch gagal.
+    setLoading(false);
     if (!res.ok) {
       toast.error(data.error || "Gagal memuat hasil");
       return;
     }
     setRows(data.submissions);
-    setLoading(false);
   }, [finishedOnly]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const doDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    const res = await fetch(`/api/admin/cfit/results/${deleteTarget.id}`, { method: "DELETE" });
+    const data = await res.json().catch(() => ({}));
+    setDeleting(false);
+    if (!res.ok) {
+      toast.error(data.error || "Gagal menghapus peserta");
+      return;
+    }
+    setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
+    setDeleteTarget(null);
+    toast.success(`Peserta "${deleteTarget.fullName ?? "(tanpa nama)"}" dihapus.`);
+  };
 
   // Opsi filter dibangun dari data, pakai kunci kanonik yang sama dengan
   // minat-bakat supaya variasi penulisan ("SMA 1" vs "SMAN 1") tergabung.
@@ -217,6 +237,7 @@ export default function CfitAdminResults() {
                 <th>Klasifikasi</th>
                 <th>Selesai</th>
                 <th>PDF</th>
+                <th>Hapus</th>
               </tr>
             </thead>
             <tbody>
@@ -248,12 +269,37 @@ export default function CfitAdminResults() {
                       <span className="opacity-50 text-xs font-bold">-</span>
                     )}
                   </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="brut-btn brut-btn-pink text-xs px-2 py-1"
+                      style={{ boxShadow: "3px 3px 0 0 #000" }}
+                      title="Hapus peserta ini beserta seluruh jawaban & hasilnya"
+                      onClick={() => setDeleteTarget(r)}
+                    >
+                      🗑 HAPUS
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+
+      <CfitConfirm
+        open={!!deleteTarget}
+        title="Hapus peserta ini?"
+        danger
+        confirmLabel="YA, HAPUS PERMANEN"
+        pending={deleting}
+        onConfirm={() => void doDelete()}
+        onCancel={() => setDeleteTarget(null)}
+      >
+        {deleteTarget
+          ? `Peserta "${deleteTarget.fullName ?? "(tanpa nama)"}"${deleteTarget.school ? ` — ${deleteTarget.school}` : ""} akan dihapus PERMANEN beserta seluruh jawaban, progres subtes, dan hasil IQ-nya. Tindakan ini tidak bisa dibatalkan. Token tes TIDAK ikut terhapus.`
+          : ""}
+      </CfitConfirm>
     </div>
   );
 }
