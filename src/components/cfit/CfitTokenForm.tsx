@@ -3,11 +3,15 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import toast from "react-hot-toast";
+import CfitConfirm from "@/components/cfit/CfitConfirm";
 
 // Form token khusus CFIT — memakai endpoint /api/cfit/* dan cookie sesi
 // sendiri, terpisah dari tes minat-bakat.
+// CATATAN: 1 token bisa dipakai BANYAK peserta (token kelas). Perangkat yang
+// sama setelah sesi selesai → tawarkan mulai sebagai peserta baru (forceNew).
 export default function CfitTokenForm() {
   const [code, setCode] = useState("");
+  const [askNew, setAskNew] = useState(false);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -26,10 +30,7 @@ export default function CfitTokenForm() {
     if (data.finishedAt) {
       // Sesi lama di browser ini sudah selesai — tawarkan mulai sebagai
       // peserta baru (peserta bergantian di perangkat yang sama).
-      const ulang = window.confirm(
-        "Sesi tes dengan token ini di perangkat ini sudah selesai.\nMulai sebagai peserta BARU?",
-      );
-      if (ulang) await redeem(true);
+      setAskNew(true);
       return;
     }
     toast.success("Token valid! Lanjut ke data diri.");
@@ -58,6 +59,24 @@ export default function CfitTokenForm() {
       <button type="submit" className="brut-btn brut-btn-black w-full" disabled={pending}>
         {pending ? "MEMERIKSA..." : "MULAI TES IQ"}
       </button>
+
+      <CfitConfirm
+        open={askNew}
+        title="Sesi di perangkat ini sudah selesai"
+        confirmLabel="MULAI PESERTA BARU"
+        cancelLabel="BATAL"
+        pending={pending}
+        onConfirm={() => {
+          setAskNew(false);
+          startTransition(async () => {
+            await redeem(true);
+          });
+        }}
+        onCancel={() => setAskNew(false)}
+      >
+        Tes dengan token ini di perangkat ini sudah diselesaikan. Mulai sebagai peserta BARU dengan token
+        yang sama? (Peserta bergantian di perangkat yang sama.)
+      </CfitConfirm>
     </form>
   );
 }

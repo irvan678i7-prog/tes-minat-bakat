@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
+import CfitConfirm from "@/components/cfit/CfitConfirm";
 
 type SubtestInfo = {
   code: string;
@@ -37,6 +38,7 @@ export default function CfitDashboardPage() {
   const [subtests, setSubtests] = useState<SubtestInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [finishing, setFinishing] = useState(false);
+  const [confirmFinish, setConfirmFinish] = useState(false);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/cfit/test/start", { cache: "no-store" });
@@ -71,15 +73,7 @@ export default function CfitDashboardPage() {
   // dikerjakan (server juga memvalidasi hal yang sama).
   const activeIdx = subtests.findIndex((s) => !s.locked);
 
-  const finishAll = async () => {
-    if (
-      !allLocked &&
-      !window.confirm(
-        "Masih ada subtes yang belum dikerjakan / belum dikunci.\nSemua subtes akan DIKUNCI dan tidak bisa dikerjakan lagi.\n\nYakin selesaikan tes sekarang?",
-      )
-    ) {
-      return;
-    }
+  const doFinish = async () => {
     setFinishing(true);
     const res = await fetch("/api/cfit/test/finish", { method: "POST" });
     const data = await res.json().catch(() => ({}));
@@ -89,6 +83,14 @@ export default function CfitDashboardPage() {
       return;
     }
     router.replace("/cfit/done");
+  };
+
+  const finishAll = () => {
+    if (allLocked) {
+      void doFinish();
+    } else {
+      setConfirmFinish(true);
+    }
   };
 
   if (loading) {
@@ -167,6 +169,22 @@ export default function CfitDashboardPage() {
           </button>
         </div>
       </main>
+
+      <CfitConfirm
+        open={confirmFinish}
+        title="Selesaikan tes sekarang?"
+        danger
+        confirmLabel="YA, SELESAIKAN"
+        pending={finishing}
+        onConfirm={() => {
+          setConfirmFinish(false);
+          void doFinish();
+        }}
+        onCancel={() => setConfirmFinish(false)}
+      >
+        Masih ada subtes yang belum dikerjakan / belum dikunci. Semua subtes akan DIKUNCI dan tidak bisa
+        dikerjakan lagi.
+      </CfitConfirm>
     </div>
   );
 }
