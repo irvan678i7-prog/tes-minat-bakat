@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
+import CfitBulkImageUploader from "./CfitBulkImageUploader";
 
 // Bank Soal IQ (CFIT) — tampilan mengikuti Bank Soal minat-bakat:
 // tabel subtes dengan TEMPLATE (XLSX) / UPLOAD / INSTRUKSI / WAKTU / PREVIEW
@@ -128,12 +129,41 @@ export default function CfitAdminQuestions() {
 
   return (
     <div className="space-y-6">
+      <div className="brut-card" style={{ background: "#a3e635" }}>
+        <h3 className="text-xl font-black uppercase mb-2">⚡ Upload Gambar Massal (Cara Cepat)</h3>
+        <p className="text-sm font-bold mb-2">
+          Urutan kerja: <span className="bg-black text-white px-1">1</span> UPLOAD XLSX subtes
+          (nomor soal & kunci — kolom gambar boleh kosong) →{" "}
+          <span className="bg-black text-white px-1">2</span> beri nama file gambar sesuai pola →{" "}
+          <span className="bg-black text-white px-1">3</span> pilih SEMUA gambar sekaligus di sini.
+          Gambar otomatis terpasang ke soal & pilihan berdasarkan nama file — tanpa tempel URL satu
+          per satu.
+        </p>
+        <ul className="text-xs font-bold mb-3 space-y-1">
+          <li>
+            <code>1.png</code> → gambar soal nomor 1
+          </li>
+          <li>
+            <code>1a.png</code> … <code>1f.png</code> → gambar pilihan a–f soal nomor 1 (boleh juga{" "}
+            <code>1-a.png</code> / <code>1_a.png</code>)
+          </li>
+          <li>
+            <code>c1.png</code> → gambar soal CONTOH nomor 1; <code>c1a.png</code> → pilihan a
+            contoh 1 (boleh <code>contoh1.png</code>)
+          </li>
+        </ul>
+        <CfitBulkImageUploader
+          subtests={subs.map((s) => ({ code: s.code, form: s.form, name: s.name }))}
+          onDone={() => void load()}
+        />
+      </div>
+
       <div className="brut-card" style={{ background: "#22d3ee" }}>
-        <h3 className="text-xl font-black uppercase mb-2">Upload Gambar Soal</h3>
+        <h3 className="text-xl font-black uppercase mb-2">Upload Gambar Satuan</h3>
         <p className="text-sm font-bold mb-3">
-          Soal & tiap pilihan jawaban CFIT berupa gambar. Upload gambar di sini; URL otomatis
-          tersalin ke clipboard. Tempel ke kolom <code>imageUrl</code> (gambar soal) atau{" "}
-          <code>option*Image</code> (gambar pilihan) di template XLSX subtes.
+          Untuk koreksi 1–2 gambar: upload di sini, URL otomatis tersalin ke clipboard. Tempel ke
+          kolom <code>imageUrl</code> (gambar soal) atau <code>option*Image</code> (gambar pilihan)
+          di template XLSX subtes, atau langsung di editor soal (PREVIEW → EDIT).
         </p>
         <div className="flex flex-col sm:flex-row gap-2">
           <input ref={imgRef} type="file" accept="image/*" className="brut-input flex-1" />
@@ -689,7 +719,7 @@ function QuestionEditor({
           className="brut-input w-full mt-1"
           value={imageUrl}
           onChange={(e) => setImageUrl(e.target.value)}
-          placeholder="https://... (upload lewat kartu 'Upload Gambar Soal')"
+          placeholder="https://... (upload lewat kartu 'Upload Gambar Satuan')"
         />
       </label>
       {imageUrl.trim() ? (
