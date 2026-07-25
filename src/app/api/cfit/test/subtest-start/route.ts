@@ -33,6 +33,53 @@ function normalizeOptions(raw: unknown): NormOption[] {
   return out;
 }
 
+// ── ACAK URUTAN PILIHAN JAWABAN (bukan urutan soal!) ──
+// Urutan SOAL mengikuti questionNo booklet standar dan TIDAK PERNAH diubah.
+// Urutan OPSI diacak deterministik memakai randomSeed milik submission:
+// - konsisten: refresh / lanjut sesi → urutan opsi sama persis;
+// - beda antar peserta → menyulitkan kerja sama ("jawabannya yang C");
+// - penilaian tidak terpengaruh: kunci menempel pada `key` opsi, bukan posisi.
+function hashSeed(str: string): number {
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i++) {
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  h = Math.imul(h ^ (h >>> 16), 2246822507);
+  h = Math.imul(h ^ (h >>> 13), 3266489909);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+function mulberry32(a: number): () => number {
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function seededShuffle<T>(arr: T[], seed: string): T[] {
+  const rand = mulberry32(hashSeed(seed));
+  const out = [...arr];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+// Opsi hanya boleh diacak kalau tiap opsi membawa kontennya sendiri (gambar
+// atau label). Opsi format lama (huruf polos yang merujuk posisi pilihan di
+// GAMBAR SOAL) tidak boleh diacak — hurufnya sekadar penunjuk posisi standar.
+function shuffleOptionsIfSafe(opts: NormOption[], seed: string, isExample: boolean): NormOption[] {
+  if (isExample) return opts; // contoh soal: urutan asli, sering dirujuk instruksi
+  if (opts.length < 2) return opts;
+  const allSelfContained = opts.every((o) => o.imageUrl || o.label);
+  if (!allSelfContained) return opts;
+  return seededShuffle(opts, seed);
+}
+
 // Mulai (atau resume) satu subtes: nyalakan timer server-side lalu kirim
 // soal TANPA kunci jawaban. Kalau subtes sudah terkunci → 423.
 export async function POST(req: NextRequest) {
@@ -96,6 +143,7 @@ export async function POST(req: NextRequest) {
 
   const rows = await prisma.cfitQuestion.findMany({
     where: { subtestId: subtest.id },
+    // Urutan SOAL standar booklet (questionNo) — JANGAN diacak.
     orderBy: [{ isExample: "desc" }, { questionNo: "asc" }],
     select: {
       id: true,
@@ -112,7 +160,11 @@ export async function POST(req: NextRequest) {
   // jumlah jawaban yang diminta (expectedAnswers) untuk soal multi-jawaban.
   const questions = rows.map(({ correct, options, ...q }) => ({
     ...q,
-    options: normalizeOptions(options),
+    options: shuffleOptionsIfSafe(
+      normalizeOptions(options),
+      `${submission.randomSeed}:${q.id}`,
+      q.isExample,
+    ),
     expectedAnswers: Array.isArray(correct) ? (correct as unknown[]).length : 1,
   }));
 
