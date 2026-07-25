@@ -67,6 +67,9 @@ export default function CfitDashboardPage() {
   }, [load]);
 
   const allLocked = subtests.length > 0 && subtests.every((s) => s.locked);
+  // Urutan dipaksa: hanya subtes pertama yang belum terkunci yang boleh
+  // dikerjakan (server juga memvalidasi hal yang sama).
+  const activeIdx = subtests.findIndex((s) => !s.locked);
 
   const finishAll = async () => {
     if (
@@ -113,8 +116,9 @@ export default function CfitDashboardPage() {
       <main className="flex-1 max-w-4xl mx-auto px-6 py-10 w-full space-y-5">
         <div className="brut-card" style={{ background: "#fef9c3" }}>
           <p className="font-bold">
-            Kerjakan subtes secara berurutan. Begitu subtes dimulai, timer berjalan dan tidak bisa dihentikan.
-            Subtes yang waktunya habis akan terkunci otomatis.
+            Kerjakan subtes secara BERURUTAN — subtes berikutnya baru terbuka setelah subtes sebelumnya
+            dikunci. Begitu subtes dimulai, timer berjalan dan tidak bisa dihentikan. Subtes yang waktunya
+            habis akan terkunci otomatis.
           </p>
         </div>
 
@@ -141,12 +145,16 @@ export default function CfitDashboardPage() {
                 <button className="brut-btn brut-btn-white" disabled>
                   TERKUNCI
                 </button>
-              ) : (
+              ) : i === activeIdx ? (
                 <button
                   className={`brut-btn ${s.started ? "brut-btn-pink" : "brut-btn-lime"}`}
                   onClick={() => router.push(`/cfit/test/${encodeURIComponent(s.code)}`)}
                 >
                   {s.started ? "LANJUTKAN" : "MULAI"}
+                </button>
+              ) : (
+                <button className="brut-btn brut-btn-white" disabled title="Selesaikan subtes sebelumnya dulu">
+                  MENUNGGU GILIRAN
                 </button>
               )}
             </div>

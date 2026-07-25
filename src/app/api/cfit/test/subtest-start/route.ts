@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { formsFor, getCfitFromRequest } from "@/lib/cfit/auth";
-import { ensureCfitSubtestStarted } from "@/lib/cfit/lock";
+import { computeCfitSubtestLock, ensureCfitSubtestStarted } from "@/lib/cfit/lock";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,6 +56,30 @@ export async function POST(req: NextRequest) {
   });
   if (!subtest || !formsFor(submission.form as never).includes(subtest.form as never)) {
     return NextResponse.json({ error: "Subtes tidak ditemukan untuk bentuk tes ini." }, { status: 404 });
+  }
+
+  // WAJIB BERURUTAN (sesuai prosedur CFIT): subtes hanya boleh dimulai kalau
+  // semua subtes dengan urutan lebih kecil sudah TERKUNCI (selesai manual /
+  // waktu habis). Mencegah timer beberapa subtes berjalan bersamaan.
+  const earlier = await prisma.cfitSubtest.findMany({
+    where: {
+      form: { in: formsFor(submission.form as never) },
+      orderIndex: { lt: subtest.orderIndex },
+    },
+    orderBy: { orderIndex: "asc" },
+  });
+  for (const s of earlier) {
+    const l = await computeCfitSubtestLock({
+      submissionId: submission.id,
+      subtestId: s.id,
+      durationSec: s.durationSec,
+    });
+    if (!l.locked) {
+      return NextResponse.json(
+        { error: `Kerjakan subtes secara berurutan. Selesaikan "${s.name}" terlebih dahulu.` },
+        { status: 409 },
+      );
+    }
   }
 
   const lock = await ensureCfitSubtestStarted({
