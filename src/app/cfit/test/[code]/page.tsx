@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import toast from "react-hot-toast";
+import { useAntiCheat } from "@/components/student/useAntiCheat";
 
 type Option = { key: string; label: string; imageUrl: string | null };
 
@@ -30,6 +31,19 @@ function fmt(sec: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+function violationLabel(t: string | null): string {
+  switch (t) {
+    case "tab_hidden":
+      return "pindah tab / ganti aplikasi";
+    case "fullscreen_exit":
+      return "keluar dari mode fullscreen";
+    case "screenshot":
+      return "mencoba mengambil screenshot";
+    default:
+      return "aktivitas mencurigakan";
+  }
+}
+
 export default function CfitSubtestRunnerPage() {
   const params = useParams<{ code: string }>();
   const router = useRouter();
@@ -42,6 +56,8 @@ export default function CfitSubtestRunnerPage() {
   const [remaining, setRemaining] = useState<number | null>(null);
   const deadlineRef = useRef<number | null>(null);
   const finishedRef = useRef(false);
+  // Banner peringatan yang bisa ditutup — muncul lagi setiap ada pelanggaran baru.
+  const [ackedAt, setAckedAt] = useState(0);
 
   const finishSubtest = useCallback(
     async (auto: boolean) => {
@@ -119,6 +135,14 @@ export default function CfitSubtestRunnerPage() {
     return () => clearInterval(t);
   }, [loaded, finishSubtest]);
 
+  // Anti-curang — aturan SAMA dengan tes minat-bakat: pindah tab, keluar
+  // fullscreen, dan screenshot dihitung pelanggaran; auto-flag setelah 5x.
+  const { state: anti, requestFullscreen, fullscreenActive } = useAntiCheat({
+    active: loaded && !!subtest,
+    subtestCode,
+    endpoint: "/api/cfit/test/violation",
+  });
+
   const saveAnswer = useCallback(
     async (q: Question, sel: string[]) => {
       const selected = q.expectedAnswers > 1 ? sel : sel[0];
@@ -163,6 +187,7 @@ export default function CfitSubtestRunnerPage() {
   const q = questions[idx];
   const timeLow = (remaining ?? 0) <= 30;
   const hasOptionImages = q ? q.options.some((o) => o.imageUrl) : false;
+  const showViolationBanner = anti.count > 0 && anti.lastAt > ackedAt;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -174,16 +199,56 @@ export default function CfitSubtestRunnerPage() {
               Soal {idx + 1} / {questions.length}
             </p>
           </div>
-          <div
-            className={`brut-sm px-3 py-1 font-mono text-xl md:text-2xl font-black ${timeLow ? "brut-blink" : ""}`}
-            style={{ background: timeLow ? "#ff4d8d" : "#fff" }}
-          >
-            {fmt(remaining ?? 0)}
+          <div className="flex items-center gap-2">
+            {anti.count > 0 ? (
+              <span
+                className="brut-tag"
+                style={{ background: anti.flagged ? "#ff4d8d" : "#fef08a" }}
+                title="Jumlah pelanggaran terdeteksi"
+              >
+                ⚠️ {anti.count}/{anti.threshold}
+              </span>
+            ) : null}
+            <div
+              className={`brut-sm px-3 py-1 font-mono text-xl md:text-2xl font-black ${timeLow ? "brut-blink" : ""}`}
+              style={{ background: timeLow ? "#ff4d8d" : "#fff" }}
+            >
+              {fmt(remaining ?? 0)}
+            </div>
           </div>
         </div>
       </header>
 
       <main className="flex-1 max-w-4xl mx-auto px-4 md:px-6 py-6 w-full space-y-4">
+        {showViolationBanner ? (
+          <div className="brut-card space-y-2" style={{ background: "#ff4d8d" }}>
+            <p className="font-black uppercase">⚠️ Pelanggaran terdeteksi: {violationLabel(anti.lastType)}</p>
+            <p className="text-sm font-semibold">
+              Total {anti.count} dari batas {anti.threshold} pelanggaran.{" "}
+              {anti.flagged
+                ? "Kamu sudah DITANDAI oleh sistem dan hasilmu akan diperiksa admin."
+                : `Jika mencapai ${anti.threshold} pelanggaran, kamu otomatis ditandai menyontek.`}
+            </p>
+            <button type="button" className="brut-btn brut-btn-white" onClick={() => setAckedAt(Date.now())}>
+              OK, SAYA MENGERTI
+            </button>
+          </div>
+        ) : null}
+
+        {!fullscreenActive ? (
+          <div
+            className="brut-card flex flex-col md:flex-row md:items-center justify-between gap-3"
+            style={{ background: "#fef9c3" }}
+          >
+            <p className="text-xs font-bold uppercase">
+              Kerjakan dalam mode fullscreen. Pindah tab, keluar fullscreen, atau screenshot dihitung pelanggaran.
+            </p>
+            <button type="button" className="brut-btn brut-btn-black shrink-0" onClick={requestFullscreen}>
+              AKTIFKAN FULLSCREEN
+            </button>
+          </div>
+        ) : null}
+
         {subtest.instructions && idx === 0 ? (
           <div className="brut-card text-sm font-semibold whitespace-pre-wrap" style={{ background: "#fef9c3" }}>
             {subtest.instructions}

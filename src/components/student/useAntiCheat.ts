@@ -30,6 +30,10 @@ const SAME_ACTION_GROUPS: ViolationType[][] = [
 // menghitungnya sebagai pindah tab.
 const TAB_HIDDEN_MIN_MS = 600;
 
+// Endpoint default (tes minat-bakat). Tes lain (mis. CFIT) bisa memakai hook
+// yang sama dengan mengirim opsi `endpoint` sendiri.
+const DEFAULT_ENDPOINT = "/api/student/test/violation";
+
 function inSameActionGroup(a: ViolationType, b: ViolationType): boolean {
   if (a === b) return true;
   return SAME_ACTION_GROUPS.some((g) => g.includes(a) && g.includes(b));
@@ -47,15 +51,17 @@ type WakeLockNavigator = Navigator & {
  * - Keluar fullscreen (fullscreen_exit)
  * - Screenshot (keyboard shortcut)
  *
- * Setiap event di-POST ke /api/student/test/violation supaya admin bisa
- * review dan siswa auto-flagged setelah `threshold` event.
+ * Setiap event di-POST ke `endpoint` (default /api/student/test/violation)
+ * supaya admin bisa review dan peserta auto-flagged setelah `threshold` event.
  */
 export function useAntiCheat(opts: {
   active: boolean;
   subtestCode: string;
+  endpoint?: string;
   onUpdate?: (s: AntiCheatState) => void;
 }) {
-  const { active, subtestCode, onUpdate } = opts;
+  const { active, subtestCode, endpoint, onUpdate } = opts;
+  const violationEndpoint = endpoint ?? DEFAULT_ENDPOINT;
   const [state, setState] = useState<AntiCheatState>({
     count: 0,
     flagged: false,
@@ -109,7 +115,7 @@ export function useAntiCheat(opts: {
       }
       lastFireRef.current = { type, at: now };
       try {
-        const res = await fetch("/api/student/test/violation", {
+        const res = await fetch(violationEndpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -212,7 +218,7 @@ export function useAntiCheat(opts: {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, subtestCode]);
+  }, [active, subtestCode, violationEndpoint]);
 
   return { state, requestFullscreen, fullscreenActive };
 }
