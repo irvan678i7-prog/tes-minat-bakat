@@ -18,8 +18,8 @@ const Body = z.object({
   email: z.string().email().max(160).optional(),
 });
 
-// Usia dihitung SERVER-SIDE dari tanggal lahir terhadap tanggal tes
-// (tanggal token di-redeem). Nilai `age` kiriman klien hanya fallback.
+// Usia dihitung SERVER-SIDE dari tanggal lahir terhadap tanggal tes.
+// Nilai `age` kiriman klien hanya fallback.
 function computeAgeAt(birth: Date, ref: Date): number | null {
   if (Number.isNaN(birth.getTime()) || Number.isNaN(ref.getTime())) return null;
   let age = ref.getFullYear() - birth.getFullYear();
@@ -32,10 +32,7 @@ function computeAgeAt(birth: Date, ref: Date): number | null {
 export async function GET(req: NextRequest) {
   const p = getCfitFromRequest(req);
   if (!p) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const s = await prisma.cfitSubmission.findUnique({
-    where: { id: p.sub },
-    include: { token: { select: { redeemedAt: true } } },
-  });
+  const s = await prisma.cfitSubmission.findUnique({ where: { id: p.sub } });
   if (!s) return NextResponse.json({ error: "Submission tidak ditemukan" }, { status: 404 });
   return NextResponse.json({
     fullName: s.fullName,
@@ -49,8 +46,10 @@ export async function GET(req: NextRequest) {
     email: s.email,
     form: s.form,
     finishedAt: s.finishedAt,
-    // Tanggal tes = saat token di-redeem (fallback: saat submission dibuat).
-    testDate: s.token?.redeemedAt ?? s.startedAt,
+    // Tanggal tes = saat PESERTA INI redeem token (submission dibuat saat
+    // redeem). Jangan pakai token.redeemedAt: itu waktu redeem PERTAMA se-
+    // token (token kelas dipakai banyak peserta, bisa beda hari).
+    testDate: s.startedAt,
   });
 }
 
@@ -62,13 +61,15 @@ export async function POST(req: NextRequest) {
 
   const d = parsed.data;
 
-  const sub = await prisma.cfitSubmission.findUnique({
-    where: { id: p.sub },
-    include: { token: { select: { redeemedAt: true } } },
-  });
+  const sub = await prisma.cfitSubmission.findUnique({ where: { id: p.sub } });
   if (!sub) return NextResponse.json({ error: "Submission tidak ditemukan" }, { status: 404 });
+  // Biodata dikunci setelah tes selesai — mencegah identitas diganti-ganti
+  // setelah hasil terbit.
+  if (sub.finishedAt) {
+    return NextResponse.json({ error: "Tes sudah diselesaikan — biodata tidak bisa diubah lagi." }, { status: 409 });
+  }
 
-  const testDate = sub.token?.redeemedAt ?? sub.startedAt;
+  const testDate = sub.startedAt;
 
   // Usia otomatis dari tanggal lahir (dihitung terhadap tanggal tes).
   let age = d.age;
