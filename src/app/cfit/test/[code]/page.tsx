@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import { useAntiCheat } from "@/components/student/useAntiCheat";
+import CfitConfirm from "@/components/cfit/CfitConfirm";
 
 type Option = { key: string; label: string; imageUrl: string | null };
 
@@ -54,6 +55,7 @@ export default function CfitSubtestRunnerPage() {
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [idx, setIdx] = useState(0);
   const [remaining, setRemaining] = useState<number | null>(null);
+  const [confirmFinish, setConfirmFinish] = useState(false);
   const deadlineRef = useRef<number | null>(null);
   const finishedRef = useRef(false);
   // Banner peringatan yang bisa ditutup — muncul lagi setiap ada pelanggaran baru.
@@ -119,6 +121,24 @@ export default function CfitSubtestRunnerPage() {
     };
   }, [subtestCode, router]);
 
+  // PRELOAD semua gambar soal & opsi begitu data diterima. Tanpa ini, gambar
+  // baru diunduh saat soalnya dibuka sehingga tiap pindah soal terasa lambat
+  // (padahal timer terus berjalan). Browser meng-cache hasil preload, jadi
+  // saat soal dibuka gambarnya langsung tampil.
+  useEffect(() => {
+    if (questions.length === 0) return;
+    const urls: string[] = [];
+    for (const item of questions) {
+      if (item.imageUrl) urls.push(item.imageUrl);
+      for (const o of item.options) if (o.imageUrl) urls.push(o.imageUrl);
+    }
+    for (const u of urls) {
+      const im = new window.Image();
+      im.decoding = "async";
+      im.src = u;
+    }
+  }, [questions]);
+
   // Countdown — deadline dihitung dari remainingSec milik SERVER.
   const loaded = remaining !== null;
   useEffect(() => {
@@ -172,7 +192,9 @@ export default function CfitSubtestRunnerPage() {
     } else {
       next = [optKey];
     }
-    setAnswers({ ...answers, [q.id]: next });
+    // Functional update — mencegah jawaban soal lain hilang saat siswa
+    // mengklik sangat cepat berpindah-pindah soal (stale state race).
+    setAnswers((prev) => ({ ...prev, [q.id]: next }));
     if (next.length > 0) void saveAnswer(q, next);
   };
 
@@ -272,6 +294,8 @@ export default function CfitSubtestRunnerPage() {
                 src={q.imageUrl}
                 alt={`Soal ${q.questionNo}`}
                 className="w-full max-h-[420px] object-contain border-4 border-black bg-white"
+                loading="eager"
+                decoding="async"
                 draggable={false}
               />
             ) : null}
@@ -294,6 +318,8 @@ export default function CfitSubtestRunnerPage() {
                         src={opt.imageUrl}
                         alt={`Pilihan ${opt.key}`}
                         className="w-full max-h-28 object-contain bg-white"
+                        loading="eager"
+                        decoding="async"
                         draggable={false}
                       />
                     ) : null}
@@ -319,14 +345,7 @@ export default function CfitSubtestRunnerPage() {
               BERIKUTNYA →
             </button>
           ) : (
-            <button
-              className="brut-btn brut-btn-black"
-              onClick={() => {
-                if (window.confirm("Selesaikan subtes ini? Subtes akan DIKUNCI dan tidak bisa dibuka lagi.")) {
-                  void finishSubtest(false);
-                }
-              }}
-            >
+            <button className="brut-btn brut-btn-black" onClick={() => setConfirmFinish(true)}>
               SELESAI SUBTES
             </button>
           )}
@@ -355,6 +374,20 @@ export default function CfitSubtestRunnerPage() {
           </div>
         </div>
       </main>
+
+      <CfitConfirm
+        open={confirmFinish}
+        title="Selesaikan subtes ini?"
+        danger
+        confirmLabel="YA, KUNCI SUBTES"
+        onConfirm={() => {
+          setConfirmFinish(false);
+          void finishSubtest(false);
+        }}
+        onCancel={() => setConfirmFinish(false)}
+      >
+        Subtes akan DIKUNCI dan tidak bisa dibuka lagi. Pastikan semua jawaban sudah terisi.
+      </CfitConfirm>
     </div>
   );
 }
