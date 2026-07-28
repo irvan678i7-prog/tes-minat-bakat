@@ -167,7 +167,7 @@ export default async function VerifikasiPage({
 						Verifikasi Keaslian Laporan
 					</h1>
 					<p className="text-sm font-semibold opacity-80 mt-1">
-						Tes Minat \u2022 Tes Bakat \u2022 Tes IQ (CFIT Skala 3)
+						Tes Minat • Tes Bakat • Tes IQ (CFIT Skala 3)
 					</p>
 				</div>
 			</header>
