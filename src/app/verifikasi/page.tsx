@@ -2,9 +2,10 @@
 // Bisa diakses dengan memindai QR di laporan PDF (/verifikasi?kode=...) atau
 // dengan mengetik kode laporan secara manual.
 //
-// Sengaja TIDAK menampilkan skor apa pun — hanya memastikan laporan dengan kode
-// tersebut benar diterbitkan oleh Program Studi Magister Bimbingan dan
-// Konseling, Program Pascasarjana Universitas Muhammadiyah Metro.
+// Sengaja MINIM data: hanya jenis laporan dan nama peserta yang disamarkan.
+// Tujuannya semata memastikan laporan dengan kode tersebut benar diterbitkan
+// oleh Program Studi Magister Bimbingan dan Konseling, Program Pascasarjana
+// Universitas Muhammadiyah Metro.
 
 import { prisma } from "../../lib/db";
 import {
@@ -31,24 +32,7 @@ type Hasil = {
 	kode: string;
 	jenis?: ReportKind;
 	nama?: string;
-	sekolah?: string;
-	kelas?: string;
-	selesai?: Date | null;
 };
-
-function fmtTanggal(d?: Date | null): string {
-	if (!d) return "\u2014";
-	return (
-		new Date(d).toLocaleString("id-ID", {
-			day: "2-digit",
-			month: "long",
-			year: "numeric",
-			hour: "2-digit",
-			minute: "2-digit",
-			timeZone: "Asia/Jakarta",
-		}) + " WIB"
-	);
-}
 
 // Nama disamarkan sebagian demi privasi peserta: "Ahmad Fauzi" -> "Ahmad F****".
 function samarkanNama(nama: string | null | undefined): string {
@@ -74,8 +58,6 @@ async function verifikasi(input: string): Promise<Hasil> {
 			select: {
 				id: true,
 				fullName: true,
-				school: true,
-				grade: true,
 				finishedAt: true,
 				result: { select: { id: true } },
 			},
@@ -90,9 +72,6 @@ async function verifikasi(input: string): Promise<Hasil> {
 			kode: parsed.code,
 			jenis: "IQ",
 			nama: samarkanNama(sub.fullName),
-			sekolah: sub.school || "\u2014",
-			kelas: sub.grade || "\u2014",
-			selesai: sub.finishedAt,
 		};
 	}
 
@@ -101,8 +80,6 @@ async function verifikasi(input: string): Promise<Hasil> {
 		select: {
 			id: true,
 			fullName: true,
-			school: true,
-			grade: true,
 			finishedAt: true,
 			result: { select: { id: true } },
 		},
@@ -116,34 +93,38 @@ async function verifikasi(input: string): Promise<Hasil> {
 		kode: parsed.code,
 		jenis: parsed.kind,
 		nama: samarkanNama(sub.fullName),
-		sekolah: sub.school || "\u2014",
-		kelas: sub.grade || "\u2014",
-		selesai: sub.finishedAt,
 	};
 }
 
-const STATUS_STYLE: Record<Status, { bg: string; judul: string; pesan: string }> = {
+const STATUS_STYLE: Record<
+	Status,
+	{ bg: string; tanda: string; judul: string; pesan: string }
+> = {
 	VALID: {
 		bg: "#16A34A",
-		judul: "LAPORAN ASLI \u2014 TERVERIFIKASI",
+		tanda: "\u2713",
+		judul: "Laporan Asli \u2014 Terverifikasi",
 		pesan:
 			"Kode laporan ini terdaftar dan hasil tesnya sudah final. Laporan diterbitkan secara resmi oleh penyelenggara di bawah ini.",
 	},
 	BELUM_SELESAI: {
 		bg: "#F97316",
-		judul: "KODE TERDAFTAR \u2014 HASIL BELUM FINAL",
+		tanda: "!",
+		judul: "Kode Terdaftar \u2014 Hasil Belum Final",
 		pesan:
 			"Kode laporan ini terdaftar, tetapi pelaksanaan tesnya belum diselesaikan sehingga laporan final belum diterbitkan.",
 	},
 	TIDAK_DITEMUKAN: {
 		bg: "#DC2626",
-		judul: "KODE TIDAK DITEMUKAN",
+		tanda: "\u2715",
+		judul: "Kode Tidak Ditemukan",
 		pesan:
 			"Tidak ada laporan dengan kode ini pada basis data penyelenggara. Pastikan kode diketik dengan benar.",
 	},
 	KODE_TIDAK_SAH: {
 		bg: "#DC2626",
-		judul: "KODE TIDAK SAH",
+		tanda: "\u2715",
+		judul: "Kode Tidak Sah",
 		pesan:
 			"Format kode tidak dikenali atau tanda tangan digitalnya tidak cocok. Laporan dengan kode ini TIDAK diterbitkan oleh penyelenggara.",
 	},
@@ -160,36 +141,47 @@ export default async function VerifikasiPage({
 	const style = hasil ? STATUS_STYLE[hasil.status] : null;
 
 	return (
-		<main className="min-h-screen bg-white text-black">
+		<main className="min-h-screen bg-neutral-100 text-black">
 			<header className="border-b-4 border-black bg-black text-white">
-				<div className="max-w-3xl mx-auto px-6 py-5">
-					<h1 className="text-2xl md:text-3xl font-black uppercase tracking-tight">
+				<div className="max-w-2xl mx-auto px-6 py-7">
+					<p className="text-[11px] font-black uppercase tracking-[0.2em] text-yellow-300">
+						Layanan Verifikasi Resmi
+					</p>
+					<h1 className="text-2xl md:text-3xl font-black uppercase tracking-tight mt-2">
 						Verifikasi Keaslian Laporan
 					</h1>
-					<p className="text-sm font-semibold opacity-80 mt-1">
+					<p className="text-sm font-semibold opacity-70 mt-2 leading-snug">
 						Tes Minat • Tes Bakat • Tes IQ (CFIT Skala 3)
 					</p>
 				</div>
 			</header>
 
-			<div className="max-w-3xl mx-auto px-6 py-8 space-y-6">
-				<section className="border-4 border-black p-5">
-					<p className="text-sm font-semibold mb-3">
+			<div className="max-w-2xl mx-auto px-6 py-10 space-y-6">
+				<section className="border-4 border-black bg-white p-6 shadow-[6px_6px_0_0_#000]">
+					<h2 className="text-xs font-black uppercase tracking-[0.16em] mb-2">
+						Masukkan Kode Laporan
+					</h2>
+					<p className="text-sm font-medium leading-relaxed opacity-70 mb-4">
 						Pindai QR code pada laporan, atau ketik kode laporan yang tertera di
-						sudut kanan atas laporan.
+						sudut kanan atas dokumen.
 					</p>
-					<form method="get" action="/verifikasi" className="flex flex-wrap gap-3">
+					<form
+						method="get"
+						action="/verifikasi"
+						className="flex flex-col sm:flex-row gap-3"
+					>
 						<input
 							type="text"
 							name="kode"
 							defaultValue={raw}
 							placeholder="UMM-BKT-XXXXXXXX-XXXX"
 							autoComplete="off"
-							className="flex-1 min-w-[240px] border-4 border-black px-4 py-3 font-mono font-bold uppercase tracking-wider"
+							spellCheck={false}
+							className="flex-1 min-w-0 border-4 border-black px-4 py-3 font-mono text-sm font-bold uppercase tracking-[0.12em] placeholder:tracking-normal placeholder:opacity-40 focus:outline-none focus:bg-yellow-50"
 						/>
 						<button
 							type="submit"
-							className="border-4 border-black bg-yellow-300 px-6 py-3 font-black uppercase tracking-wide"
+							className="border-4 border-black bg-yellow-300 px-7 py-3 font-black uppercase tracking-wide hover:bg-yellow-400 transition-colors"
 						>
 							Periksa
 						</button>
@@ -197,53 +189,48 @@ export default async function VerifikasiPage({
 				</section>
 
 				{hasil && style ? (
-					<section className="border-4 border-black">
+					<section className="border-4 border-black bg-white shadow-[6px_6px_0_0_#000]">
 						<div
-							className="px-5 py-4 text-white"
+							className="flex items-start gap-4 px-6 py-5 text-white"
 							style={{ background: style.bg }}
 						>
-							<p className="text-lg font-black uppercase tracking-tight">
-								{style.judul}
-							</p>
-							<p className="font-mono font-bold text-sm mt-1">{hasil.kode}</p>
+							<span
+								aria-hidden="true"
+								className="shrink-0 w-10 h-10 border-2 border-white/70 flex items-center justify-center text-xl font-black"
+							>
+								{style.tanda}
+							</span>
+							<div className="min-w-0">
+								<p className="text-lg font-black uppercase tracking-tight leading-tight">
+									{style.judul}
+								</p>
+								<p className="font-mono text-sm font-bold tracking-[0.12em] mt-1 break-all opacity-90">
+									{hasil.kode}
+								</p>
+							</div>
 						</div>
-						<div className="px-5 py-4 space-y-4">
-							<p className="text-sm font-semibold">{style.pesan}</p>
+
+						<div className="px-6 py-5 space-y-5">
+							<p className="text-sm font-medium leading-relaxed">{style.pesan}</p>
 
 							{hasil.jenis ? (
-								<table className="w-full text-sm">
-									<tbody>
-										<tr className="border-b-2 border-black/10">
-											<td className="py-2 pr-4 font-bold opacity-60 w-40">
-												Jenis Laporan
-											</td>
-											<td className="py-2 font-bold">
-												{REPORT_KIND_LABEL[hasil.jenis]}
-											</td>
-										</tr>
-										<tr className="border-b-2 border-black/10">
-											<td className="py-2 pr-4 font-bold opacity-60">Nama Peserta</td>
-											<td className="py-2 font-bold">{hasil.nama}</td>
-										</tr>
-										<tr className="border-b-2 border-black/10">
-											<td className="py-2 pr-4 font-bold opacity-60">Sekolah</td>
-											<td className="py-2 font-bold">{hasil.sekolah}</td>
-										</tr>
-										<tr className="border-b-2 border-black/10">
-											<td className="py-2 pr-4 font-bold opacity-60">Kelas</td>
-											<td className="py-2 font-bold">{hasil.kelas}</td>
-										</tr>
-										<tr>
-											<td className="py-2 pr-4 font-bold opacity-60">
-												Waktu Selesai
-											</td>
-											<td className="py-2 font-bold">{fmtTanggal(hasil.selesai)}</td>
-										</tr>
-									</tbody>
-								</table>
+								<dl className="border-t-2 border-black/10">
+									<div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-4 py-3 border-b-2 border-black/10">
+										<dt className="sm:w-40 shrink-0 text-[11px] font-black uppercase tracking-[0.14em] opacity-50">
+											Jenis Laporan
+										</dt>
+										<dd className="font-bold">{REPORT_KIND_LABEL[hasil.jenis]}</dd>
+									</div>
+									<div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-4 py-3 border-b-2 border-black/10">
+										<dt className="sm:w-40 shrink-0 text-[11px] font-black uppercase tracking-[0.14em] opacity-50">
+											Nama Peserta
+										</dt>
+										<dd className="font-bold">{hasil.nama}</dd>
+									</div>
+								</dl>
 							) : null}
 
-							<p className="text-xs font-semibold opacity-60">
+							<p className="text-xs font-medium leading-relaxed opacity-55">
 								Nama peserta sengaja disamarkan sebagian demi menjaga kerahasiaan
 								data. Halaman ini tidak menampilkan skor hasil tes.
 							</p>
@@ -251,12 +238,12 @@ export default async function VerifikasiPage({
 					</section>
 				) : null}
 
-				<section className="border-4 border-black bg-yellow-300 p-5">
-					<p className="text-xs font-black uppercase tracking-wide mb-1">
+				<section className="border-4 border-black bg-yellow-300 p-6 shadow-[6px_6px_0_0_#000]">
+					<p className="text-[11px] font-black uppercase tracking-[0.16em] mb-2">
 						Penyelenggara Tes
 					</p>
 					<p className="font-black leading-snug">{LEMBAGA_PRODI}</p>
-					<p className="font-bold leading-snug">{LEMBAGA_UNIT}</p>
+					<p className="font-bold leading-snug mt-0.5">{LEMBAGA_UNIT}</p>
 				</section>
 			</div>
 		</main>
