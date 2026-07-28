@@ -52,7 +52,18 @@ export type ScoringPayload = {
   iqEstimate?: number;
   iqInterpretation?: { band: string; description: string };
   recommendations: { majors: string[]; careers: string[] };
-  penjurusan?: PenjurusanResult & { minatSource: "cross-link" | null };
+  penjurusan?: PenjurusanResult & {
+    minatSource: "cross-link" | null;
+    /** Dasar pencocokan submission MINAT milik peserta yang sama. */
+    minatMatchedBy?: "NISN" | "NAMA" | null;
+    /** true = hasil cross-link perlu diverifikasi manual oleh guru BK. */
+    minatNeedsVerification?: boolean;
+  };
+  /**
+   * Peringatan integritas data (kunci kosong, jumlah kunci != parts,
+   * cross-link ambigu, dst). Ditampilkan ke admin / guru BK, bukan ke siswa.
+   */
+  warnings?: string[];
 };
 
 type AnswerRow = {
@@ -64,6 +75,7 @@ type AnswerRow = {
     correct: unknown;
     scoringTag: string | null;
     inputMode?: string;
+    questionNo?: number;
   };
 };
 
@@ -113,6 +125,19 @@ function normalizeText(v: unknown): string {
     .toUpperCase();
 }
 
+/**
+ * Normalisasi identitas untuk pencocokan antar submission: buang tanda baca,
+ * rapatkan spasi ganda, uppercase. "Budi  Santoso." == "budi santoso".
+ */
+function normalizeIdent(v: unknown): string {
+  return String(v ?? "")
+    .normalize("NFKD")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+}
+
 type SubWithAnswers = {
   testKind: "BAKAT" | "MINAT";
   answers: AnswerRow[];
@@ -124,40 +149,99 @@ type SubWithAnswers = {
   grade?: string | null;
 };
 
+type GradeRow = { isCorrect: boolean; partialScore: number };
+
 /**
  * Compute per-answer correctness in memory (no DB writes). Returns
- * { isCorrect, partialScore } for each input answer in the same order.
+ * { isCorrect, partialScore } for each input answer in the same order,
+ * plus daftar warning integritas data.
+ *
+ * PENTING: `testKind` menentukan perlakuan kunci kosong.
+ * - MINAT: kunci memang kosong by design — setiap jawaban terisi dihitung.
+ * - BAKAT: kunci kosong = kesalahan input admin. Dulu cabang yang sama
+ *   membuat SEMUA peserta dapat poin penuh tanpa peringatan apa pun.
+ *   Sekarang soal itu diberi 0 poin dan dicatat sebagai warning.
  */
-function gradeAnswerRows(answers: AnswerRow[]): { isCorrect: boolean; partialScore: number }[] {
-  return answers.map((ans) => {
+function gradeAnswerRows(
+  answers: AnswerRow[],
+  testKind: "BAKAT" | "MINAT",
+): { grades: GradeRow[]; warnings: string[] } {
+  const warnings: string[] = [];
+  const seenWarning = new Set<string>();
+  const warn = (msg: string) => {
+    if (seenWarning.has(msg)) return;
+    seenWarning.add(msg);
+    warnings.push(msg);
+  };
+
+  const grades = answers.map((ans, idx) => {
     const correct = ans.question.correct as unknown;
     const selected = ans.selected as unknown;
-    const parts = ans.question.parts || 1;
+    const parts = Math.max(1, ans.question.parts || 1);
+    const code = ans.question.subtest.code;
+    const no = ans.question.questionNo ?? idx + 1;
+    const tag = `${code} soal ${no}`;
     let isCorrect = false;
     let partialScore = 0;
+
     // TEXT and CHOICE both compare normalized strings (uppercase, trimmed,
-    // collapsed whitespace). Empty correct => MINAT-style "every answered counts".
+    // collapsed whitespace).
     if (parts > 1 && Array.isArray(correct) && Array.isArray(selected)) {
+      // Invariant: panjang kunci harus sama dengan `parts`, karena skor
+      // maksimum subtes dihitung dari `parts` (loadSubtestMeta.totalParts).
+      // Kalau beda, raw tidak akan pernah mencapai max → persentase subtes
+      // bias turun permanen.
+      if (correct.length !== parts) {
+        warn(
+          `${tag}: jumlah kunci (${correct.length}) tidak sama dengan parts (${parts}). ` +
+            "Penilaian memakai jumlah parts; perbaiki bank soal di panel admin.",
+        );
+      }
       let okCount = 0;
-      for (let i = 0; i < correct.length; i++) {
+      let kunciKosong = 0;
+      for (let i = 0; i < parts; i++) {
         const c = normalizeText(correct[i]);
         const s = normalizeText(selected[i]);
-        if (c && c === s) okCount += 1;
+        if (!c) {
+          kunciKosong += 1;
+          continue;
+        }
+        if (c === s) okCount += 1;
+      }
+      if (kunciKosong > 0 && testKind === "BAKAT") {
+        warn(
+          `${tag}: ${kunciKosong} bagian tidak punya kunci jawaban — bagian tersebut dinilai 0. ` +
+            "Lengkapi kunci di panel admin.",
+        );
       }
       partialScore = okCount;
-      isCorrect = okCount === correct.length;
+      isCorrect = okCount === parts;
     } else if (typeof correct === "string" || typeof correct === "number") {
       const c = normalizeText(correct);
       const s = normalizeText(Array.isArray(selected) ? selected[0] : selected);
+      if (!c && testKind === "BAKAT") {
+        warn(`${tag}: kunci jawaban kosong — dinilai 0. Lengkapi kunci di panel admin.`);
+      }
       isCorrect = c.length > 0 && c === s;
       partialScore = isCorrect ? 1 : 0;
     } else if (correct == null || (Array.isArray(correct) && correct.length === 0)) {
-      const s = String(Array.isArray(selected) ? selected[0] : selected ?? "").trim();
-      isCorrect = s.length > 0;
-      partialScore = isCorrect ? 1 : 0;
+      if (testKind === "BAKAT") {
+        // BUKAN otomatis benar. Kunci kosong pada tes berkunci = kesalahan
+        // input, bukan desain seperti pada MINAT.
+        warn(`${tag}: kunci jawaban kosong — dinilai 0. Lengkapi kunci di panel admin.`);
+        isCorrect = false;
+        partialScore = 0;
+      } else {
+        // MINAT: setiap jawaban terisi dihitung sebagai keterisian.
+        const s = String(Array.isArray(selected) ? selected[0] : selected ?? "").trim();
+        isCorrect = s.length > 0;
+        partialScore = isCorrect ? 1 : 0;
+      }
     }
     return { isCorrect, partialScore };
   });
+
+  return { grades, warnings };
 }
 
 export async function scoreSubmission(submissionId: string): Promise<ScoringPayload> {
@@ -169,7 +253,7 @@ export async function scoreSubmission(submissionId: string): Promise<ScoringPayl
   });
   const subtestMeta = await loadSubtestMeta(sub.testKind);
   if (sub.testKind === "BAKAT") {
-    const minatBidang = await findMatchingMinatBidangScores({
+    const crossLink = await findMatchingMinatCrossLink({
       fullName: sub.fullName,
       school: sub.school,
       grade: sub.grade,
@@ -183,7 +267,7 @@ export async function scoreSubmission(submissionId: string): Promise<ScoringPayl
         grade: sub.grade,
       },
       subtestMeta,
-      minatBidang,
+      crossLink,
     );
   }
   return computeScoringPayload(
@@ -195,40 +279,106 @@ export async function scoreSubmission(submissionId: string): Promise<ScoringPayl
   );
 }
 
-// Cross-link: cari submission MINAT milik peserta yang sama (fullName +
-// school + grade, case-insensitive). Bila ada, ambil distribusi bidang
-// minat-nya untuk dijadikan koreksi pada penjurusan IPA / IPS.
-export async function findMatchingMinatBidangScores(idents: {
+/**
+ * Hasil pencocokan submission MINAT milik peserta yang sama.
+ *
+ * CATATAN PENTING (identitas peserta):
+ * Pencocokan saat ini memakai nama + sekolah (+ kelas) yang dinormalisasi.
+ * Ini TIDAK unik: dua siswa bernama sama di sekolah & kelas yang sama akan
+ * saling tertukar data minatnya. Karena itu:
+ *   - bila ditemukan LEBIH DARI SATU kandidat, cross-link DIBATALKAN
+ *     (`ambiguous: true`) alih-alih diam-diam mengambil submission terbaru;
+ *   - hasil pencocokan berbasis nama selalu ditandai
+ *     `needsVerification: true` supaya guru BK memverifikasi.
+ * TODO (perlu migrasi DB + form identitas): tambahkan kolom `nisn` pada
+ * Submission dan jadikan NISN kunci pencocokan utama; nama hanya fallback.
+ */
+export type MinatCrossLink = {
+  bidangScores: Record<string, number> | null;
+  matchedBy: "NISN" | "NAMA" | null;
+  needsVerification: boolean;
+  ambiguous: boolean;
+  note?: string;
+};
+
+function isCrossLink(v: unknown): v is MinatCrossLink {
+  return !!v && typeof v === "object" && "bidangScores" in (v as object);
+}
+
+/**
+ * Cari submission MINAT milik peserta yang sama untuk dijadikan koreksi
+ * pada penjurusan IPA / IPS. Lihat catatan pada `MinatCrossLink`.
+ */
+export async function findMatchingMinatCrossLink(idents: {
   fullName: string | null;
   school: string | null;
   grade: string | null;
-}): Promise<Record<string, number> | null> {
+}): Promise<MinatCrossLink | null> {
   if (!idents.fullName || !idents.school) return null;
-  const where: {
-    testKind: "MINAT";
-    finishedAt: { not: null };
-    fullName: { equals: string; mode: "insensitive" };
-    school: { equals: string; mode: "insensitive" };
-    grade?: { equals: string; mode: "insensitive" };
-  } = {
-    testKind: "MINAT",
-    finishedAt: { not: null },
-    fullName: { equals: idents.fullName, mode: "insensitive" },
-    school: { equals: idents.school, mode: "insensitive" },
-  };
-  if (idents.grade) where.grade = { equals: idents.grade, mode: "insensitive" };
 
+  const targetName = normalizeIdent(idents.fullName);
+  const targetSchool = normalizeIdent(idents.school);
+  const targetGrade = normalizeIdent(idents.grade);
+  if (!targetName || !targetSchool) return null;
+
+  // Ambil kandidat berdasarkan sekolah saja (query longgar), lalu cocokkan
+  // nama & kelas secara ternormalisasi di memori. Ini mencegah cross-link
+  // gagal diam-diam hanya karena beda spasi / tanda baca / kapitalisasi.
   const candidates = await prisma.submission.findMany({
-    where,
+    where: {
+      testKind: "MINAT",
+      finishedAt: { not: null },
+      school: { equals: idents.school, mode: "insensitive" },
+    },
+    select: { id: true, fullName: true, grade: true, finishedAt: true },
+    orderBy: { finishedAt: "desc" },
+    take: 500,
+  });
+
+  const matched = candidates.filter((c) => {
+    if (normalizeIdent(c.fullName) !== targetName) return false;
+    if (targetGrade && normalizeIdent(c.grade) !== targetGrade) return false;
+    return true;
+  });
+
+  if (matched.length === 0) return null;
+  if (matched.length > 1) {
+    return {
+      bidangScores: null,
+      matchedBy: null,
+      needsVerification: true,
+      ambiguous: true,
+      note:
+        `Ditemukan ${matched.length} hasil Tes Minat dengan nama, sekolah, dan kelas yang sama. ` +
+        "Cross-link dibatalkan supaya data minat tidak tertukar antar siswa. " +
+        "Verifikasi manual oleh guru BK diperlukan.",
+    };
+  }
+
+  const bidangScores = await loadBidangScores(matched[0].id);
+  if (!bidangScores) return null;
+  return {
+    bidangScores,
+    matchedBy: "NAMA",
+    needsVerification: true,
+    ambiguous: false,
+    note:
+      "Cross-link dicocokkan lewat nama + sekolah + kelas (bukan NISN). " +
+      "Perlu verifikasi guru BK.",
+  };
+}
+
+async function loadBidangScores(
+  submissionId: string,
+): Promise<Record<string, number> | null> {
+  const m = await prisma.submission.findUnique({
+    where: { id: submissionId },
     include: {
       result: true,
       answers: { include: { question: { include: { subtest: true } } } },
     },
-    orderBy: { finishedAt: "desc" },
-    take: 1,
   });
-  if (candidates.length === 0) return null;
-  const m = candidates[0];
+  if (!m) return null;
   const stored = m.result?.payload as ScoringPayload | null | undefined;
   if (stored?.minat?.bidangScores) return stored.minat.bidangScores;
   // Fallback: recompute bidang scores from raw answers.
@@ -242,6 +392,20 @@ export async function findMatchingMinatBidangScores(idents: {
 }
 
 /**
+ * Versi ringkas dari `findMatchingMinatCrossLink` — dipertahankan supaya
+ * caller lama (mis. endpoint finish) tetap berjalan. Prefer memakai
+ * `findMatchingMinatCrossLink` agar status verifikasi ikut tercatat.
+ */
+export async function findMatchingMinatBidangScores(idents: {
+  fullName: string | null;
+  school: string | null;
+  grade: string | null;
+}): Promise<Record<string, number> | null> {
+  const link = await findMatchingMinatCrossLink(idents);
+  return link?.bidangScores ?? null;
+}
+
+/**
  * Compute the full scoring payload from a pre-loaded submission. No DB calls.
  * Use this from the finish endpoint to avoid an extra round-trip.
  *
@@ -252,23 +416,34 @@ export async function findMatchingMinatBidangScores(idents: {
  *
  * `minatBidang` (opsional) memuat skor bidang MINAT peserta yang sama untuk
  * mengoreksi penjurusan IPA / IPS — caller wajib menyiapkannya bila ingin
- * cross-link (mis. via `findMatchingMinatBidangScores`).
+ * cross-link (mis. via `findMatchingMinatCrossLink`). Menerima bentuk lama
+ * (Record skor bidang) maupun bentuk baru (`MinatCrossLink`).
  */
 export function computeScoringPayload(
   sub: SubWithAnswers,
   subtestMeta: SubtestMeta[] | null = null,
-  minatBidang: Record<string, number> | null = null,
+  minatBidang: Record<string, number> | MinatCrossLink | null = null,
 ): ScoringPayload {
-  if (sub.testKind === "BAKAT") return scoreBakat(sub, subtestMeta, minatBidang);
+  const crossLink: MinatCrossLink | null = isCrossLink(minatBidang)
+    ? minatBidang
+    : minatBidang
+    ? {
+        bidangScores: minatBidang,
+        matchedBy: "NAMA",
+        needsVerification: true,
+        ambiguous: false,
+      }
+    : null;
+  if (sub.testKind === "BAKAT") return scoreBakat(sub, subtestMeta, crossLink);
   return scoreMinat(sub, subtestMeta);
 }
 
 function scoreBakat(
   sub: SubWithAnswers,
   subtestMeta: SubtestMeta[] | null,
-  minatBidang: Record<string, number> | null,
+  crossLink: MinatCrossLink | null,
 ): ScoringPayload {
-  const grades = gradeAnswerRows(sub.answers);
+  const { grades, warnings } = gradeAnswerRows(sub.answers, "BAKAT");
   const perSubtest: Record<string, { name: string; raw: number; max: number }> = {};
 
   // Seed dari subtestMeta supaya `max` = total bank soal real (bukan dari
@@ -354,7 +529,9 @@ function scoreBakat(
   const majors = Array.from(new Set(profileMatches.flatMap((p) => p.majors))).slice(0, 8);
   const careers = Array.from(new Set(profileMatches.flatMap((p) => p.careers))).slice(0, 8);
 
-  const penjurusan = hitungPenjurusan(perSubtest, minatBidang);
+  const minatBidangScores = crossLink?.bidangScores ?? null;
+  if (crossLink?.note) warnings.push(crossLink.note);
+  const penjurusan = hitungPenjurusan(perSubtest, minatBidangScores);
 
   return {
     testKind: "BAKAT",
@@ -377,8 +554,13 @@ function scoreBakat(
     recommendations: { majors, careers },
     penjurusan: {
       ...penjurusan,
-      minatSource: minatBidang ? "cross-link" : null,
+      minatSource: minatBidangScores ? "cross-link" : null,
+      minatMatchedBy: minatBidangScores ? crossLink?.matchedBy ?? null : null,
+      minatNeedsVerification: minatBidangScores
+        ? crossLink?.needsVerification ?? false
+        : false,
     },
+    warnings: warnings.length > 0 ? warnings : undefined,
   };
 }
 
