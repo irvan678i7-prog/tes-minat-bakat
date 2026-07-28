@@ -10,6 +10,14 @@ import {
 	hitungMinatSkor,
 	type KomponenKode,
 } from "./penjurusan";
+import {
+	LEMBAGA_PRODI,
+	LEMBAGA_UNIT,
+	buildReportCode,
+	drawQrCode,
+	qrPayload,
+	verificationFooterText,
+} from "./report-verification";
 
 type Jenjang = "SMP" | "SMA" | "SMK";
 
@@ -49,7 +57,7 @@ type SubmissionInfo = {
 	testKind: "MINAT" | "BAKAT";
 };
 
-// ── PALETTE ──────────────────────────────────────────────────────────────
+// ── PALETTE ─────────────────────────────────────────────────────────
 const INK = "#0F172A";
 const SOFT_INK = "#475569";
 const HAIRLINE = "#CBD5E1";
@@ -215,8 +223,9 @@ export function buildReportPDF(
 	const pageW = doc.internal.pageSize.getWidth();
 	const pageH = doc.internal.pageSize.getHeight();
 	const margin = 28;
+	const reportCode = buildReportCode(submission.testKind, submission.id);
 
-	drawHeader(doc, submission, margin, pageW);
+	drawHeader(doc, submission, reportCode, margin, pageW);
 
 	const y = drawIdentity(doc, submission, margin, 88);
 
@@ -228,15 +237,54 @@ export function buildReportPDF(
 	}
 
 	if (doc.getNumberOfPages() > 1) doc.setPage(1);
-	drawFooter(doc, margin, pageW, pageH, opts?.showPageNumber !== false);
+	drawFooter(doc, margin, pageW, pageH, reportCode, opts?.showPageNumber !== false);
 	while (doc.getNumberOfPages() > 1) doc.deletePage(doc.getNumberOfPages());
 	return Buffer.from(doc.output("arraybuffer"));
 }
 
-// ── HEADER ─────────────────────────────────────────────────────────────────
+// ── BADGE VALIDASI (kode laporan + QR) ─────────────────────────────────────
+// QR mengarah ke halaman /verifikasi supaya keaslian laporan bisa dicek oleh
+// sekolah/orang tua; kodenya juga dicetak agar bisa diketik manual.
+function drawVerifyBadge(
+	doc: jsPDF,
+	code: string,
+	x: number,
+	y: number,
+	w: number,
+	h: number,
+): void {
+	setFillHex(doc, INK);
+	doc.rect(x, y, w, h, "F");
+	setFillHex(doc, ACCENT);
+	doc.rect(x, y, w, 3, "F");
+
+	const qrSize = h - 14;
+	const qrX = x + w - qrSize - 7;
+	const qrY = y + 10;
+	drawQrCode(doc, qrPayload(code), qrX, qrY, qrSize);
+
+	const parts = code.split("-");
+	const line1 = parts.slice(0, 2).join("-");
+	const line2 = parts.slice(2).join("-");
+
+	setTextHex(doc, WHITE);
+	doc.setFont("helvetica", "normal");
+	doc.setFontSize(6.2);
+	doc.text("KODE LAPORAN", x + 8, y + 15);
+	doc.setFont("helvetica", "bold");
+	doc.setFontSize(9);
+	doc.text(line1, x + 8, y + 27);
+	doc.text(line2, x + 8, y + 38);
+	doc.setFont("helvetica", "normal");
+	doc.setFontSize(5.6);
+	doc.text("Pindai QR untuk cek keaslian", x + 8, y + 49);
+}
+
+// ── HEADER ──────────────────────────────────────────────────────────
 function drawHeader(
 	doc: jsPDF,
 	sub: SubmissionInfo,
+	reportCode: string,
 	margin: number,
 	pageW: number,
 ): void {
@@ -267,36 +315,22 @@ function drawHeader(
 	setTextHex(doc, SOFT_INK);
 	doc.setFontSize(8.6);
 	doc.text(
-		`${sub.fullName || "Peserta"}  •  Dicetak ${fmtDate(new Date())}`,
+		`${sub.fullName || "Peserta"}  \u2022  Dicetak ${fmtDate(new Date())}`,
 		margin,
 		70,
 	);
 
-	const badgeW = 110;
-	const badgeH = 50;
+	const badgeW = 152;
+	const badgeH = 58;
 	const badgeX = pageW - margin - badgeW;
-	const badgeY = 14;
-	setFillHex(doc, INK);
-	doc.rect(badgeX, badgeY, badgeW, badgeH, "F");
-	setFillHex(doc, ACCENT);
-	doc.rect(badgeX, badgeY, badgeW, 3, "F");
-	setTextHex(doc, WHITE);
-	doc.setFont("helvetica", "normal");
-	doc.setFontSize(7);
-	doc.text("KODE LAPORAN", badgeX + 10, badgeY + 16);
-	doc.setFont("helvetica", "bold");
-	doc.setFontSize(13);
-	doc.text(sub.id.slice(0, 8).toUpperCase(), badgeX + 10, badgeY + 32);
-	doc.setFont("helvetica", "normal");
-	doc.setFontSize(7);
-	doc.text("Rahasia • Internal", badgeX + 10, badgeY + 44);
+	drawVerifyBadge(doc, reportCode, badgeX, 12, badgeW, badgeH);
 
 	setDrawHex(doc, HAIRLINE);
 	doc.setLineWidth(0.5);
 	doc.line(margin, 80, pageW - margin, 80);
 }
 
-// ── IDENTITAS ───────────────────────────────────────────────────────────────
+// ── IDENTITAS ──────────────────────────────────────────────────────
 function drawIdentity(
 	doc: jsPDF,
 	sub: SubmissionInfo,
@@ -359,7 +393,7 @@ function drawIdentity(
 	return nextY(doc, yIn + 4) + 8;
 }
 
-// ── BAKAT BODY (1 PAGE) ──────────────────────────────────────────────────────
+// ── BAKAT BODY (1 PAGE) ─────────────────────────────────────────────────
 function drawBakatBody(
 	doc: jsPDF,
 	payload: ScoringPayload,
@@ -370,8 +404,6 @@ function drawBakatBody(
 	pageH: number,
 ): number {
 	let y = yIn;
-
-	y = drawIqCard(doc, payload, margin, y, pageW);
 
 	const cats = payload.bakat?.iqCategories ?? [];
 	if (cats.length > 0) {
@@ -399,7 +431,7 @@ function drawBakatBody(
 		doc.setFont("helvetica", "normal");
 		doc.setFontSize(8.4);
 		const narrativeLines = doc.splitTextToSize(narrative, pageW - margin * 2);
-		if (y + 12 + narrativeLines.length * 10 + 4 < pageH - 64) {
+		if (y + 12 + narrativeLines.length * 10 + 4 < pageH - 70) {
 			y = drawNarrative(doc, narrative, margin, y, pageW);
 		}
 	}
@@ -409,7 +441,7 @@ function drawBakatBody(
 	return y;
 }
 
-// ── NARASI SINGKAT ──────────────────────────────────────────────────────────
+// ── NARASI SINGKAT ────────────────────────────────────────────────────
 function drawNarrative(
 	doc: jsPDF,
 	text: string,
@@ -429,89 +461,7 @@ function drawNarrative(
 	return yIn + 12 + lines.length * 10 + 4;
 }
 
-// ── EKIU IQ CARD ─────────────────────────────────────────────────────────────
-function drawIqCard(
-	doc: jsPDF,
-	payload: ScoringPayload,
-	margin: number,
-	yIn: number,
-	pageW: number,
-): number {
-	setTextHex(doc, INK);
-	doc.setFont("helvetica", "bold");
-	doc.setFontSize(9);
-	doc.text("ESTIMASI KEMAMPUAN INTELEKTUAL UMUM (EKIU)", margin, yIn);
-
-	const y = yIn + 4;
-	const cardH = 62;
-	setFillHex(doc, PANEL);
-	doc.rect(margin, y, pageW - margin * 2, cardH, "F");
-	setDrawHex(doc, HAIRLINE);
-	doc.setLineWidth(0.5);
-	doc.rect(margin, y, pageW - margin * 2, cardH);
-
-	const scoreW = 120;
-	setFillHex(doc, INK);
-	doc.rect(margin, y, scoreW, cardH, "F");
-	setFillHex(doc, ACCENT);
-	doc.rect(margin, y, scoreW, 3, "F");
-
-	const fsiq = payload.bakat?.fsiq;
-	setTextHex(doc, WHITE);
-	doc.setFont("helvetica", "normal");
-	doc.setFontSize(6.2);
-	const ekiuLabelLines = doc.splitTextToSize(
-		"Skor Estimasi Kemampuan Intelektual Umum",
-		scoreW - 16,
-	);
-	doc.text(ekiuLabelLines, margin + 10, y + 11);
-	doc.setFont("helvetica", "bold");
-	doc.setFontSize(26);
-	const score = fsiq?.score ?? payload.iqEstimate ?? null;
-	doc.text(score != null ? String(score) : "—", margin + 10, y + 50);
-	doc.setFont("helvetica", "normal");
-	doc.setFontSize(6.6);
-	if (fsiq) {
-		doc.text(`CI 95%: ${fsiq.ci95Low}\u2013${fsiq.ci95High}`, margin + 10, y + 60);
-	} else {
-		doc.text("Berbasis 8 subtes Bakat.", margin + 10, y + 60);
-	}
-
-	const rightX = margin + scoreW + 12;
-	const rightW = pageW - margin * 2 - scoreW - 22;
-
-	setTextHex(doc, INK);
-	doc.setFont("helvetica", "bold");
-	doc.setFontSize(12);
-	const bandLabel = safe(
-		fsiq?.band.label ?? payload.iqInterpretation?.band ?? "—",
-	);
-	doc.text(bandLabel, rightX, y + 16, { maxWidth: rightW });
-
-	doc.setFont("helvetica", "normal");
-	setTextHex(doc, SOFT_INK);
-	doc.setFontSize(8.2);
-	const desc = fsiq?.band.descId ?? payload.iqInterpretation?.description ?? "";
-	const descLines = wrapClamp(doc, desc, rightW, 2);
-	doc.text(descLines, rightX, y + 28);
-
-	setTextHex(doc, INK);
-	doc.setFont("helvetica", "bold");
-	doc.setFontSize(7.2);
-	doc.text("FORMULA AKUMULASI", rightX, y + 48);
-	doc.setFont("helvetica", "normal");
-	doc.setFontSize(7.6);
-	setTextHex(doc, SOFT_INK);
-	const formula =
-		fsiq?.formula ??
-		"EKIU = (0.30 \u00D7 Penalaran) + (0.25 \u00D7 Verbal) + (0.25 \u00D7 Kuantitatif) + (0.20 \u00D7 Spasial)";
-	const fLines = wrapClamp(doc, formula, rightW, 1);
-	doc.text(fLines, rightX, y + 57);
-
-	return y + cardH + 8;
-}
-
-// ── 4 Kategori Akumulasi IQ ──────────────────────────────────────────────────
+// ── 4 Kategori Akumulasi IQ ──────────────────────────────────────────────
 type IqCategory = NonNullable<
 	NonNullable<ScoringPayload["bakat"]>["iqCategories"]
 >[number];
@@ -567,7 +517,7 @@ function drawIqCategoryTable(
 	return nextY(doc, yIn + 4) + 6;
 }
 
-// ── SKOR PER SUBTES ──────────────────────────────────────────────────────────
+// ── SKOR PER SUBTES ───────────────────────────────────────────────────
 function drawSubtestTable(
 	doc: jsPDF,
 	payload: ScoringPayload,
@@ -654,7 +604,7 @@ function drawSubtestTable(
 	return y + 12;
 }
 
-// ── PENJURUSAN IPA / IPS (KOMPAK 2 KOLOM) ────────────────────────────────────
+// ── PENJURUSAN IPA / IPS (KOMPAK 2 KOLOM) ───────────────────────────────────
 const IPA_FILL = PRIMARY;
 const IPS_FILL = "#EC4899";
 
@@ -1007,7 +957,7 @@ function drawRecommendationsByJenjang(
 	return y + 12;
 }
 
-// ── DISCLAIMER 1-baris ───────────────────────────────────────────────────────
+// ── DISCLAIMER 1-baris ──────────────────────────────────────────────────
 function drawDisclaimerOneLine(
 	doc: jsPDF,
 	margin: number,
@@ -1016,7 +966,7 @@ function drawDisclaimerOneLine(
 ): void {
 	const text =
 		"Disclaimer: laporan ini bersifat skrining minat & bakat (BUKAN diagnosis klinis). Skor EKIU adalah estimasi profil dengan formula 0.30 Penalaran + 0.25 Verbal + 0.25 Kuantitatif + 0.20 Spasial, dikonversi ke M=100, SD=15.";
-	const boxY = pageH - 56;
+	const boxY = pageH - 62;
 	setFillHex(doc, "#FEF3C7");
 	doc.rect(margin, boxY, pageW - margin * 2, 22, "F");
 	setDrawHex(doc, ACCENT_DEEP);
@@ -1035,30 +985,46 @@ function drawDisclaimerOneLine(
 	doc.text(lines.slice(0, 2), margin + 70, boxY + 9);
 }
 
-// ── FOOTER ─────────────────────────────────────────────────────────────────
-function drawFooter(doc: jsPDF, margin: number, pageW: number, pageH: number, showPageNumber = true): void {
-  setDrawHex(doc, HAIRLINE);
-  doc.setLineWidth(0.4);
-  doc.line(margin, pageH - 24, pageW - margin, pageH - 24);
-  setTextHex(doc, SOFT_INK);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(7.6);
-  doc.text(
-    "EKIU — Estimasi Kemampuan Intelektual Umum • Rahasia & untuk keperluan internal.",
-    margin,
-    pageH - 12,
-  );
-  if (showPageNumber) {
-    doc.setFont("helvetica", "bold");
-    setTextHex(doc, INK);
-    const totalPages = doc.getNumberOfPages();
-    const txt = `Hal 1 / ${totalPages}`;
-    const w = doc.getTextWidth(txt);
-    doc.text(txt, pageW - margin - w, pageH - 12);
-  }
+// ── FOOTER ──────────────────────────────────────────────────────────
+function drawFooter(
+	doc: jsPDF,
+	margin: number,
+	pageW: number,
+	pageH: number,
+	reportCode: string,
+	showPageNumber = true,
+): void {
+	setDrawHex(doc, HAIRLINE);
+	doc.setLineWidth(0.4);
+	doc.line(margin, pageH - 30, pageW - margin, pageH - 30);
+
+	setTextHex(doc, INK);
+	doc.setFont("helvetica", "bold");
+	doc.setFontSize(7);
+	doc.text(`${LEMBAGA_PRODI} \u2014 ${LEMBAGA_UNIT}`, margin, pageH - 21);
+
+	setTextHex(doc, SOFT_INK);
+	doc.setFont("helvetica", "normal");
+	doc.setFontSize(6.6);
+	doc.text(verificationFooterText(reportCode), margin, pageH - 13);
+	doc.text(
+		"EKIU \u2014 Estimasi Kemampuan Intelektual Umum \u2022 Rahasia & untuk keperluan internal.",
+		margin,
+		pageH - 6,
+	);
+
+	if (showPageNumber) {
+		doc.setFont("helvetica", "bold");
+		setTextHex(doc, INK);
+		doc.setFontSize(7.6);
+		const totalPages = doc.getNumberOfPages();
+		const txt = `Hal 1 / ${totalPages}`;
+		const w = doc.getTextWidth(txt);
+		doc.text(txt, pageW - margin - w, pageH - 13);
+	}
 }
 
-// ── MINAT BODY (1 PAGE) ──────────────────────────────────────────────────────
+// ── MINAT BODY (1 PAGE) ─────────────────────────────────────────────────
 function drawMinatBody(
 	doc: jsPDF,
 	payload: ScoringPayload,
