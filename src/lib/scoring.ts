@@ -16,6 +16,7 @@ import {
   hitungPenjurusan,
   type PenjurusanResult,
 } from "./penjurusan";
+import { validateQuestionKey } from "./question-validation";
 
 type Letter = string;
 
@@ -53,6 +54,12 @@ export type ScoringPayload = {
   iqInterpretation?: { band: string; description: string };
   recommendations: { majors: string[]; careers: string[] };
   penjurusan?: PenjurusanResult & { minatSource: "cross-link" | null };
+  /**
+   * Masalah data yang terdeteksi saat scoring (kunci jawaban kosong pada
+   * soal BAKAT, jumlah kunci tidak sama dengan parts, dll). Optional supaya
+   * payload lama di DB tetap valid.
+   */
+  warnings?: string[];
 };
 
 type AnswerRow = {
@@ -124,39 +131,77 @@ type SubWithAnswers = {
   grade?: string | null;
 };
 
+type GradeResult = {
+  isCorrect: boolean;
+  partialScore: number;
+  warnings: string[];
+};
+
 /**
  * Compute per-answer correctness in memory (no DB writes). Returns
- * { isCorrect, partialScore } for each input answer in the same order.
+ * { isCorrect, partialScore, warnings } for each input answer in the same order.
+ *
+ * PERBAIKAN AUDIT: dulu cabang "kunci kosong" berlaku untuk BAKAT maupun
+ * MINAT, sehingga soal BAKAT yang lupa diisi kuncinya membuat SEMUA peserta
+ * dapat poin penuh tanpa peringatan apa pun. Sekarang cabang itu hanya
+ * berlaku untuk MINAT (yang memang tidak punya kunci benar/salah); pada
+ * BAKAT jawabannya diberi skor 0 dan dicatat sebagai warning.
+ *
+ * Perbaikan kedua: soal multi-part diiterasi sepanjang `parts`, bukan
+ * `correct.length`. Skor maksimum subtes dihitung dari `parts`, jadi kalau
+ * kuncinya kurang, `raw` tidak akan pernah bisa mencapai `max` dan
+ * persentase subtes bias turun permanen.
  */
-function gradeAnswerRows(answers: AnswerRow[]): { isCorrect: boolean; partialScore: number }[] {
+function gradeAnswerRows(
+  answers: AnswerRow[],
+  testKind: "BAKAT" | "MINAT",
+): GradeResult[] {
   return answers.map((ans) => {
     const correct = ans.question.correct as unknown;
     const selected = ans.selected as unknown;
-    const parts = ans.question.parts || 1;
+    const parts = Math.max(1, ans.question.parts || 1);
+
+    const warnings = validateQuestionKey({
+      parts,
+      correct,
+      inputMode: ans.question.inputMode,
+      testKind,
+    })
+      .filter((i) => i.level === "error")
+      .map((i) => `${ans.question.subtest.code}: ${i.message}`);
+
     let isCorrect = false;
     let partialScore = 0;
-    // TEXT and CHOICE both compare normalized strings (uppercase, trimmed,
-    // collapsed whitespace). Empty correct => MINAT-style "every answered counts".
+
+    // TEXT dan CHOICE sama-sama dibandingkan sebagai string ternormalisasi
+    // (uppercase, trim, whitespace dirapatkan).
     if (parts > 1 && Array.isArray(correct) && Array.isArray(selected)) {
       let okCount = 0;
-      for (let i = 0; i < correct.length; i++) {
+      for (let i = 0; i < parts; i++) {
         const c = normalizeText(correct[i]);
         const s = normalizeText(selected[i]);
         if (c && c === s) okCount += 1;
       }
       partialScore = okCount;
-      isCorrect = okCount === correct.length;
+      isCorrect = okCount === parts;
     } else if (typeof correct === "string" || typeof correct === "number") {
       const c = normalizeText(correct);
       const s = normalizeText(Array.isArray(selected) ? selected[0] : selected);
       isCorrect = c.length > 0 && c === s;
       partialScore = isCorrect ? 1 : 0;
     } else if (correct == null || (Array.isArray(correct) && correct.length === 0)) {
-      const s = String(Array.isArray(selected) ? selected[0] : selected ?? "").trim();
-      isCorrect = s.length > 0;
-      partialScore = isCorrect ? 1 : 0;
+      if (testKind === "MINAT") {
+        // MINAT memang tanpa kunci: setiap jawaban terisi dihitung 1.
+        const s = String(Array.isArray(selected) ? selected[0] : selected ?? "").trim();
+        isCorrect = s.length > 0;
+        partialScore = isCorrect ? 1 : 0;
+      } else {
+        // BAKAT tanpa kunci → 0, dan sudah tercatat di `warnings`.
+        isCorrect = false;
+        partialScore = 0;
+      }
     }
-    return { isCorrect, partialScore };
+    return { isCorrect, partialScore, warnings };
   });
 }
 
@@ -268,7 +313,8 @@ function scoreBakat(
   subtestMeta: SubtestMeta[] | null,
   minatBidang: Record<string, number> | null,
 ): ScoringPayload {
-  const grades = gradeAnswerRows(sub.answers);
+  const grades = gradeAnswerRows(sub.answers, "BAKAT");
+  const warnings = Array.from(new Set(grades.flatMap((g) => g.warnings)));
   const perSubtest: Record<string, { name: string; raw: number; max: number }> = {};
 
   // Seed dari subtestMeta supaya `max` = total bank soal real (bukan dari
@@ -328,19 +374,38 @@ function scoreBakat(
     };
   }
 
-  // Top 3 subtests by raw score (per buku: pilih 3 subtes tertinggi → cocokan profil)
+  // Top 3 subtes berdasarkan rasio raw/max (per buku: pilih 3 subtes
+  // tertinggi → cocokkan profil).
+  //
+  // PERBAIKAN AUDIT: subtes tanpa bank soal (max <= 0) dikecualikan supaya
+  // tidak ikut peringkat dengan rasio semu, dan tie-break memakai kode
+  // subtes agar hasilnya deterministik (dulu bergantung urutan key objek,
+  // sehingga peserta dengan skor imbang bisa dapat profil berbeda-beda).
   const topCodes = Object.entries(out)
-    .sort((a, b) => (b[1].raw / Math.max(1, b[1].max)) - (a[1].raw / Math.max(1, a[1].max)))
+    .filter(([, v]) => v.max > 0)
+    .sort((a, b) => {
+      const ra = a[1].raw / a[1].max;
+      const rb = b[1].raw / b[1].max;
+      if (rb !== ra) return rb - ra;
+      return a[0].localeCompare(b[0]);
+    })
     .slice(0, 3)
     .map(([c]) => c);
 
-  // Match profiles by intersection with top 3
+  // Cocokkan profil dengan top 3, dibobot berdasarkan peringkat: subtes
+  // peringkat 1 bernilai 3, ke-2 bernilai 2, ke-3 bernilai 1. Sebelumnya
+  // hanya menghitung jumlah irisan, sehingga profil yang cocok dengan
+  // subtes peringkat 3 dinilai sama dengan yang cocok dengan peringkat 1.
+  const rankWeight = new Map(topCodes.map((c, i) => [c, topCodes.length - i]));
   const profileMatches = APTITUDE_PROFILES.map((p) => {
-    const match = p.aspects.filter((a) => topCodes.includes(a)).length;
-    return { ...p, matchScore: match };
+    const matchScore = p.aspects.reduce(
+      (s, a) => s + (rankWeight.get(a) ?? 0),
+      0,
+    );
+    return { ...p, matchScore };
   })
     .filter((p) => p.matchScore > 0)
-    .sort((a, b) => b.matchScore - a.matchScore)
+    .sort((a, b) => b.matchScore - a.matchScore || a.name.localeCompare(b.name))
     .slice(0, 5);
 
   // IQ yang ditampilkan di seluruh app (admin list, PDF, dst) sekarang pakai
@@ -379,6 +444,7 @@ function scoreBakat(
       ...penjurusan,
       minatSource: minatBidang ? "cross-link" : null,
     },
+    warnings: warnings.length > 0 ? warnings : undefined,
   };
 }
 
@@ -404,6 +470,12 @@ function scoreMinat(
   sub: SubWithAnswers,
   subtestMeta: SubtestMeta[] | null,
 ): ScoringPayload {
+  // Deteksi soal MINAT yang keliru diberi kunci jawaban — kunci itu diabaikan
+  // saat penilaian, jadi lebih baik dilaporkan daripada diam-diam menyesatkan.
+  const warnings = Array.from(
+    new Set(gradeAnswerRows(sub.answers, "MINAT").flatMap((g) => g.warnings)),
+  );
+
   // Bidang counts: tally letters chosen on MINAT_BIDANG subtest.
   const bidangScores: Record<Letter, number> = {};
   const programLetterCounts: Record<string, Record<Letter, number>> = {};
@@ -441,7 +513,7 @@ function scoreMinat(
   }
 
   const topBidang = Object.entries(bidangScores)
-    .sort((a, b) => b[1] - a[1])
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .slice(0, 3)
     .map(([l]) => l);
 
@@ -450,7 +522,7 @@ function scoreMinat(
     const code = `MINAT_PROG_${b}`;
     const counts = programLetterCounts[code] || {};
     const ranking = Object.entries(counts)
-      .sort((a, b2) => b2[1] - a[1])
+      .sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]))
       .slice(0, 3);
     const map = MINAT_BIDANG_TO_PROGRAM[b];
     const topAnswers = ranking.map(([letter, count]) => {
@@ -473,5 +545,6 @@ function scoreMinat(
     perSubtest,
     minat: { bidangScores, topBidang, programs },
     recommendations: { majors, careers },
+    warnings: warnings.length > 0 ? warnings : undefined,
   };
 }
