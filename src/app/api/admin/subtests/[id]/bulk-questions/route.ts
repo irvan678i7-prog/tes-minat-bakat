@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { getAdminFromRequest } from "@/lib/auth";
 import { getSupabaseAdmin, SUPABASE_BUCKET } from "@/lib/supabase";
 import { ALLOWED_IMAGE_MIME, MAX_UPLOAD_BYTES, MIME_TO_EXT } from "@/lib/env";
+import { validateQuestionKeys } from "@/lib/question-validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +15,12 @@ export const dynamic = "force-dynamic";
 // dan SPASIAL (parts 5). Admin upload banyak gambar sekaligus + isi kunci
 // di form, server upload semua gambar ke Supabase lalu replace seluruh
 // Question untuk subtes ini.
+//
+// Sejak perbaikan integritas kunci jawaban, batch DITOLAK bila ada soal
+// BAKAT non-contoh yang kuncinya belum lengkap. Alasannya: kunci kosong
+// membuat scoring memberi 0 poin (dulu malah poin penuh) tanpa admin sadar.
+// Kalau ingin upload gambar dulu lalu isi kunci belakangan, tandai soal
+// tersebut sebagai contoh atau lengkapi kuncinya sebelum submit.
 
 const SISTEMATIS_CODE = "BAKAT_7_SISTEMATISASI";
 const SPASIAL_CODE = "BAKAT_5_SPASIAL";
@@ -133,6 +140,39 @@ async function handle(
   const isSistematis = sub.code === SISTEMATIS_CODE;
   const subCode = sub.code;
 
+  // Hitung parts efektif per baris (dipakai untuk validasi kunci sebelum
+  // upload gambar, supaya admin tidak menunggu upload lalu ditolak).
+  const partsOf = (m: MetaItem): number =>
+    isSpasial
+      ? SPASIAL_PARTS
+      : isSistematis
+      ? Math.max(1, Math.min(SISTEMATIS_MAX_PARTS, Number(m.parts ?? 12) || 12))
+      : Math.max(1, Number(m.parts ?? 1) || 1);
+
+  // VALIDASI KUNCI JAWABAN — sebelum apa pun ditulis / diupload.
+  const keyErrors = validateQuestionKeys(
+    meta.map((m, i) => {
+      const parts = partsOf(m);
+      return {
+        testKind: sub.testKind as "BAKAT" | "MINAT",
+        parts,
+        correct: normalizeKunci(m.kunci, parts),
+        isExample: !!m.isExample,
+        label: `ke-${Number(m.questionNo ?? i + 1) || i + 1}`,
+      };
+    }),
+  );
+  if (keyErrors.length > 0) {
+    return NextResponse.json(
+      {
+        error:
+          "Kunci jawaban belum lengkap sehingga batch tidak disimpan:\n- " +
+          keyErrors.join("\n- "),
+      },
+      { status: 400 },
+    );
+  }
+
   const sb = getSupabaseAdmin();
 
   // Helper upload satu File ke Supabase storage. Return public URL atau null
@@ -221,11 +261,7 @@ async function handle(
   };
 
   const data: Row[] = meta.map((m, i) => {
-    const parts = isSpasial
-      ? SPASIAL_PARTS
-      : isSistematis
-      ? Math.max(1, Math.min(SISTEMATIS_MAX_PARTS, Number(m.parts ?? 12) || 12))
-      : Math.max(1, Number(m.parts ?? 1) || 1);
+    const parts = partsOf(m);
     const kunci = normalizeKunci(m.kunci, parts);
     // SPASIAL kunci selalu upper-case (B/S). SISTEMATIS dibiarkan (huruf
     // A-L akan dinormalisasi case-insensitively saat scoring).

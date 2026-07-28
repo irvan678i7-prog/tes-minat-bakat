@@ -1,11 +1,12 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { BAKAT_SUBTESTS, MINAT_SUBTESTS } from "../src/lib/test-config";
+import { validateQuestionKey } from "../src/lib/question-validation";
 
 const prisma = new PrismaClient();
 
 async function main() {
-  // ─── Admin user ──────────────────────────────────────────────────────
+  // ─── Admin user ───────────────────────────────────────────────────
   const email = process.env.ADMIN_EMAIL || "admin@tmb.test";
   const password = process.env.ADMIN_PASSWORD || "admin123";
   const name = process.env.ADMIN_NAME || "Administrator";
@@ -133,6 +134,21 @@ async function seedBakatSamples() {
         parts > 1
           ? q.correct.split(/[;,]/).map((s) => s.trim().toUpperCase())
           : q.correct.trim().toUpperCase();
+      // Invariant kunci jawaban: untuk BAKAT, kunci wajib terisi dan jumlah
+      // kunci harus sama dengan `parts`. Kalau tidak, skor maksimum subtes
+      // (dihitung dari parts) tidak akan pernah tercapai — persentase subtes
+      // bias turun permanen untuk SEMUA peserta. Gagal cepat di sini jauh
+      // lebih murah daripada menemukannya setelah ratusan siswa mengerjakan.
+      const check = validateQuestionKey({
+        testKind: "BAKAT",
+        parts,
+        correct: correctVal,
+        isExample: false,
+        label: `${code} #${no}`,
+      });
+      if (!check.ok) {
+        throw new Error(`[seed] ${check.error}`);
+      }
       await prisma.question.create({
         data: {
           subtestId: subtest.id,
@@ -151,6 +167,8 @@ async function seedBakatSamples() {
 async function seedMinatSamples() {
   // Bidang Minat (8 letters) — 28 items, pasangan kata.
   // Untuk demo: 8 contoh pasangan, peserta nyata akan pakai upload XLSX.
+  // Catatan: soal MINAT memang TIDAK punya kunci benar/salah, jadi `correct`
+  // kosong di sini adalah desain — bukan kesalahan input seperti pada BAKAT.
   const bidangPairs = [
     ["A", "B"], ["B", "C"], ["C", "D"], ["D", "E"],
     ["E", "F"], ["F", "G"], ["G", "H"], ["H", "A"],
