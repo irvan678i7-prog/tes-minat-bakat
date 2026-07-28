@@ -125,15 +125,21 @@ export function parseReportCode(input: string): ParsedReportCode | null {
 
 // ── URL verifikasi ───────────────────────────────────────────────────────────
 
-/** Base URL publik aplikasi (tanpa garis miring di akhir). Boleh kosong. */
+/**
+ * Base URL publik aplikasi (tanpa garis miring di akhir). Boleh kosong — kalau
+ * kosong, QR akan berisi kode laporannya saja.
+ *
+ * Set salah satu di environment: REPORT_VERIFY_BASE_URL, NEXT_PUBLIC_APP_URL,
+ * atau NEXT_PUBLIC_SITE_URL. Di Vercel, VERCEL_PROJECT_PRODUCTION_URL dipakai
+ * sebagai cadangan otomatis.
+ */
 export function reportBaseUrl(): string {
+	const vercelHost = process.env.VERCEL_PROJECT_PRODUCTION_URL;
 	const raw =
 		process.env.REPORT_VERIFY_BASE_URL ||
 		process.env.NEXT_PUBLIC_APP_URL ||
 		process.env.NEXT_PUBLIC_SITE_URL ||
-		(process.env.VERCEL_PROJECT_PRODUCTION_URL
-			? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-			: "");
+		(vercelHost ? `https://${vercelHost}` : "");
 	return raw.replace(/\/+$/, "");
 }
 
@@ -179,12 +185,15 @@ export function drawQrCode(
 	const count = qr.modules.size;
 	const data = qr.modules.data;
 
-	const quiet = 2; // modul kosong di tiap sisi (standar QR minimal 4, 2 cukup rapat)
+	const quiet = 2; // modul kosong di tiap sisi
 	const cell = size / (count + quiet * 2);
 	const originX = x + quiet * cell;
 	const originY = y + quiet * cell;
 
-	const light = opts?.light === undefined ? ([255, 255, 255] as [number, number, number]) : opts.light;
+	const light =
+		opts?.light === undefined
+			? ([255, 255, 255] as [number, number, number])
+			: opts.light;
 	if (light) {
 		doc.setFillColor(light[0], light[1], light[2]);
 		doc.rect(x, y, size, size, "F");
