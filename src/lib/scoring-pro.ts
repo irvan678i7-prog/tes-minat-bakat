@@ -13,22 +13,10 @@
 // IQ klinis. Norma diturunkan dari cut-off `CATEGORY_RANGES` di test-config.ts
 // menggunakan equipercentile mapping. Untuk validitas klinis, butuh data
 // standardisasi pada populasi rujukan; itu di luar lingkup tes skrining ini.
-//
-// PENGELOMPOKAN SUBTES: daftar anggota komposit dan kategori EKIU TIDAK
-// didefinisikan di file ini. Semuanya di-import dari `subtest-map.ts` yang
-// jadi sumber kebenaran tunggal, supaya tidak lagi berbeda dengan pemetaan
-// yang dipakai `penjurusan.ts`.
 
 import { CATEGORY_RANGES } from "./test-config";
-import {
-  COMPOSITE_MEMBERS,
-  IQ_CATEGORY_MEMBERS,
-  type IqCategoryCode,
-} from "./subtest-map";
 
-export type { IqCategoryCode };
-
-// ── Statistik dasar ────────────────────────────────────────────────────
+// ── Statistik dasar ───────────────────────────────────────────────────────
 
 // Inverse-normal CDF approximation (Acklam, 2003). Akurasi ~1e-9 untuk
 // p di (0, 1). Dipakai untuk konversi percentile → z-score.
@@ -75,7 +63,7 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
-// ── Equipercentile mapping per subtes ──────────────────────────────────
+// ── Equipercentile mapping per subtes ────────────────────────────────────
 //
 // Cut-off `CATEGORY_RANGES[code] = [maxBR, maxRR, maxAR, maxB]` mendefinisikan
 // batas atas tier BR/RR/AR/B (selebihnya = LB). Kita anggap batas-batas ini
@@ -152,7 +140,7 @@ export function standardScoresFromRaw(
   };
 }
 
-// ── Composite Indices (CHC-like) ──────────────────────────────────────
+// ── Composite Indices (CHC-like) ─────────────────────────────────────────
 //
 // Indeks komposit memudahkan interpretasi: alih-alih 9 angka subtes, ringkas
 // jadi 4 indeks fungsional. Skala mean 100, SD 15 (mirip Wechsler).
@@ -162,20 +150,31 @@ export function standardScoresFromRaw(
 //   VSI (Visual-Spasial)       — manipulasi mental bentuk
 //   PSI (Kecepatan Klerikal)   — speed of clerical processing
 //   VCI (Pemahaman Verbal)     — kosakata + analisa verbal
-//
-// Daftar anggota di-import dari subtest-map.ts (sumber kebenaran tunggal).
 
-export const COMPOSITE_GROUPS: Record<
-  string,
-  { name: string; short: string; members: string[] }
-> = {
-  GRI: { name: "Penalaran Umum", short: "GRI", members: COMPOSITE_MEMBERS.GRI },
-  VSI: { name: "Visual-Spasial", short: "VSI", members: COMPOSITE_MEMBERS.VSI },
-  PSI: { name: "Kecepatan Klerikal", short: "PSI", members: COMPOSITE_MEMBERS.PSI },
-  VCI: { name: "Pemahaman Verbal", short: "VCI", members: COMPOSITE_MEMBERS.VCI },
+export const COMPOSITE_GROUPS: Record<string, { name: string; short: string; members: string[] }> = {
+  GRI: {
+    name: "Penalaran Umum",
+    short: "GRI",
+    members: ["BAKAT_1_VISUAL", "BAKAT_2_NUMERIK", "BAKAT_3_VERBAL", "BAKAT_4_URUTAN"],
+  },
+  VSI: {
+    name: "Visual-Spasial",
+    short: "VSI",
+    members: ["BAKAT_5_SPASIAL", "BAKAT_6_3DIMENSI"],
+  },
+  PSI: {
+    name: "Kecepatan Klerikal",
+    short: "PSI",
+    members: ["BAKAT_7_SISTEMATISASI", "BAKAT_9_FIGURAL"],
+  },
+  VCI: {
+    name: "Pemahaman Verbal",
+    short: "VCI",
+    members: ["BAKAT_3_VERBAL", "BAKAT_8_KOSAKATA"],
+  },
 };
 
-// ── 4 Kategori Akumulasi IQ Prediktif ──────────────────────────────────
+// ── 4 Kategori Akumulasi IQ Prediktif ────────────────────────────────────
 //
 // Sesuai rumus rekomendasi:
 //   IQ_prediksi = (0.30 × Penalaran) + (0.25 × Verbal)
@@ -184,7 +183,9 @@ export const COMPOSITE_GROUPS: Record<
 // dikonversi ke skala IQ (mean 100, SD 15).
 //
 // Sistematisasi (klerikal murni) tidak masuk formula IQ — tetap dilaporkan
-// sebagai bagian indeks komposit PSI. Lihat subtest-map.ts.
+// sebagai bagian indeks komposit PSI.
+
+export type IqCategoryCode = "P" | "V" | "K" | "S";
 
 export const IQ_CATEGORY_GROUPS: Record<
   IqCategoryCode,
@@ -194,25 +195,25 @@ export const IQ_CATEGORY_GROUPS: Record<
     name: "Penalaran",
     short: "Penalaran",
     weight: 0.30,
-    members: IQ_CATEGORY_MEMBERS.P,
+    members: ["BAKAT_1_VISUAL", "BAKAT_4_URUTAN"],
   },
   V: {
     name: "Verbal",
     short: "Verbal",
     weight: 0.25,
-    members: IQ_CATEGORY_MEMBERS.V,
+    members: ["BAKAT_3_VERBAL", "BAKAT_8_KOSAKATA"],
   },
   K: {
     name: "Kuantitatif",
     short: "Kuantitatif",
     weight: 0.25,
-    members: IQ_CATEGORY_MEMBERS.K,
+    members: ["BAKAT_2_NUMERIK", "BAKAT_9_FIGURAL"],
   },
   S: {
     name: "Spasial",
     short: "Spasial",
     weight: 0.20,
-    members: IQ_CATEGORY_MEMBERS.S,
+    members: ["BAKAT_5_SPASIAL", "BAKAT_6_3DIMENSI"],
   },
 };
 
@@ -242,7 +243,7 @@ export type WechslerBandInfo = {
   descId: string;
 };
 
-// ── Pita Wechsler standar ─────────────────────────────────────────────
+// ── Pita Wechsler standar ────────────────────────────────────────────────
 
 export type WechslerBand =
   | "Very Superior"
@@ -266,7 +267,7 @@ export function wechslerBand(score: number): WechslerBandInfo {
   return { code: "Extremely Low", label: "Keterbelakangan Mental", descId: "IQ ≤ 69 — jauh di bawah rata-rata, perlu evaluasi profesional." };
 }
 
-// ── Full Scale IQ ─────────────────────────────────────────────────────
+// ── Full Scale IQ ─────────────────────────────────────────────────────────
 
 export type FSIQResult = {
   score: number;       // 100 + 15 * (weighted mean of category z-scores), clamp 50-160
@@ -296,7 +297,7 @@ function scoreToPercentile(score: number): number {
   return clamp(Math.round(cdf * 100), 1, 99);
 }
 
-// ── Public API ───────────────────────────────────────────────────────
+// ── Public API ────────────────────────────────────────────────────────────
 
 export type SubtestRaw = {
   code: string;
@@ -360,7 +361,7 @@ export function computeProBakat(
     };
   });
 
-  // ── IQ Prediktif: akumulasi 4 kategori dengan bobot ───────────────────
+  // ── IQ Prediktif: akumulasi 4 kategori dengan bobot ─────────────────
   // Rumus: IQ_z = 0.30*P + 0.25*V + 0.25*K + 0.20*S
   // di mana tiap kategori = mean z-score subtes anggotanya.
   const iqCategories: IqCategoryScore[] = (
@@ -402,7 +403,7 @@ export function computeProBakat(
   return { subtests: scored, composites, iqCategories, fsiq, narrative };
 }
 
-// ── Narrative builder ────────────────────────────────────────────────
+// ── Narrative builder ────────────────────────────────────────────────────
 
 function buildNarrative(
   subtests: ProSubtestScore[],
