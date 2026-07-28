@@ -3,6 +3,14 @@
 
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import {
+	LEMBAGA_PRODI,
+	LEMBAGA_UNIT,
+	buildReportCode,
+	drawQrCode,
+	qrPayload,
+	verificationFooterText,
+} from "../report-verification";
 
 export type CfitPdfSubmission = {
 	id: string;
@@ -109,6 +117,44 @@ function fmtDate(d?: Date | null): string {
 	);
 }
 
+// ── BADGE VALIDASI (kode laporan + QR) ─────────────────────
+// QR mengarah ke halaman /verifikasi supaya keaslian laporan bisa dicek
+// siapa pun; kodenya juga dicetak agar bisa diketik manual.
+function drawVerifyBadge(
+	doc: jsPDF,
+	code: string,
+	x: number,
+	y: number,
+	w: number,
+	h: number,
+): void {
+	setFillHex(doc, INK);
+	doc.rect(x, y, w, h, "F");
+	setFillHex(doc, ACCENT);
+	doc.rect(x, y, w, 3, "F");
+
+	const qrSize = h - 14;
+	const qrX = x + w - qrSize - 7;
+	const qrY = y + 10;
+	drawQrCode(doc, qrPayload(code), qrX, qrY, qrSize);
+
+	const parts = code.split("-");
+	const line1 = parts.slice(0, 2).join("-");
+	const line2 = parts.slice(2).join("-");
+
+	setTextHex(doc, WHITE);
+	doc.setFont("helvetica", "normal");
+	doc.setFontSize(6.2);
+	doc.text("KODE LAPORAN", x + 8, y + 15);
+	doc.setFont("helvetica", "bold");
+	doc.setFontSize(9);
+	doc.text(line1, x + 8, y + 27);
+	doc.text(line2, x + 8, y + 38);
+	doc.setFont("helvetica", "normal");
+	doc.setFontSize(5.6);
+	doc.text("Pindai QR untuk cek keaslian", x + 8, y + 49);
+}
+
 export function buildCfitReportPDF(
 	sub: CfitPdfSubmission,
 	result: CfitPdfResult,
@@ -117,6 +163,7 @@ export function buildCfitReportPDF(
 	const pageW = doc.internal.pageSize.getWidth();
 	const pageH = doc.internal.pageSize.getHeight();
 	const margin = 28;
+	const reportCode = buildReportCode("IQ", sub.id);
 
 	const payload = (result.payload ?? {}) as {
 		perSubtest?: CfitSubtestScore[];
@@ -155,23 +202,10 @@ export function buildCfitReportPDF(
 		70,
 	);
 
-	const badgeW = 110;
-	const badgeH = 50;
+	const badgeW = 152;
+	const badgeH = 58;
 	const badgeX = pageW - margin - badgeW;
-	setFillHex(doc, INK);
-	doc.rect(badgeX, 14, badgeW, badgeH, "F");
-	setFillHex(doc, ACCENT);
-	doc.rect(badgeX, 14, badgeW, 3, "F");
-	setTextHex(doc, WHITE);
-	doc.setFont("helvetica", "normal");
-	doc.setFontSize(7);
-	doc.text("KODE LAPORAN", badgeX + 10, 30);
-	doc.setFont("helvetica", "bold");
-	doc.setFontSize(13);
-	doc.text(sub.id.slice(0, 8).toUpperCase(), badgeX + 10, 46);
-	doc.setFont("helvetica", "normal");
-	doc.setFontSize(7);
-	doc.text("Rahasia \u2022 Internal", badgeX + 10, 58);
+	drawVerifyBadge(doc, reportCode, badgeX, 12, badgeW, badgeH);
 
 	setDrawHex(doc, HAIRLINE);
 	doc.setLineWidth(0.5);
@@ -360,7 +394,7 @@ export function buildCfitReportPDF(
 	y = nextY(doc, y + 4) + 10;
 
 	// ── DISCLAIMER ──
-	const boxY = pageH - 56;
+	const boxY = pageH - 62;
 	setFillHex(doc, "#E0F2FE");
 	doc.rect(margin, boxY, pageW - margin * 2, 22, "F");
 	setDrawHex(doc, ACCENT_DEEP);
@@ -384,14 +418,20 @@ export function buildCfitReportPDF(
 	// ── FOOTER ──
 	setDrawHex(doc, HAIRLINE);
 	doc.setLineWidth(0.4);
-	doc.line(margin, pageH - 24, pageW - margin, pageH - 24);
+	doc.line(margin, pageH - 30, pageW - margin, pageH - 30);
+	setTextHex(doc, INK);
+	doc.setFont("helvetica", "bold");
+	doc.setFontSize(7);
+	doc.text(`${LEMBAGA_PRODI} \u2014 ${LEMBAGA_UNIT}`, margin, pageH - 21);
 	setTextHex(doc, SOFT_INK);
 	doc.setFont("helvetica", "normal");
-	doc.setFontSize(7.6);
+	doc.setFontSize(6.6);
+	doc.text(verificationFooterText(reportCode), margin, pageH - 13);
+	doc.setFontSize(6.6);
 	doc.text(
 		"EKIU \u2014 Tes IQ CFIT Skala 3 \u2022 Rahasia & untuk keperluan internal.",
 		margin,
-		pageH - 12,
+		pageH - 6,
 	);
 
 	if (doc.getNumberOfPages() > 1) doc.setPage(1);
