@@ -1,440 +1,604 @@
-// Laporan Tes IQ — CFIT Skala 3. 1 lembar A4 portrait, kompak tapi lengkap.
+// ──────────────────────────────────────────────────────────────────
+// Laporan individual Tes IQ — CFIT Skala 3 (Bentuk A + B), satu halaman A4.
 // TERPISAH dari laporan minat-bakat (src/lib/pdf.ts).
+// ──────────────────────────────────────────────────────────────────
 
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
+import jsPDF from "jspdf"
+import autoTable from "jspdf-autotable"
 import {
-	LEMBAGA_PRODI,
-	LEMBAGA_UNIT,
-	buildReportCode,
-	drawQrCode,
-	qrPayload,
-	verificationFooterText,
-} from "../report-verification";
+  LEMBAGA_PRODI,
+  LEMBAGA_UNIT,
+  buildReportCode,
+  drawQrCode,
+  qrPayload,
+  verificationFooterText,
+} from "../report-verification"
+import type { CfitSubtestScore } from "./scoring"
 
 export type CfitPdfSubmission = {
-	id: string;
-	form: string;
-	fullName: string | null;
-	gender: string | null;
-	age: number | null;
-	grade: string | null;
-	school: string | null;
-	startedAt: Date;
-	finishedAt: Date | null;
-};
+  id: string
+  form: string
+  fullName: string | null
+  gender: string | null
+  age: number | null
+  grade: string | null
+  school: string | null
+  startedAt: Date | string
+  finishedAt: Date | string | null
+}
 
 export type CfitPdfResult = {
-	rawScoreA: number | null;
-	rawScoreB: number | null;
-	rawScoreTotal: number;
-	iq: number;
-	classification: string;
-	payload: unknown;
-	generatedAt: Date;
-};
+  rawScoreA: number | null
+  rawScoreB: number | null
+  rawScoreTotal: number
+  iq: number
+  classification: string
+  payload?: unknown
+  generatedAt?: Date | string | null
+}
 
-type CfitSubtestScore = {
-	subtestCode: string;
-	correct: number;
-	answered: number;
-	total: number;
-};
+// ─── Palet ───
+const INK = "#0F172A"
+const SOFT_INK = "#475569"
+const HAIRLINE = "#CBD5E1"
+const STRIPE = "#F8FAFC"
+const PANEL = "#F1F5F9"
+const WHITE = "#FFFFFF"
+const ACCENT = "#22D3EE"
+const ACCENT_DEEP = "#0E7490"
+const HIGHLIGHT = "#CFFAFE"
 
-// ── PALETTE ────────────────────────────────────────────────
-const INK = "#0F172A";
-const SOFT_INK = "#475569";
-const HAIRLINE = "#CBD5E1";
-const STRIPE = "#F8FAFC";
-const PANEL = "#F1F5F9";
-const WHITE = "#FFFFFF";
-const ACCENT = "#22D3EE";
-const ACCENT_DEEP = "#0E7490";
-const HIGHLIGHT = "#CFFAFE";
+// ─── Identitas penanda tangan (bisa diatur lewat environment variable) ───
+const KOP_KOTA = (process.env.REPORT_KOTA ?? "Metro").trim()
+const KAPRODI_NAMA = (process.env.REPORT_KAPRODI_NAMA ?? "").trim()
+const KAPRODI_NIDN = (process.env.REPORT_KAPRODI_NIDN ?? "").trim()
+const TESTER_NAMA = (process.env.REPORT_TESTER_NAMA ?? "").trim()
+const TESTER_NA = (process.env.REPORT_TESTER_NA ?? "").trim()
 
 const FORM_LABEL: Record<string, string> = {
-	FORM_3A: "Bentuk A",
-	FORM_3B: "Bentuk B",
-	FORM_3AB: "Bentuk A + B",
-};
+  FORM_3A: "Bentuk A",
+  FORM_3B: "Bentuk B",
+  FORM_3AB: "Bentuk A + B",
+}
 
 const SUBTEST_LABEL: Record<string, string> = {
-	"3A_SERIES": "A — Subtes 1: Series",
-	"3A_CLASSIFICATION": "A — Subtes 2: Classification",
-	"3A_MATRICES": "A — Subtes 3: Matrices",
-	"3A_CONDITIONS": "A — Subtes 4: Conditions (Topology)",
-	"3B_SERIES": "B — Subtes 1: Series",
-	"3B_CLASSIFICATION": "B — Subtes 2: Classification",
-	"3B_MATRICES": "B — Subtes 3: Matrices",
-	"3B_CONDITIONS": "B — Subtes 4: Conditions (Topology)",
-};
+  "3A_SERIES": "A — Subtes 1: Series",
+  "3A_CLASSIFICATION": "A — Subtes 2: Classification",
+  "3A_MATRICES": "A — Subtes 3: Matrices",
+  "3A_CONDITIONS": "A — Subtes 4: Conditions (Topology)",
+  "3B_SERIES": "B — Subtes 1: Series",
+  "3B_CLASSIFICATION": "B — Subtes 2: Classification",
+  "3B_MATRICES": "B — Subtes 3: Matrices",
+  "3B_CONDITIONS": "B — Subtes 4: Conditions (Topology)",
+}
 
-const CLASS_BANDS: Array<{ range: string; label: string; min: number; max: number }> = [
-	{ range: ">= 170", label: "Jenius (Genius)", min: 170, max: 9999 },
-	{ range: "140 - 169", label: "Sangat Superior (Very Superior)", min: 140, max: 169 },
-	{ range: "120 - 139", label: "Superior", min: 120, max: 139 },
-	{ range: "110 - 119", label: "Di Atas Rata-rata (High Average)", min: 110, max: 119 },
-	{ range: "90 - 109", label: "Rata-rata (Average)", min: 90, max: 109 },
-	{ range: "80 - 89", label: "Di Bawah Rata-rata (Low Average)", min: 80, max: 89 },
-	{ range: "70 - 79", label: "Borderline", min: 70, max: 79 },
-	{ range: "< 70", label: "Terhambat (Mentally Defective)", min: -9999, max: 69 },
-];
+/** Kelompok grafik: 4 subtes CFIT, nilai Bentuk A + B digabung. */
+const CHART_GROUPS: Array<{ key: string; label: string }> = [
+  { key: "SERIES", label: "Series" },
+  { key: "CLASSIFICATION", label: "Classification" },
+  { key: "MATRICES", label: "Matrices" },
+  { key: "CONDITIONS", label: "Conditions" },
+]
 
+const NORM_GROUP_LABEL: Record<string, string> = {
+  "15": "usia 15 tahun",
+  "16": "usia 16 tahun",
+  "17+": "usia 17 tahun ke atas",
+}
+
+// ─── Helper warna & teks ───
 function hexToRGB(hex: string): [number, number, number] {
-	return [
-		parseInt(hex.slice(1, 3), 16),
-		parseInt(hex.slice(3, 5), 16),
-		parseInt(hex.slice(5, 7), 16),
-	];
+  const h = hex.replace("#", "")
+  return [
+    parseInt(h.slice(0, 2), 16),
+    parseInt(h.slice(2, 4), 16),
+    parseInt(h.slice(4, 6), 16),
+  ]
 }
-function setFillHex(doc: jsPDF, hex: string): void {
-	const [r, g, b] = hexToRGB(hex);
-	doc.setFillColor(r, g, b);
+
+function setFillHex(doc: jsPDF, hex: string) {
+  const [r, g, b] = hexToRGB(hex)
+  doc.setFillColor(r, g, b)
 }
-function setDrawHex(doc: jsPDF, hex: string): void {
-	const [r, g, b] = hexToRGB(hex);
-	doc.setDrawColor(r, g, b);
+
+function setDrawHex(doc: jsPDF, hex: string) {
+  const [r, g, b] = hexToRGB(hex)
+  doc.setDrawColor(r, g, b)
 }
-function setTextHex(doc: jsPDF, hex: string): void {
-	const [r, g, b] = hexToRGB(hex);
-	doc.setTextColor(r, g, b);
+
+function setTextHex(doc: jsPDF, hex: string) {
+  const [r, g, b] = hexToRGB(hex)
+  doc.setTextColor(r, g, b)
 }
+
 function nextY(doc: jsPDF, fallback: number): number {
-	const last = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable;
-	return last?.finalY ?? fallback;
-}
-function fmtDate(d?: Date | null): string {
-	if (!d) return "-";
-	return (
-		new Date(d).toLocaleString("id-ID", {
-			day: "2-digit",
-			month: "short",
-			year: "numeric",
-			hour: "2-digit",
-			minute: "2-digit",
-			timeZone: "Asia/Jakarta",
-		}) + " WIB"
-	);
+  const last = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable
+  return last?.finalY ? last.finalY : fallback
 }
 
-// ── BADGE VALIDASI (kode laporan + QR) ─────────────────────
-// QR mengarah ke halaman /verifikasi supaya keaslian laporan bisa dicek
-// siapa pun; kodenya juga dicetak agar bisa diketik manual.
-function drawVerifyBadge(
-	doc: jsPDF,
-	code: string,
-	x: number,
-	y: number,
-	w: number,
-	h: number,
-): void {
-	setFillHex(doc, INK);
-	doc.rect(x, y, w, h, "F");
-	setFillHex(doc, ACCENT);
-	doc.rect(x, y, w, 3, "F");
-
-	const qrSize = h - 14;
-	const qrX = x + w - qrSize - 7;
-	const qrY = y + 10;
-	drawQrCode(doc, qrPayload(code), qrX, qrY, qrSize);
-
-	const parts = code.split("-");
-	const line1 = parts.slice(0, 2).join("-");
-	const line2 = parts.slice(2).join("-");
-
-	setTextHex(doc, WHITE);
-	doc.setFont("helvetica", "normal");
-	doc.setFontSize(6.2);
-	doc.text("KODE LAPORAN", x + 8, y + 15);
-	doc.setFont("helvetica", "bold");
-	doc.setFontSize(9);
-	doc.text(line1, x + 8, y + 27);
-	doc.text(line2, x + 8, y + 38);
-	doc.setFont("helvetica", "normal");
-	doc.setFontSize(5.6);
-	doc.text("Pindai QR untuk cek keaslian", x + 8, y + 49);
+function fmtDate(v: Date | string | null | undefined): string {
+  if (!v) return "-"
+  const d = typeof v === "string" ? new Date(v) : v
+  if (Number.isNaN(d.getTime())) return "-"
+  return d.toLocaleString("id-ID", { dateStyle: "long", timeStyle: "short" })
 }
 
+function fmtDateOnly(v: Date | string | null | undefined): string {
+  const d = !v ? new Date() : typeof v === "string" ? new Date(v) : v
+  const safe = Number.isNaN(d.getTime()) ? new Date() : d
+  return safe.toLocaleDateString("id-ID", { dateStyle: "long" })
+}
+
+// ─── Kop resmi ───
+function drawKop(doc: jsPDF, margin: number, pageW: number): number {
+  setFillHex(doc, INK)
+  doc.rect(0, 0, pageW, 5, "F")
+
+  setTextHex(doc, INK)
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(12.5)
+  doc.text("UNIVERSITAS MUHAMMADIYAH METRO", pageW / 2, 30, { align: "center" })
+  doc.setFontSize(10.5)
+  doc.text("PROGRAM PASCASARJANA", pageW / 2, 43, { align: "center" })
+  doc.setFontSize(9.2)
+  doc.text(
+    "PROGRAM STUDI MAGISTER BIMBINGAN DAN KONSELING",
+    pageW / 2,
+    55,
+    { align: "center" },
+  )
+
+  setDrawHex(doc, INK)
+  doc.setLineWidth(1.6)
+  doc.line(margin, 63, pageW - margin, 63)
+  doc.setLineWidth(0.5)
+  doc.line(margin, 66, pageW - margin, 66)
+  return 66
+}
+
+/** Penanda kerahasiaan di kanan atas (menggantikan blok kode laporan). */
+function drawRahasiaBadge(doc: jsPDF, pageW: number, margin: number) {
+  const w = 96
+  const h = 24
+  const x = pageW - margin - w
+  const y = 14
+  setFillHex(doc, INK)
+  doc.rect(x, y, w, h, "F")
+  setTextHex(doc, WHITE)
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(11)
+  doc.text("RAHASIA", x + w / 2, y + 16, { align: "center" })
+  setTextHex(doc, INK)
+}
+
+// ─── Grafik batang: % benar per subtes (A + B digabung) ───
+function drawSubtestChart(
+  doc: jsPDF,
+  perSubtest: CfitSubtestScore[],
+  margin: number,
+  yIn: number,
+  pageW: number,
+): number {
+  const innerW = pageW - margin * 2
+  const chartH = 96
+  const plotH = chartH - 16
+  const baseY = yIn + chartH
+
+  setFillHex(doc, WHITE)
+  setDrawHex(doc, HAIRLINE)
+  doc.setLineWidth(0.6)
+  doc.rect(margin, yIn - 8, innerW, chartH + 40, "FD")
+
+  const plotX = margin + 34
+  const plotW = innerW - 34 - 12
+
+  for (const p of [0, 25, 50, 75, 100]) {
+    const gy = baseY - plotH * (p / 100)
+    setDrawHex(doc, p === 0 ? INK : HAIRLINE)
+    doc.setLineWidth(p === 0 ? 0.8 : 0.3)
+    doc.line(plotX, gy, plotX + plotW, gy)
+    setTextHex(doc, SOFT_INK)
+    doc.setFont("helvetica", "normal")
+    doc.setFontSize(6.2)
+    doc.text(`${p}%`, plotX - 5, gy + 2, { align: "right" })
+  }
+
+  const groups = CHART_GROUPS.map((g) => {
+    const rows = perSubtest.filter((s) => s.subtestCode.endsWith(`_${g.key}`))
+    const correct = rows.reduce((n, s) => n + s.correct, 0)
+    const total = rows.reduce((n, s) => n + s.total, 0)
+    const pct = total > 0 ? Math.round((correct / total) * 100) : 0
+    return { ...g, correct, total, pct }
+  })
+
+  const slotW = plotW / groups.length
+  const barW = Math.min(52, slotW * 0.5)
+
+  groups.forEach((g, i) => {
+    const cx = plotX + slotW * i + slotW / 2
+    const h = plotH * (Math.max(0, Math.min(100, g.pct)) / 100)
+    if (h > 0) {
+      setFillHex(doc, ACCENT)
+      doc.rect(cx - barW / 2, baseY - h, barW, h, "F")
+      setDrawHex(doc, INK)
+      doc.setLineWidth(0.8)
+      doc.rect(cx - barW / 2, baseY - h, barW, h)
+    }
+    setTextHex(doc, ACCENT_DEEP)
+    doc.setFont("helvetica", "bold")
+    doc.setFontSize(8)
+    doc.text(`${g.pct}%`, cx, baseY - h - 4, { align: "center" })
+
+    setTextHex(doc, INK)
+    doc.setFont("helvetica", "bold")
+    doc.setFontSize(7.2)
+    doc.text(g.label, cx, baseY + 11, { align: "center" })
+    setTextHex(doc, SOFT_INK)
+    doc.setFont("helvetica", "normal")
+    doc.setFontSize(6.4)
+    doc.text(`${g.correct}/${g.total} benar`, cx, baseY + 20, { align: "center" })
+  })
+
+  setTextHex(doc, SOFT_INK)
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(6.4)
+  doc.text(
+    "Persentase jawaban benar per subtes (Bentuk A + B digabung).",
+    margin + 6,
+    baseY + 30,
+  )
+  setTextHex(doc, INK)
+
+  return yIn + chartH + 40
+}
+
+// ─── QR validasi (tengah bawah grafik) ───
+function drawQrBlock(
+  doc: jsPDF,
+  code: string,
+  yIn: number,
+  pageW: number,
+): number {
+  const size = 64
+  const x = (pageW - size) / 2
+  drawQrCode(doc, qrPayload(code), x, yIn, size)
+
+  let y = yIn + size + 9
+  setTextHex(doc, INK)
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(8.4)
+  doc.text(code, pageW / 2, y, { align: "center" })
+
+  y += 9
+  setTextHex(doc, SOFT_INK)
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(6.6)
+  doc.text(
+    "Pindai QR atau masukkan kode di atas untuk memvalidasi keaslian laporan ini.",
+    pageW / 2,
+    y,
+    { align: "center" },
+  )
+  setTextHex(doc, INK)
+  return y + 6
+}
+
+// ─── Dua blok tanda tangan ───
+function drawSignatures(
+  doc: jsPDF,
+  margin: number,
+  yIn: number,
+  pageW: number,
+  tanggal: string,
+): number {
+  let y = yIn
+  setTextHex(doc, INK)
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(8)
+  doc.text(`${KOP_KOTA}, ${tanggal}`, pageW - margin, y, { align: "right" })
+  y += 14
+
+  const gap = 24
+  const colW = (pageW - margin * 2 - gap) / 2
+  const cols = [
+    {
+      x: margin,
+      jabatan: ["Ketua Program Studi", "Magister Bimbingan dan Konseling"],
+      nama: KAPRODI_NAMA,
+      idLabel: "NIDN",
+      idValue: KAPRODI_NIDN,
+    },
+    {
+      x: margin + colW + gap,
+      jabatan: ["Tester"],
+      nama: TESTER_NAMA,
+      idLabel: "NA",
+      idValue: TESTER_NA,
+    },
+  ]
+
+  for (const c of cols) {
+    let cy = y
+    setTextHex(doc, INK)
+    doc.setFont("helvetica", "bold")
+    doc.setFontSize(8)
+    for (const line of c.jabatan) {
+      doc.text(line, c.x, cy)
+      cy += 10
+    }
+
+    const nameY = y + 52
+    doc.setFont("helvetica", "bold")
+    doc.setFontSize(8.6)
+    doc.text(c.nama || "(...............................................)", c.x, nameY)
+    setDrawHex(doc, INK)
+    doc.setLineWidth(0.5)
+    doc.line(c.x, nameY + 3, c.x + Math.min(colW, 176), nameY + 3)
+
+    setTextHex(doc, SOFT_INK)
+    doc.setFont("helvetica", "normal")
+    doc.setFontSize(7.6)
+    doc.text(
+      `${c.idLabel}. ${c.idValue || "................................"}`,
+      c.x,
+      nameY + 13,
+    )
+    setTextHex(doc, INK)
+  }
+
+  return y + 70
+}
+
+// ─── Laporan ───
 export function buildCfitReportPDF(
-	sub: CfitPdfSubmission,
-	result: CfitPdfResult,
+  sub: CfitPdfSubmission,
+  result: CfitPdfResult,
 ): Buffer {
-	const doc = new jsPDF({ unit: "pt", format: "a4" });
-	const pageW = doc.internal.pageSize.getWidth();
-	const pageH = doc.internal.pageSize.getHeight();
-	const margin = 28;
-	const reportCode = buildReportCode("IQ", sub.id);
+  const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "portrait" })
+  const pageW = doc.internal.pageSize.getWidth()
+  const pageH = doc.internal.pageSize.getHeight()
+  const margin = 28
+  const innerW = pageW - margin * 2
 
-	const payload = (result.payload ?? {}) as {
-		perSubtest?: CfitSubtestScore[];
-		normGroup?: string;
-		classificationEn?: string;
-	};
-	const perSubtest = Array.isArray(payload.perSubtest) ? payload.perSubtest : [];
-	const normGroup = typeof payload.normGroup === "string" ? payload.normGroup : "17+";
+  const payload = (result.payload ?? {}) as {
+    perSubtest?: CfitSubtestScore[]
+    normGroup?: string
+    classificationEn?: string
+    belowNorm?: boolean
+  }
+  const perSubtest = payload.perSubtest ?? []
+  const normGroup = payload.normGroup ?? "17+"
+  const normGroupLabel = NORM_GROUP_LABEL[normGroup] ?? `usia ${normGroup}`
+  const reportCode = buildReportCode("IQ", sub.id)
 
-	// ── HEADER ──
-	setFillHex(doc, ACCENT);
-	doc.rect(0, 0, pageW, 4, "F");
-	setFillHex(doc, INK);
-	doc.rect(margin, 14, 22, 22, "F");
-	setFillHex(doc, ACCENT);
-	doc.rect(margin + 4, 18, 14, 14, "F");
-	setTextHex(doc, INK);
-	doc.setFont("helvetica", "bold");
-	doc.setFontSize(14);
-	doc.text("EKIU", margin + 30, 26);
-	doc.setFont("helvetica", "normal");
-	setTextHex(doc, SOFT_INK);
-	doc.setFontSize(7.6);
-	doc.text("ESTIMASI KEMAMPUAN INTELEKTUAL UMUM", margin + 30, 35);
+  // Kop resmi + penanda RAHASIA
+  drawKop(doc, margin, pageW)
+  drawRahasiaBadge(doc, pageW, margin)
 
-	setTextHex(doc, INK);
-	doc.setFont("helvetica", "bold");
-	doc.setFontSize(18);
-	doc.text("Laporan Tes IQ - CFIT Skala 3", margin, 58);
-	doc.setFont("helvetica", "normal");
-	setTextHex(doc, SOFT_INK);
-	doc.setFontSize(8.6);
-	doc.text(
-		`${sub.fullName || "Peserta"}  \u2022  ${FORM_LABEL[sub.form] ?? sub.form}  \u2022  Dicetak ${fmtDate(new Date())}`,
-		margin,
-		70,
-	);
+  // Judul laporan
+  setTextHex(doc, INK)
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(14)
+  doc.text("LAPORAN HASIL TES INTELEGENSI", pageW / 2, 86, { align: "center" })
+  setTextHex(doc, SOFT_INK)
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(8.4)
+  doc.text(
+    `Culture Fair Intelligence Test (CFIT) Skala 3 — ${FORM_LABEL[sub.form] ?? "Bentuk A + B"}`,
+    pageW / 2,
+    98,
+    { align: "center" },
+  )
 
-	const badgeW = 152;
-	const badgeH = 58;
-	const badgeX = pageW - margin - badgeW;
-	drawVerifyBadge(doc, reportCode, badgeX, 12, badgeW, badgeH);
+  // Identitas peserta
+  setTextHex(doc, INK)
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(9)
+  doc.text("IDENTITAS PESERTA", margin, 116)
 
-	setDrawHex(doc, HAIRLINE);
-	doc.setLineWidth(0.5);
-	doc.line(margin, 80, pageW - margin, 80);
+  autoTable(doc, {
+    startY: 122,
+    margin: { left: margin, right: margin },
+    theme: "grid",
+    styles: {
+      font: "helvetica",
+      fontSize: 8,
+      cellPadding: 3.5,
+      lineColor: hexToRGB(HAIRLINE),
+      lineWidth: 0.4,
+      textColor: hexToRGB(INK),
+    },
+    columnStyles: {
+      0: { cellWidth: 88, fontStyle: "bold", fillColor: hexToRGB(PANEL) },
+      1: { cellWidth: innerW / 2 - 88 },
+      2: { cellWidth: 88, fontStyle: "bold", fillColor: hexToRGB(PANEL) },
+      3: { cellWidth: innerW / 2 - 88 },
+    },
+    body: [
+      ["Nama", sub.fullName ?? "-", "Bentuk Tes", FORM_LABEL[sub.form] ?? sub.form],
+      [
+        "Jenis Kelamin",
+        sub.gender ?? "-",
+        "Usia",
+        sub.age != null ? `${sub.age} tahun` : "-",
+      ],
+      ["Kelas", sub.grade ?? "-", "Sekolah", sub.school ?? "-"],
+      [
+        "Mulai",
+        fmtDate(sub.startedAt),
+        "Selesai",
+        fmtDate(sub.finishedAt),
+      ],
+    ],
+  })
 
-	// ── IDENTITAS ──
-	let y = 92;
-	setTextHex(doc, INK);
-	doc.setFont("helvetica", "bold");
-	doc.setFontSize(9);
-	doc.text("IDENTITAS PESERTA", margin, y);
-	autoTable(doc, {
-		startY: y + 4,
-		body: [
-			["Nama", sub.fullName || "-", "L/P", sub.gender || "-"],
-			["Usia", sub.age != null ? `${sub.age} th` : "-", "Kelas", sub.grade || "-"],
-			["Sekolah", sub.school || "-", "Bentuk Tes", FORM_LABEL[sub.form] ?? sub.form],
-			["Mulai", fmtDate(sub.startedAt), "Selesai", fmtDate(sub.finishedAt)],
-		],
-		theme: "plain",
-		styles: {
-			font: "helvetica",
-			fontSize: 8,
-			lineWidth: 0.3,
-			lineColor: hexToRGB(HAIRLINE),
-			textColor: hexToRGB(INK),
-			cellPadding: { top: 2.5, bottom: 2.5, left: 6, right: 6 },
-			overflow: "ellipsize",
-		},
-		columnStyles: {
-			0: { fontStyle: "bold", textColor: hexToRGB(SOFT_INK), cellWidth: 92 },
-			1: { fontStyle: "bold", cellWidth: "auto" },
-			2: { fontStyle: "bold", textColor: hexToRGB(SOFT_INK), cellWidth: 76 },
-			3: { fontStyle: "bold", cellWidth: 130 },
-		},
-		margin: { left: margin, right: margin },
-	});
-	y = nextY(doc, y + 4) + 12;
+  // Kartu hasil IQ
+  let y = nextY(doc, 200) + 14
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(9)
+  setTextHex(doc, INK)
+  doc.text("HASIL PENGUKURAN", margin, y)
+  y += 6
 
-	// ── KARTU IQ ──
-	setTextHex(doc, INK);
-	doc.setFont("helvetica", "bold");
-	doc.setFontSize(9);
-	doc.text("HASIL TES IQ (CFIT SKALA 3)", margin, y);
-	const cardY = y + 4;
-	const cardH = 62;
-	setFillHex(doc, PANEL);
-	doc.rect(margin, cardY, pageW - margin * 2, cardH, "F");
-	setDrawHex(doc, HAIRLINE);
-	doc.setLineWidth(0.5);
-	doc.rect(margin, cardY, pageW - margin * 2, cardH);
+  const cardH = 62
+  setFillHex(doc, PANEL)
+  setDrawHex(doc, HAIRLINE)
+  doc.setLineWidth(0.6)
+  doc.rect(margin, y, innerW, cardH, "FD")
 
-	const scoreW = 120;
-	setFillHex(doc, INK);
-	doc.rect(margin, cardY, scoreW, cardH, "F");
-	setFillHex(doc, ACCENT);
-	doc.rect(margin, cardY, scoreW, 3, "F");
-	setTextHex(doc, WHITE);
-	doc.setFont("helvetica", "normal");
-	doc.setFontSize(6.6);
-	doc.text("SKOR IQ (CFIT)", margin + 10, cardY + 13);
-	doc.setFont("helvetica", "bold");
-	doc.setFontSize(28);
-	doc.text(String(result.iq), margin + 10, cardY + 44);
-	doc.setFont("helvetica", "normal");
-	doc.setFontSize(6.6);
-	doc.text(`Norma kelompok usia ${normGroup}`, margin + 10, cardY + 56);
+  const scoreW = 120
+  setFillHex(doc, HIGHLIGHT)
+  setDrawHex(doc, ACCENT_DEEP)
+  doc.setLineWidth(0.8)
+  doc.rect(margin + 8, y + 8, scoreW, cardH - 16, "FD")
+  setTextHex(doc, ACCENT_DEEP)
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(7)
+  doc.text("SKOR IQ", margin + 8 + scoreW / 2, y + 22, { align: "center" })
+  setTextHex(doc, INK)
+  doc.setFontSize(28)
+  doc.text(
+    `${payload.belowNorm ? "≤" : ""}${result.iq}`,
+    margin + 8 + scoreW / 2,
+    y + 46,
+    { align: "center" },
+  )
 
-	const rightX = margin + scoreW + 12;
-	const rightW = pageW - margin * 2 - scoreW - 22;
-	setTextHex(doc, INK);
-	doc.setFont("helvetica", "bold");
-	doc.setFontSize(13);
-	doc.text(result.classification, rightX, cardY + 17, { maxWidth: rightW });
-	if (payload.classificationEn) {
-		doc.setFont("helvetica", "normal");
-		setTextHex(doc, SOFT_INK);
-		doc.setFontSize(8.2);
-		doc.text(payload.classificationEn, rightX, cardY + 28, { maxWidth: rightW });
-	}
-	setTextHex(doc, INK);
-	doc.setFont("helvetica", "bold");
-	doc.setFontSize(7.2);
-	doc.text("RAW SCORE (RS)", rightX, cardY + 42);
-	doc.setFont("helvetica", "normal");
-	setTextHex(doc, SOFT_INK);
-	doc.setFontSize(8);
-	const rsParts: string[] = [];
-	if (result.rawScoreA != null) rsParts.push(`Bentuk A: ${result.rawScoreA}`);
-	if (result.rawScoreB != null) rsParts.push(`Bentuk B: ${result.rawScoreB}`);
-	rsParts.push(`Total: ${result.rawScoreTotal}`);
-	doc.text(rsParts.join("   \u2022   "), rightX, cardY + 53);
-	y = cardY + cardH + 12;
+  const infoX = margin + scoreW + 24
+  setTextHex(doc, SOFT_INK)
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(7.4)
+  doc.text(`Norma kelompok ${normGroupLabel}`, infoX, y + 18)
+  setTextHex(doc, INK)
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(13)
+  doc.text(result.classification, infoX, y + 36)
+  if (payload.classificationEn) {
+    setTextHex(doc, SOFT_INK)
+    doc.setFont("helvetica", "normal")
+    doc.setFontSize(7.4)
+    doc.text(payload.classificationEn, infoX, y + 47)
+  }
 
-	// ── RINCIAN PER SUBTES ──
-	if (perSubtest.length > 0) {
-		setTextHex(doc, INK);
-		doc.setFont("helvetica", "bold");
-		doc.setFontSize(9);
-		doc.text("RINCIAN PER SUBTES", margin, y);
-		const rows = perSubtest.map((s) => [
-			SUBTEST_LABEL[s.subtestCode] ?? s.subtestCode,
-			String(s.correct),
-			String(s.answered),
-			String(s.total),
-			`${Math.round((s.correct / Math.max(1, s.total)) * 100)}%`,
-		]);
-		autoTable(doc, {
-			startY: y + 4,
-			head: [["Subtes", "Benar", "Dijawab", "Jumlah Soal", "% Benar"]],
-			body: rows,
-			theme: "plain",
-			styles: {
-				font: "helvetica",
-				fontSize: 8.2,
-				lineWidth: 0.3,
-				lineColor: hexToRGB(HAIRLINE),
-				textColor: hexToRGB(INK),
-				cellPadding: { top: 2.6, bottom: 2.6, left: 6, right: 6 },
-				overflow: "ellipsize",
-			},
-			headStyles: {
-				fillColor: hexToRGB(INK),
-				textColor: hexToRGB(WHITE),
-				fontStyle: "bold",
-				fontSize: 7.8,
-			},
-			columnStyles: {
-				0: { cellWidth: "auto", fontStyle: "bold" },
-				1: { cellWidth: 52, halign: "center" },
-				2: { cellWidth: 56, halign: "center" },
-				3: { cellWidth: 68, halign: "center" },
-				4: { cellWidth: 56, halign: "center" },
-			},
-			alternateRowStyles: { fillColor: hexToRGB(STRIPE) },
-			margin: { left: margin, right: margin },
-		});
-		y = nextY(doc, y + 4) + 12;
-	}
+  const rsX = pageW - margin - 150
+  setTextHex(doc, INK)
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(7)
+  doc.text("RAW SCORE", rsX, y + 18)
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(7.6)
+  doc.text(`Bentuk A : ${result.rawScoreA ?? "-"}`, rsX, y + 30)
+  doc.text(`Bentuk B : ${result.rawScoreB ?? "-"}`, rsX, y + 40)
+  doc.setFont("helvetica", "bold")
+  doc.text(`Total (A + B) : ${result.rawScoreTotal}`, rsX, y + 51)
 
-	// ── SKALA KLASIFIKASI ──
-	setTextHex(doc, INK);
-	doc.setFont("helvetica", "bold");
-	doc.setFontSize(9);
-	doc.text("SKALA KLASIFIKASI IQ (CFIT)", margin, y);
-	const bandRows = CLASS_BANDS.map((b) => [
-		b.range,
-		b.label,
-		result.iq >= b.min && result.iq <= b.max ? "<= POSISI PESERTA" : "",
-	]);
-	autoTable(doc, {
-		startY: y + 4,
-		head: [["Rentang IQ", "Klasifikasi", ""]],
-		body: bandRows,
-		theme: "plain",
-		styles: {
-			font: "helvetica",
-			fontSize: 8,
-			lineWidth: 0.3,
-			lineColor: hexToRGB(HAIRLINE),
-			textColor: hexToRGB(INK),
-			cellPadding: { top: 2.2, bottom: 2.2, left: 6, right: 6 },
-		},
-		headStyles: {
-			fillColor: hexToRGB(INK),
-			textColor: hexToRGB(WHITE),
-			fontStyle: "bold",
-			fontSize: 7.6,
-		},
-		columnStyles: {
-			0: { cellWidth: 90, halign: "center", fontStyle: "bold" },
-			1: { cellWidth: "auto" },
-			2: { cellWidth: 120, halign: "left", fontStyle: "bold", textColor: hexToRGB(ACCENT_DEEP) },
-		},
-		alternateRowStyles: { fillColor: hexToRGB(STRIPE) },
-		margin: { left: margin, right: margin },
-		didParseCell: (data) => {
-			if (data.section !== "body") return;
-			const band = CLASS_BANDS[data.row.index];
-			if (band && result.iq >= band.min && result.iq <= band.max) {
-				data.cell.styles.fillColor = hexToRGB(HIGHLIGHT);
-				data.cell.styles.fontStyle = "bold";
-			}
-		},
-	});
-	y = nextY(doc, y + 4) + 10;
+  y += cardH + 16
 
-	// ── DISCLAIMER ──
-	const boxY = pageH - 62;
-	setFillHex(doc, "#E0F2FE");
-	doc.rect(margin, boxY, pageW - margin * 2, 22, "F");
-	setDrawHex(doc, ACCENT_DEEP);
-	doc.setLineWidth(0.4);
-	doc.rect(margin, boxY, pageW - margin * 2, 22);
-	setFillHex(doc, ACCENT_DEEP);
-	doc.rect(margin, boxY, 3, 22, "F");
-	setTextHex(doc, "#0C4A6E");
-	doc.setFont("helvetica", "bold");
-	doc.setFontSize(7);
-	doc.text("DISCLAIMER", margin + 8, boxY + 9);
-	setTextHex(doc, INK);
-	doc.setFont("helvetica", "normal");
-	doc.setFontSize(7);
-	const disclaimer =
-		`Skor dihitung dari Raw Score total ${result.rawScoreTotal} dengan tabel norma CFIT kelompok usia ${normGroup}. ` +
-		"Hasil bersifat skrining dan bukan pengganti pemeriksaan psikologis oleh psikolog berlisensi.";
-	const dLines = doc.splitTextToSize(disclaimer, pageW - margin * 2 - 80) as string[];
-	doc.text(dLines.slice(0, 2), margin + 70, boxY + 9);
+  // Rincian per subtes
+  setTextHex(doc, INK)
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(9)
+  doc.text("RINCIAN PER SUBTES", margin, y)
 
-	// ── FOOTER ──
-	setDrawHex(doc, HAIRLINE);
-	doc.setLineWidth(0.4);
-	doc.line(margin, pageH - 30, pageW - margin, pageH - 30);
-	setTextHex(doc, INK);
-	doc.setFont("helvetica", "bold");
-	doc.setFontSize(7);
-	doc.text(`${LEMBAGA_PRODI} \u2014 ${LEMBAGA_UNIT}`, margin, pageH - 21);
-	setTextHex(doc, SOFT_INK);
-	doc.setFont("helvetica", "normal");
-	doc.setFontSize(6.6);
-	doc.text(verificationFooterText(reportCode), margin, pageH - 13);
-	doc.setFontSize(6.6);
-	doc.text(
-		"EKIU \u2014 Tes IQ CFIT Skala 3 \u2022 Rahasia & untuk keperluan internal.",
-		margin,
-		pageH - 6,
-	);
+  autoTable(doc, {
+    startY: y + 6,
+    margin: { left: margin, right: margin },
+    theme: "grid",
+    styles: {
+      font: "helvetica",
+      fontSize: 7.6,
+      cellPadding: 3,
+      lineColor: hexToRGB(HAIRLINE),
+      lineWidth: 0.4,
+      textColor: hexToRGB(INK),
+    },
+    headStyles: {
+      fillColor: hexToRGB(INK),
+      textColor: hexToRGB(WHITE),
+      fontStyle: "bold",
+      fontSize: 7.4,
+    },
+    alternateRowStyles: { fillColor: hexToRGB(STRIPE) },
+    columnStyles: {
+      0: { cellWidth: innerW - 4 * 62 },
+      1: { cellWidth: 62, halign: "center" },
+      2: { cellWidth: 62, halign: "center" },
+      3: { cellWidth: 62, halign: "center" },
+      4: { cellWidth: 62, halign: "center", fontStyle: "bold" },
+    },
+    head: [["Subtes", "Benar", "Dijawab", "Jumlah Soal", "% Benar"]],
+    body: perSubtest.map((s) => [
+      SUBTEST_LABEL[s.subtestCode] ?? s.subtestCode,
+      String(s.correct),
+      String(s.answered),
+      String(s.total),
+      s.total > 0 ? `${Math.round((s.correct / s.total) * 100)}%` : "-",
+    ]),
+  })
 
-	if (doc.getNumberOfPages() > 1) doc.setPage(1);
-	while (doc.getNumberOfPages() > 1) doc.deletePage(doc.getNumberOfPages());
-	return Buffer.from(doc.output("arraybuffer"));
+  y = nextY(doc, y + 60) + 12
+
+  // Catatan penskoran
+  const noteLines = [
+    `Skor IQ diperoleh dengan mengonversi Raw Score total (A + B) = ${result.rawScoreTotal} memakai tabel norma CFIT Skala 3 kelompok ${normGroupLabel}.`,
+    payload.belowNorm
+      ? "Raw Score berada di bawah rentang tabel norma (baris terendah 20), sehingga skor IQ ditampilkan sebagai batas terendah norma."
+      : "Hasil ini bersifat skrining dan bukan pengganti pemeriksaan psikologis oleh psikolog berlisensi.",
+  ]
+  setFillHex(doc, HIGHLIGHT)
+  setDrawHex(doc, ACCENT_DEEP)
+  doc.setLineWidth(0.5)
+  const noteH = 12 + noteLines.length * 9
+  doc.rect(margin, y, innerW, noteH, "FD")
+  setTextHex(doc, INK)
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(6.8)
+  noteLines.forEach((line, i) => {
+    const wrapped = doc.splitTextToSize(line, innerW - 12) as string[]
+    doc.text(wrapped[0] ?? "", margin + 6, y + 11 + i * 9)
+  })
+  y += noteH + 16
+
+  // Grafik pengganti tabel skala klasifikasi
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(9)
+  setTextHex(doc, INK)
+  doc.text("GRAFIK CAPAIAN PER SUBTES", margin, y)
+  y = drawSubtestChart(doc, perSubtest, margin, y + 14, pageW) + 10
+
+  // QR validasi (tengah), lalu dua blok tanda tangan
+  y = drawQrBlock(doc, reportCode, y, pageW) + 8
+  drawSignatures(
+    doc,
+    margin,
+    y,
+    pageW,
+    fmtDateOnly(result.generatedAt ?? sub.finishedAt),
+  )
+
+  // Footer
+  setDrawHex(doc, HAIRLINE)
+  doc.setLineWidth(0.5)
+  doc.line(margin, pageH - 30, pageW - margin, pageH - 30)
+  setTextHex(doc, INK)
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(7)
+  doc.text(`${LEMBAGA_PRODI} — ${LEMBAGA_UNIT}`, margin, pageH - 21)
+  setTextHex(doc, SOFT_INK)
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(6.6)
+  doc.text(verificationFooterText(reportCode), margin, pageH - 13)
+  doc.setFontSize(6.4)
+  doc.text(
+    "Laporan Tes IQ (CFIT Skala 3) • Rahasia & hanya untuk keperluan layanan bimbingan dan konseling.",
+    margin,
+    pageH - 6,
+  )
+
+  // Pastikan tetap satu halaman
+  while (doc.getNumberOfPages() > 1) {
+    doc.deletePage(doc.getNumberOfPages())
+  }
+
+  return Buffer.from(doc.output("arraybuffer"))
 }
