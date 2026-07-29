@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { formsFor, getCfitFromRequest } from "@/lib/cfit/auth";
 import { computeCfitSubtestLock } from "@/lib/cfit/lock";
+import { cfitBreakRemainingSec, cfitBreakSecBetween } from "@/lib/cfit/breaks";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -58,8 +59,34 @@ export async function GET(req: NextRequest) {
       started: lock.started,
       locked: lock.locked,
       finishReason: lock.finishReason,
+      finishedAt: lock.finishedAt,
       remainingSec,
     });
+  }
+
+  // Jeda otomatis: subtes berikutnya baru boleh dibuka setelah jeda selesai.
+  // Dihitung dari waktu subtes sebelumnya terkunci (server-authoritative).
+  const activeIdx = items.findIndex((i) => !i.locked);
+  let activeBreak: {
+    code: string;
+    name: string;
+    breakSec: number;
+    remainingSec: number;
+    formChanged: boolean;
+  } | null = null;
+  if (activeIdx > 0) {
+    const prev = items[activeIdx - 1];
+    const active = items[activeIdx];
+    if (!active.started && prev.finishedAt) {
+      const breakSec = cfitBreakSecBetween(prev.form, active.form);
+      activeBreak = {
+        code: active.code,
+        name: active.name,
+        breakSec,
+        remainingSec: cfitBreakRemainingSec(prev.finishedAt, breakSec),
+        formChanged: prev.form !== active.form,
+      };
+    }
   }
 
   return NextResponse.json({
@@ -67,5 +94,6 @@ export async function GET(req: NextRequest) {
     profileFilled: !!submission.fullName,
     finishedAt: submission.finishedAt,
     subtests: items,
+    activeBreak,
   });
 }

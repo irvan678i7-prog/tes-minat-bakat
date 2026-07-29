@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { formsFor, getCfitFromRequest } from "@/lib/cfit/auth";
-import { computeCfitSubtestLock, ensureCfitSubtestStarted } from "@/lib/cfit/lock";
+import { computeCfitSubtestLock, ensureCfitSubtestStarted, type CfitSubtestLockInfo } from "@/lib/cfit/lock";
+import { cfitBreakRemainingSec, cfitBreakSecBetween } from "@/lib/cfit/breaks";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -115,6 +116,9 @@ export async function POST(req: NextRequest) {
     },
     orderBy: { orderIndex: "asc" },
   });
+  // Subtes tepat sebelum ini — dipakai untuk menghitung jeda otomatis.
+  let prevLock: CfitSubtestLockInfo | null = null;
+  let prevForm: string | null = null;
   for (const s of earlier) {
     const l = await computeCfitSubtestLock({
       submissionId: submission.id,
@@ -125,6 +129,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: `Kerjakan subtes secara berurutan. Selesaikan "${s.name}" terlebih dahulu.` },
         { status: 409 },
+      );
+    }
+    prevLock = l;
+    prevForm = s.form;
+  }
+
+  // JEDA OTOMATIS antar subtes: 2 menit, dan 3 menit saat berganti bentuk
+  // (3A → 3B). Hanya berlaku sebelum subtes dimulai — resume tidak terganggu.
+  const current = await computeCfitSubtestLock({
+    submissionId: submission.id,
+    subtestId: subtest.id,
+    durationSec: subtest.durationSec,
+  });
+  if (!current.started && prevLock?.finishedAt && prevForm) {
+    const breakSec = cfitBreakSecBetween(prevForm, subtest.form);
+    const breakRemainingSec = cfitBreakRemainingSec(prevLock.finishedAt, breakSec);
+    if (breakRemainingSec > 0) {
+      return NextResponse.json(
+        {
+          error: "Masih dalam jeda antar subtes. Tunggu sampai jeda selesai.",
+          breakSec,
+          breakRemainingSec,
+        },
+        { status: 425 },
       );
     }
   }
