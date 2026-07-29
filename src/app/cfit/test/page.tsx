@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import CfitConfirm from "@/components/cfit/CfitConfirm";
 
 type SubtestInfo = {
   code: string;
@@ -46,11 +45,11 @@ export default function CfitDashboardPage() {
   const [subtests, setSubtests] = useState<SubtestInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [finishing, setFinishing] = useState(false);
-  const [confirmFinish, setConfirmFinish] = useState(false);
   // Jeda otomatis antar subtes (sisa waktunya berasal dari SERVER).
   const [breakInfo, setBreakInfo] = useState<(ActiveBreak & { deadline: number }) | null>(null);
   const [breakLeft, setBreakLeft] = useState(0);
   const navigatedRef = useRef(false);
+  const finishedRef = useRef(false);
 
   // Buka subtes berikutnya secara otomatis. Dijaga agar hanya sekali per
   // kunjungan halaman supaya tidak terjadi navigasi berulang.
@@ -126,25 +125,26 @@ export default function CfitDashboardPage() {
   // dikerjakan (server juga memvalidasi hal yang sama).
   const activeIdx = subtests.findIndex((s) => !s.locked);
 
-  const doFinish = async () => {
+  const doFinish = useCallback(async () => {
     setFinishing(true);
     const res = await fetch("/api/cfit/test/finish", { method: "POST" });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       toast.error(data.error || "Gagal menyelesaikan tes");
       setFinishing(false);
+      finishedRef.current = false;
       return;
     }
     router.replace("/cfit/done");
-  };
+  }, [router]);
 
-  const finishAll = () => {
-    if (allLocked) {
-      void doFinish();
-    } else {
-      setConfirmFinish(true);
-    }
-  };
+  // TIDAK ADA penyelesaian manual. Tes diselesaikan OTOMATIS begitu semua
+  // subtes terkunci (habis waktunya), sehingga satu kelas selesai bersamaan.
+  useEffect(() => {
+    if (loading || !allLocked || finishedRef.current) return;
+    finishedRef.current = true;
+    void doFinish();
+  }, [loading, allLocked, doFinish]);
 
   if (loading) {
     return (
@@ -204,12 +204,19 @@ export default function CfitDashboardPage() {
         <div className="brut-card" style={{ background: "#fef9c3" }}>
           <p className="font-black uppercase mb-1">Jangan mulai sebelum ada pengarahan dari tester.</p>
           <p className="font-bold">
-            Kerjakan subtes secara BERURUTAN. Begitu subtes dimulai, timer berjalan dan tidak bisa
-            dihentikan. Subtes yang waktunya habis akan terkunci otomatis, lalu ada JEDA 2 MENIT dan
-            subtes berikutnya terbuka sendiri. Saat Bentuk A selesai, jedanya 3 MENIT sebelum lanjut ke
-            Bentuk B.
+            Kerjakan subtes secara BERURUTAN. Setiap subtes dimulai dari CONTOH SOAL yang tidak ada batas
+            waktunya, lalu soal asli dikerjakan dengan waktu berjalan. TIDAK ADA tombol selesai — subtes
+            berakhir otomatis saat waktu habis, lalu ada JEDA 2 MENIT dan subtes berikutnya terbuka sendiri.
+            Saat Bentuk A selesai, jedanya 3 MENIT sebelum lanjut ke Bentuk B. Seluruh tes juga ditutup
+            otomatis setelah subtes terakhir habis waktunya.
           </p>
         </div>
+
+        {finishing ? (
+          <div className="brut-card font-black uppercase brut-blink" style={{ background: "#a3e635" }}>
+            Semua subtes selesai — memproses hasil...
+          </div>
+        ) : null}
 
         {subtests.map((s, i) => (
           <div key={s.code} className="brut-card flex flex-col md:flex-row md:items-center gap-4" style={{ background: "#fff" }}>
@@ -249,29 +256,7 @@ export default function CfitDashboardPage() {
             </div>
           </div>
         ))}
-
-        <div className="pt-2">
-          <button className="brut-btn brut-btn-black w-full" onClick={finishAll} disabled={finishing}>
-            {finishing ? "MEMPROSES..." : allLocked ? "SELESAIKAN TES" : "SELESAIKAN TES SEKARANG"}
-          </button>
-        </div>
       </main>
-
-      <CfitConfirm
-        open={confirmFinish}
-        title="Selesaikan tes sekarang?"
-        danger
-        confirmLabel="YA, SELESAIKAN"
-        pending={finishing}
-        onConfirm={() => {
-          setConfirmFinish(false);
-          void doFinish();
-        }}
-        onCancel={() => setConfirmFinish(false)}
-      >
-        Masih ada subtes yang belum dikerjakan / belum dikunci. Semua subtes akan DIKUNCI dan tidak bisa
-        dikerjakan lagi.
-      </CfitConfirm>
     </div>
   );
 }
