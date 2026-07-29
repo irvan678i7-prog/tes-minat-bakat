@@ -61,6 +61,9 @@ export default function CfitSubtestRunnerPage() {
   // Banner peringatan yang bisa ditutup — muncul lagi setiap ada pelanggaran baru.
   const [ackedAt, setAckedAt] = useState(0);
 
+  // Kunci subtes lalu kembali ke halaman daftar subtes. Di sana jeda otomatis
+  // (2 menit; 3 menit saat ganti bentuk) berjalan dan subtes berikutnya akan
+  // dibuka SENDIRI setelah jeda selesai.
   const finishSubtest = useCallback(
     async (auto: boolean) => {
       if (finishedRef.current) return;
@@ -94,6 +97,12 @@ export default function CfitSubtestRunnerPage() {
       }
       if (res.status === 423) {
         toast.error("Subtes ini sudah terkunci.");
+        router.replace("/cfit/test");
+        return;
+      }
+      if (res.status === 425) {
+        // Masih dalam jeda antar subtes — kembalikan ke layar jeda.
+        toast(data.error || "Masih dalam jeda antar subtes.", { icon: "⏳" });
         router.replace("/cfit/test");
         return;
       }
@@ -139,7 +148,8 @@ export default function CfitSubtestRunnerPage() {
     }
   }, [questions]);
 
-  // Countdown — deadline dihitung dari remainingSec milik SERVER.
+  // Countdown — deadline dihitung dari remainingSec milik SERVER. Waktu habis
+  // → subtes otomatis dikunci tanpa perlu klik apa pun.
   const loaded = remaining !== null;
   useEffect(() => {
     if (!loaded) return;
@@ -386,7 +396,8 @@ export default function CfitSubtestRunnerPage() {
         }}
         onCancel={() => setConfirmFinish(false)}
       >
-        Subtes akan DIKUNCI dan tidak bisa dibuka lagi. Pastikan semua jawaban sudah terisi.
+        Subtes akan DIKUNCI dan tidak bisa dibuka lagi. Setelah ini ada jeda otomatis sebelum subtes
+        berikutnya terbuka. Pastikan semua jawaban sudah terisi.
       </CfitConfirm>
     </div>
   );
