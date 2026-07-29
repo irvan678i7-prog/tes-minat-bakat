@@ -242,6 +242,8 @@ model CfitSubmission {
   token           CfitAccessToken @relation(fields: [tokenId], references: [id])
   form            CfitForm
   fullName        String?
+  // Nomor Induk Siswa peserta — dicetak di identitas laporan, di bawah nama.
+  nis             String?
   gender          String?
   birthPlace      String?
   birthDate       DateTime?

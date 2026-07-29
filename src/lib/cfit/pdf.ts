@@ -1,7 +1,7 @@
-// ──────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────
 // Laporan individual Tes IQ — CFIT Skala 3 (Bentuk A + B), satu halaman A4.
 // TERPISAH dari laporan minat-bakat (src/lib/pdf.ts).
-// ──────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────
 
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
@@ -19,6 +19,7 @@ export type CfitPdfSubmission = {
   id: string
   form: string
   fullName: string | null
+  nis?: string | null
   gender: string | null
   age: number | null
   grade: string | null
@@ -48,11 +49,17 @@ const ACCENT = "#22D3EE"
 const ACCENT_DEEP = "#0E7490"
 const HIGHLIGHT = "#CFFAFE"
 
-// ─── Identitas penanda tangan (bisa diatur lewat environment variable) ───
+// ─── Identitas penanda tangan ───
+// Default sesuai penanda tangan resmi; masih bisa ditimpa lewat environment
+// variable bila suatu saat berganti.
 const KOP_KOTA = (process.env.REPORT_KOTA ?? "Metro").trim()
-const KAPRODI_NAMA = (process.env.REPORT_KAPRODI_NAMA ?? "").trim()
-const KAPRODI_NIDN = (process.env.REPORT_KAPRODI_NIDN ?? "").trim()
-const TESTER_NAMA = (process.env.REPORT_TESTER_NAMA ?? "").trim()
+const KAPRODI_NAMA = (
+  process.env.REPORT_KAPRODI_NAMA ?? "Dr. Eko Susanto, M.Pd., Kons."
+).trim()
+const KAPRODI_NIDN = (process.env.REPORT_KAPRODI_NIDN ?? "0213068302").trim()
+const TESTER_NAMA = (
+  process.env.REPORT_TESTER_NAMA ?? "Dr. Agus Wibowo, M.Pd."
+).trim()
 const TESTER_NA = (process.env.REPORT_TESTER_NA ?? "").trim()
 
 const FORM_LABEL: Record<string, string> = {
@@ -454,7 +461,7 @@ function drawSignatures(
     doc.setFont("helvetica", "normal")
     doc.setFontSize(7.6)
     doc.text(
-      `${c.idLabel}. ${c.idValue || "................................"}`,
+      c.idValue ? `${c.idLabel}. ${c.idValue}` : `${c.idLabel}.`,
       c.cx,
       nameY + 14,
       { align: "center" },
@@ -512,14 +519,29 @@ export function buildCfitReportPDF(
   doc.setFontSize(9)
   doc.text("IDENTITAS PESERTA", margin, 116)
 
+  const identityBody: Array<
+    Array<string | { content: string; colSpan: number }>
+  > = [
+    ["Nama", { content: sub.fullName ?? "-", colSpan: 3 }],
+    ["NIS", { content: sub.nis ?? "-", colSpan: 3 }],
+    [
+      "Jenis Kelamin",
+      sub.gender ?? "-",
+      "Usia",
+      sub.age != null ? `${sub.age} tahun` : "-",
+    ],
+    ["Kelas", sub.grade ?? "-", "Sekolah", sub.school ?? "-"],
+    ["Mulai", fmtDate(sub.startedAt), "Selesai", fmtDate(sub.finishedAt)],
+  ]
+
   autoTable(doc, {
     startY: 121,
     margin: { left: margin, right: margin },
     theme: "grid",
     styles: {
       font: "helvetica",
-      fontSize: 7.8,
-      cellPadding: 3,
+      fontSize: 7.4,
+      cellPadding: 2.4,
       lineColor: hexToRGB(HAIRLINE),
       lineWidth: 0.4,
       textColor: hexToRGB(INK),
@@ -530,21 +552,11 @@ export function buildCfitReportPDF(
       2: { cellWidth: 84, fontStyle: "bold", fillColor: hexToRGB(PANEL) },
       3: { cellWidth: innerW / 2 - 84 },
     },
-    body: [
-      ["Nama", sub.fullName ?? "-", "Bentuk Tes", FORM_LABEL[sub.form] ?? sub.form],
-      [
-        "Jenis Kelamin",
-        sub.gender ?? "-",
-        "Usia",
-        sub.age != null ? `${sub.age} tahun` : "-",
-      ],
-      ["Kelas", sub.grade ?? "-", "Sekolah", sub.school ?? "-"],
-      ["Mulai", fmtDate(sub.startedAt), "Selesai", fmtDate(sub.finishedAt)],
-    ],
+    body: identityBody,
   })
 
   // Kartu hasil IQ
-  let y = nextY(doc, 190) + 16
+  let y = nextY(doc, 190) + 14
   doc.setFont("helvetica", "bold")
   doc.setFontSize(9)
   setTextHex(doc, INK)
@@ -563,7 +575,7 @@ export function buildCfitReportPDF(
   )
 
   // Rincian per subtes
-  y += 12
+  y += 11
   setTextHex(doc, INK)
   doc.setFont("helvetica", "bold")
   doc.setFontSize(9)
@@ -576,7 +588,7 @@ export function buildCfitReportPDF(
     styles: {
       font: "helvetica",
       fontSize: 7.2,
-      cellPadding: 2.4,
+      cellPadding: 2.2,
       lineColor: hexToRGB(HAIRLINE),
       lineWidth: 0.4,
       textColor: hexToRGB(INK),
@@ -605,7 +617,7 @@ export function buildCfitReportPDF(
     ]),
   })
 
-  y = nextY(doc, y + 60) + 12
+  y = nextY(doc, y + 60) + 11
 
   // Catatan penskoran
   const noteText = payload.belowNorm
@@ -623,13 +635,13 @@ export function buildCfitReportPDF(
   noteLines.forEach((line, i) => {
     doc.text(line, margin + 8, y + 10 + i * 8.4)
   })
-  y += noteH + 14
+  y += noteH + 12
 
   // Grafik pengganti tabel skala klasifikasi
-  y = drawSubtestChart(doc, perSubtest, margin, y, pageW) + 12
+  y = drawSubtestChart(doc, perSubtest, margin, y, pageW) + 10
 
   // QR validasi (tengah), lalu dua blok tanda tangan
-  y = drawQrBlock(doc, reportCode, y, pageW) + 14
+  y = drawQrBlock(doc, reportCode, y, pageW) + 13
   drawSignatures(
     doc,
     margin,

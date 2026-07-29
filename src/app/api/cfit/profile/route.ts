@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 
 const Body = z.object({
   fullName: z.string().min(1).max(120),
+  nis: z.string().max(30).optional(),
   gender: z.enum(["L", "P"]).optional(),
   birthPlace: z.string().max(120).optional(),
   birthDate: z.string().datetime({ offset: true }).or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).optional(),
@@ -36,6 +37,7 @@ export async function GET(req: NextRequest) {
   if (!s) return NextResponse.json({ error: "Submission tidak ditemukan" }, { status: 404 });
   return NextResponse.json({
     fullName: s.fullName,
+    nis: s.nis,
     gender: s.gender,
     birthPlace: s.birthPlace,
     birthDate: s.birthDate,
@@ -85,6 +87,7 @@ export async function POST(req: NextRequest) {
     where: { id: p.sub },
     data: {
       fullName: d.fullName,
+      nis: d.nis,
       gender: d.gender,
       birthPlace: d.birthPlace,
       birthDate: d.birthDate ? new Date(d.birthDate) : undefined,
