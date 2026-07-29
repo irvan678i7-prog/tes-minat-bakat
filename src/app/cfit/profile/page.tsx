@@ -28,6 +28,7 @@ export default function CfitProfilePage() {
   const [pending, startTransition] = useTransition();
   const [loading, setLoading] = useState(true);
   const [fullName, setFullName] = useState("");
+  const [nis, setNis] = useState("");
   const [gender, setGender] = useState<"" | "L" | "P">("");
   const [school, setSchool] = useState("");
   const [grade, setGrade] = useState("");
@@ -48,6 +49,7 @@ export default function CfitProfilePage() {
       }
       if (res.ok) {
         if (data.fullName) setFullName(String(data.fullName));
+        if (data.nis) setNis(String(data.nis));
         if (data.gender === "L" || data.gender === "P") setGender(data.gender);
         if (data.school) setSchool(String(data.school));
         if (data.grade) setGrade(String(data.grade));
@@ -85,6 +87,7 @@ export default function CfitProfilePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fullName: fullName.trim(),
+          nis: nis.trim() || undefined,
           gender,
           school: school.trim(),
           grade: grade.trim() || undefined,
@@ -136,6 +139,19 @@ export default function CfitProfilePage() {
               disabled={pending}
               autoComplete="off"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-black uppercase mb-1">NIS</label>
+            <input
+              className="brut-input w-full"
+              placeholder="Nomor Induk Siswa"
+              value={nis}
+              onChange={(e) => setNis(e.target.value)}
+              disabled={pending}
+              autoComplete="off"
+            />
+            <p className="text-xs font-semibold mt-1">Dicetak di identitas laporan, di bawah nama.</p>
           </div>
 
           <div>
