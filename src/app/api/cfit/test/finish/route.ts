@@ -7,7 +7,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Finalisasi tes: kunci semua subtes yang masih terbuka, hitung RS per
-// subtes → RS total → IQ (norma 17+) → klasifikasi, simpan ke CfitResult.
+// subtes → RS total (A + B) → IQ (kolom norma sesuai usia peserta) →
+// klasifikasi, simpan ke CfitResult.
 export async function POST(req: NextRequest) {
   const p = getCfitFromRequest(req);
   if (!p) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -51,7 +52,16 @@ export async function POST(req: NextRequest) {
     total: s._count.questions,
   }));
 
-  const computed = computeCfitResult(submission.form as never, perSubtest);
+  const computed = computeCfitResult(submission.form as never, perSubtest, {
+    age: submission.age,
+  });
+
+  const payload = {
+    classificationEn: computed.classificationEn,
+    perSubtest: computed.perSubtest,
+    normGroup: computed.normGroup,
+    belowNorm: computed.belowNorm,
+  };
 
   const result = await prisma.cfitResult.upsert({
     where: { submissionId: submission.id },
@@ -62,11 +72,7 @@ export async function POST(req: NextRequest) {
       rawScoreTotal: computed.rawScoreTotal,
       iq: computed.iq,
       classification: computed.classification,
-      payload: {
-        classificationEn: computed.classificationEn,
-        perSubtest: computed.perSubtest,
-        normGroup: "17+",
-      },
+      payload,
     },
     update: {
       rawScoreA: computed.rawScoreA,
@@ -74,11 +80,7 @@ export async function POST(req: NextRequest) {
       rawScoreTotal: computed.rawScoreTotal,
       iq: computed.iq,
       classification: computed.classification,
-      payload: {
-        classificationEn: computed.classificationEn,
-        perSubtest: computed.perSubtest,
-        normGroup: "17+",
-      },
+      payload,
       generatedAt: new Date(),
     },
   });

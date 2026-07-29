@@ -7,8 +7,11 @@ import { generateTokenCode } from "@/lib/token";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Token CFIT hanya SATU macam: bentuk lengkap 3A + 3B (FORM_3AB), karena
+// laporan Tes IQ selalu memakai Raw Score gabungan A + B.
+const CFIT_TOKEN_FORM = "FORM_3AB" as const;
+
 const Body = z.object({
-  form: z.enum(["FORM_3A", "FORM_3B", "FORM_3AB"]).default("FORM_3AB"),
   count: z.number().int().min(1).max(100).default(1),
   ttlSec: z.number().int().min(60).max(24 * 60 * 60).default(3600),
 });
@@ -19,7 +22,7 @@ export async function POST(req: NextRequest) {
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ error: "Invalid input" }, { status: 400 });
 
-  const { form, count, ttlSec } = parsed.data;
+  const { count, ttlSec } = parsed.data;
   const expiresAt = new Date(Date.now() + ttlSec * 1000);
 
   const created = [];
@@ -29,7 +32,7 @@ export async function POST(req: NextRequest) {
       code = generateTokenCode();
     }
     const t = await prisma.cfitAccessToken.create({
-      data: { code, form, expiresAt, createdById: admin.sub },
+      data: { code, form: CFIT_TOKEN_FORM, expiresAt, createdById: admin.sub },
     });
     created.push(t);
   }

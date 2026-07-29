@@ -31,12 +31,6 @@ type TokenRow = {
   mengerjakanCount: number;
 };
 
-const FORM_LABEL: Record<CfitForm, string> = {
-  FORM_3A: "3A",
-  FORM_3B: "3B",
-  FORM_3AB: "3A + 3B",
-};
-
 function fmtDate(s: string): string {
   return new Date(s).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
 }
@@ -47,7 +41,6 @@ export default function CfitAdminTokens() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [showAll, setShowAll] = useState(false);
-  const [form, setForm] = useState<CfitForm>("FORM_3AB");
   const [count, setCount] = useState(1);
   const [ttlHours, setTtlHours] = useState(3);
   const [openToken, setOpenToken] = useState<string | null>(null);
@@ -73,7 +66,7 @@ export default function CfitAdminTokens() {
     const res = await fetch("/api/admin/cfit/tokens", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ form, count, ttlSec: ttlHours * 3600 }),
+      body: JSON.stringify({ count, ttlSec: ttlHours * 3600 }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -94,15 +87,7 @@ export default function CfitAdminTokens() {
     <div className="space-y-6">
       <div className="brut-card" style={{ background: "#22d3ee" }}>
         <h2 className="text-xl font-black uppercase mb-3">Buat Token CFIT</h2>
-        <div className="grid md:grid-cols-4 gap-3">
-          <div>
-            <label className="block text-xs font-black uppercase mb-1">Bentuk Tes</label>
-            <select className="brut-input w-full" value={form} onChange={(e) => setForm(e.target.value as CfitForm)}>
-              <option value="FORM_3AB">3A + 3B (lengkap)</option>
-              <option value="FORM_3A">3A saja</option>
-              <option value="FORM_3B">3B saja</option>
-            </select>
-          </div>
+        <div className="grid md:grid-cols-3 gap-3">
           <div>
             <label className="block text-xs font-black uppercase mb-1">Jumlah</label>
             <input
@@ -127,7 +112,7 @@ export default function CfitAdminTokens() {
           </div>
         </div>
         <p className="text-xs font-semibold mt-2">
-          1 token bisa dipakai banyak peserta (token kelas). Bentuk tes otomatis terdeteksi saat peserta memasukkan token di halaman <span className="font-black">/cfit</span>.
+          Token CFIT hanya <span className="font-black">1 macam</span>: bentuk lengkap 3A + 3B. 1 token bisa dipakai banyak peserta (token kelas) di halaman <span className="font-black">/cfit</span>.
         </p>
       </div>
 
@@ -162,7 +147,6 @@ export default function CfitAdminTokens() {
             <thead>
               <tr>
                 <th>Token</th>
-                <th>Bentuk</th>
                 <th>Kadaluarsa</th>
                 <th>Peserta</th>
                 <th>Status</th>
@@ -174,7 +158,6 @@ export default function CfitAdminTokens() {
                 <>
                   <tr key={t.id}>
                     <td className="font-mono font-black tracking-widest">{t.code}</td>
-                    <td><span className="brut-tag text-xs">{FORM_LABEL[t.form]}</span></td>
                     <td className={new Date(t.expiresAt) < new Date() ? "line-through opacity-60" : ""}>{fmtDate(t.expiresAt)}</td>
                     <td className="font-bold">{t.participantCount}</td>
                     <td className="font-bold">
@@ -202,7 +185,7 @@ export default function CfitAdminTokens() {
                   {openToken === t.id
                     ? t.submissions.map((s) => (
                         <tr key={s.id} style={{ background: "#fef9c3" }}>
-                          <td colSpan={2} className="font-bold">↳ {s.fullName ?? "(tanpa nama)"}</td>
+                          <td className="font-bold">↳ {s.fullName ?? "(tanpa nama)"}</td>
                           <td>{s.grade ?? "-"} {s.school ? `· ${s.school}` : ""}</td>
                           <td>{s.finishedAt ? "SELESAI" : "MENGERJAKAN"}</td>
                           <td className="font-bold">
