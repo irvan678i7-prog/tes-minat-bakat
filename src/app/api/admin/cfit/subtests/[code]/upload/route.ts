@@ -9,6 +9,11 @@ export const maxDuration = 30;
 
 // Upload bank soal CFIT dari template XLSX (sheet CONTOH SOAL + SOAL).
 // Pola sama dengan upload minat-bakat: MENGGANTI semua soal lama subtes ini.
+//
+// Kunci jawaban boleh ditulis dua cara:
+//   - satu kolom 'correctAnswer' (1 huruf, atau beberapa huruf dipisah ; )
+//   - kolom terpisah 'correctAnswer1', 'correctAnswer2', … (masing-masing 1
+//     huruf) — dipakai template subtes 2 / Classification yang butuh 2 kunci.
 
 const OPTION_KEYS = ["a", "b", "c", "d", "e", "f", "g", "h"];
 
@@ -18,6 +23,18 @@ const DEFAULT_KEYS: Record<string, string[]> = {
   MATRICES: ["a", "b", "c", "d", "e", "f"],
   CONDITIONS: ["a", "b", "c", "d", "e"],
 };
+
+// Jumlah kunci standar per jenis subtes. Dipakai untuk memperingatkan admin
+// bila jumlah kunci yang diisi tidak sesuai (mis. Classification hanya diisi
+// 1 kunci padahal peserta harus menandai 2 gambar).
+const EXPECTED_KEY_COUNT: Record<string, number> = {
+  SERIES: 1,
+  CLASSIFICATION: 2,
+  MATRICES: 1,
+  CONDITIONS: 1,
+};
+
+const MAX_KEY_COLUMNS = 8;
 
 type Row = Record<string, unknown>;
 type OptionItem = { key: string; label: string; imageUrl: string | null };
@@ -37,8 +54,28 @@ function buildOptions(r: Row): OptionItem[] {
   return opts;
 }
 
+/** Kumpulkan kunci dari 'correctAnswer' dan 'correctAnswer1..N'. */
+function collectKeys(r: Row): string[] {
+  const cells: string[] = [str(r.correctAnswer)];
+  for (let i = 1; i <= MAX_KEY_COLUMNS; i++) cells.push(str(r[`correctAnswer${i}`]));
+  const out: string[] = [];
+  for (const cell of cells) {
+    if (!cell) continue;
+    for (const part of cell.toLowerCase().split(/[,;|/\s]+/)) {
+      const t = part.trim();
+      if (t) out.push(t);
+    }
+  }
+  return out;
+}
+
 function nonEmpty(r: Row): boolean {
-  return !!(str(r.prompt) || str(r.imageUrl) || buildOptions(r).length > 0 || str(r.correctAnswer));
+  return !!(
+    str(r.prompt) ||
+    str(r.imageUrl) ||
+    buildOptions(r).length > 0 ||
+    collectKeys(r).length > 0
+  );
 }
 
 type BuiltQuestion = {
@@ -57,6 +94,7 @@ function rowsToData(
   isExample: boolean,
   defaultKeys: string[],
   sheetLabel: string,
+  expectedKeyCount: number,
 ): { data?: BuiltQuestion[]; error?: string } {
   const data: BuiltQuestion[] = [];
   const seen = new Set<number>();
@@ -76,13 +114,17 @@ function rowsToData(
     }
     const keys = options.map((o) => o.key);
 
-    const correctStr = str(r.correctAnswer).toLowerCase();
-    let correctArr = correctStr
-      ? correctStr.split(/[,;|/]/).map((s) => s.trim()).filter(Boolean)
-      : [];
+    let correctArr = collectKeys(r);
+    if (new Set(correctArr).size !== correctArr.length) {
+      return {
+        error: `Sheet ${sheetLabel} — soal no. ${questionNo}: ada kunci jawaban yang diisi dua kali ('${correctArr.join(", ")}'). Setiap kunci harus huruf yang berbeda.`,
+      };
+    }
     if (correctArr.length === 0) {
       if (!isExample) {
-        return { error: `Sheet ${sheetLabel} — soal no. ${questionNo}: kolom 'correctAnswer' wajib diisi.` };
+        return {
+          error: `Sheet ${sheetLabel} — soal no. ${questionNo}: kolom kunci jawaban wajib diisi${expectedKeyCount > 1 ? ` (${expectedKeyCount} huruf, satu per kolom correctAnswer1..${expectedKeyCount})` : ""}.`,
+        };
       }
       correctArr = [keys[0]];
     }
@@ -90,6 +132,11 @@ function rowsToData(
     if (invalid.length > 0) {
       return {
         error: `Sheet ${sheetLabel} — soal no. ${questionNo}: kunci '${invalid.join(", ")}' tidak ada di pilihan (${keys.join(", ")}).`,
+      };
+    }
+    if (!isExample && expectedKeyCount > 1 && correctArr.length !== expectedKeyCount) {
+      return {
+        error: `Sheet ${sheetLabel} — soal no. ${questionNo}: subtes ini butuh ${expectedKeyCount} kunci jawaban, tetapi terisi ${correctArr.length} ('${correctArr.join(", ")}'). Isi kolom correctAnswer1..${expectedKeyCount}.`,
       };
     }
 
@@ -155,11 +202,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ code: stri
     );
   }
 
-  const defaultKeys = DEFAULT_KEYS[sub.code.split("_").slice(1).join("_")] ?? ["a", "b", "c", "d", "e", "f"];
+  const kind = sub.code.split("_").slice(1).join("_");
+  const defaultKeys = DEFAULT_KEYS[kind] ?? ["a", "b", "c", "d", "e", "f"];
+  const expectedKeyCount = EXPECTED_KEY_COUNT[kind] ?? 1;
 
-  const soal = rowsToData(soalRows, sub.id, false, defaultKeys, "SOAL");
+  const soal = rowsToData(soalRows, sub.id, false, defaultKeys, "SOAL", expectedKeyCount);
   if (soal.error) return NextResponse.json({ error: soal.error }, { status: 400 });
-  const contoh = rowsToData(contohRows, sub.id, true, defaultKeys, "CONTOH SOAL");
+  const contoh = rowsToData(contohRows, sub.id, true, defaultKeys, "CONTOH SOAL", expectedKeyCount);
   if (contoh.error) return NextResponse.json({ error: contoh.error }, { status: 400 });
 
   const existingSoal = await prisma.cfitQuestion.count({ where: { subtestId: sub.id, isExample: false } });
