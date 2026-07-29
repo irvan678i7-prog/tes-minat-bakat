@@ -74,16 +74,22 @@ const SUBTEST_LABEL: Record<string, string> = {
 
 /** Kelompok grafik: 4 subtes CFIT, nilai Bentuk A + B digabung. */
 const CHART_GROUPS: Array<{ key: string; label: string }> = [
-  { key: "SERIES", label: "Series" },
-  { key: "CLASSIFICATION", label: "Classification" },
-  { key: "MATRICES", label: "Matrices" },
-  { key: "CONDITIONS", label: "Conditions" },
+  { key: "SERIES", label: "SERIES" },
+  { key: "CLASSIFICATION", label: "CLASSIFICATION" },
+  { key: "MATRICES", label: "MATRICES" },
+  { key: "CONDITIONS", label: "CONDITIONS" },
 ]
 
 const NORM_GROUP_LABEL: Record<string, string> = {
   "15": "usia 15 tahun",
   "16": "usia 16 tahun",
   "17+": "usia 17 tahun ke atas",
+}
+
+const NORM_GROUP_SHORT: Record<string, string> = {
+  "15": "usia 15",
+  "16": "usia 16",
+  "17+": "usia 17+",
 }
 
 // ─── Helper warna & teks ───
@@ -129,6 +135,24 @@ function fmtDateOnly(v: Date | null | undefined): string {
   return safe.toLocaleDateString("id-ID", { dateStyle: "long" })
 }
 
+/** Kotak bergaya brutalism: bayangan pekat + garis tebal (seperti UI aplikasi). */
+function drawBrutBox(
+  doc: jsPDF,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  fillHex: string,
+  shadow = 3.5,
+) {
+  setFillHex(doc, INK)
+  doc.rect(x + shadow, y + shadow, w, h, "F")
+  setFillHex(doc, fillHex)
+  setDrawHex(doc, INK)
+  doc.setLineWidth(1.2)
+  doc.rect(x, y, w, h, "FD")
+}
+
 // ─── Kop resmi ───
 function drawKop(doc: jsPDF, margin: number, pageW: number): number {
   setFillHex(doc, INK)
@@ -158,20 +182,89 @@ function drawKop(doc: jsPDF, margin: number, pageW: number): number {
 
 /** Penanda kerahasiaan di kanan atas (menggantikan blok kode laporan). */
 function drawRahasiaBadge(doc: jsPDF, pageW: number, margin: number) {
-  const w = 96
-  const h = 24
+  const w = 92
+  const h = 22
   const x = pageW - margin - w
   const y = 14
   setFillHex(doc, INK)
   doc.rect(x, y, w, h, "F")
   setTextHex(doc, WHITE)
   doc.setFont("helvetica", "bold")
-  doc.setFontSize(11)
-  doc.text("RAHASIA", x + w / 2, y + 16, { align: "center" })
+  doc.setFontSize(10.5)
+  doc.text("RAHASIA", x + w / 2, y + 15, { align: "center" })
   setTextHex(doc, INK)
 }
 
-// ─── Grafik batang: % benar per subtes (A + B digabung) ───
+// ─── Kartu hasil IQ ───
+function drawScoreCard(
+  doc: jsPDF,
+  result: CfitPdfResult,
+  info: { normGroup: string; classificationEn?: string; belowNorm?: boolean },
+  margin: number,
+  yIn: number,
+  pageW: number,
+): number {
+  const innerW = pageW - margin * 2
+  const cardH = 74
+  const scoreW = 116
+
+  drawBrutBox(doc, margin, yIn, innerW, cardH, WHITE)
+
+  // Blok skor (gelap) di kiri
+  setFillHex(doc, INK)
+  doc.rect(margin + 6, yIn + 6, scoreW, cardH - 12, "F")
+  const scoreCx = margin + 6 + scoreW / 2
+  setTextHex(doc, ACCENT)
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(6.8)
+  doc.text("SKOR IQ (CFIT)", scoreCx, yIn + 20, { align: "center" })
+  setTextHex(doc, WHITE)
+  doc.setFontSize(30)
+  doc.text(
+    `${info.belowNorm ? "≤" : ""}${result.iq}`,
+    scoreCx,
+    yIn + 48,
+    { align: "center" },
+  )
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(6.2)
+  doc.text(
+    `Norma kelompok ${NORM_GROUP_SHORT[info.normGroup] ?? `usia ${info.normGroup}`}`,
+    scoreCx,
+    yIn + 61,
+    { align: "center" },
+  )
+
+  // Klasifikasi & raw score di kanan
+  const infoX = margin + 6 + scoreW + 18
+  setTextHex(doc, INK)
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(15)
+  doc.text(result.classification, infoX, yIn + 26)
+  if (info.classificationEn) {
+    setTextHex(doc, SOFT_INK)
+    doc.setFont("helvetica", "normal")
+    doc.setFontSize(8)
+    doc.text(info.classificationEn, infoX, yIn + 37)
+  }
+
+  setTextHex(doc, ACCENT_DEEP)
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(7)
+  doc.text("RAW SCORE (RS)", infoX, yIn + 52)
+  setTextHex(doc, INK)
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(8.4)
+  doc.text(
+    `Bentuk A: ${result.rawScoreA ?? "-"}   •   Bentuk B: ${result.rawScoreB ?? "-"}   •   Total: ${result.rawScoreTotal}`,
+    infoX,
+    yIn + 64,
+  )
+
+  return yIn + cardH + 4
+}
+
+// ─── Grafik batang bergaya UI: % benar per subtes (A + B digabung) ───
 function drawSubtestChart(
   doc: jsPDF,
   perSubtest: CfitSubtestScore[],
@@ -180,27 +273,41 @@ function drawSubtestChart(
   pageW: number,
 ): number {
   const innerW = pageW - margin * 2
-  const chartH = 96
-  const plotH = chartH - 16
-  const baseY = yIn + chartH
+  const headerH = 17
+  const plotH = 68
+  const panelH = 122
+  const baseY = yIn + headerH + 8 + plotH
 
-  setFillHex(doc, WHITE)
-  setDrawHex(doc, HAIRLINE)
-  doc.setLineWidth(0.6)
-  doc.rect(margin, yIn - 8, innerW, chartH + 40, "FD")
+  drawBrutBox(doc, margin, yIn, innerW, panelH, WHITE)
 
-  const plotX = margin + 34
-  const plotW = innerW - 34 - 12
+  // Bilah judul hitam
+  setFillHex(doc, INK)
+  doc.rect(margin, yIn, innerW, headerH, "F")
+  setTextHex(doc, WHITE)
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(8.4)
+  doc.text("GRAFIK CAPAIAN PER SUBTES", margin + 8, yIn + 12)
+  setTextHex(doc, ACCENT)
+  doc.setFontSize(6.8)
+  doc.text(
+    "% JAWABAN BENAR • BENTUK A + B DIGABUNG",
+    pageW - margin - 8,
+    yIn + 12,
+    { align: "right" },
+  )
+
+  const plotX = margin + 36
+  const plotW = innerW - 36 - 16
 
   for (const p of [0, 25, 50, 75, 100]) {
     const gy = baseY - plotH * (p / 100)
     setDrawHex(doc, p === 0 ? INK : HAIRLINE)
-    doc.setLineWidth(p === 0 ? 0.8 : 0.3)
+    doc.setLineWidth(p === 0 ? 1.2 : 0.4)
     doc.line(plotX, gy, plotX + plotW, gy)
     setTextHex(doc, SOFT_INK)
-    doc.setFont("helvetica", "normal")
-    doc.setFontSize(6.2)
-    doc.text(`${p}%`, plotX - 5, gy + 2, { align: "right" })
+    doc.setFont("helvetica", "bold")
+    doc.setFontSize(6)
+    doc.text(`${p}%`, plotX - 6, gy + 2, { align: "right" })
   }
 
   const groups = CHART_GROUPS.map((g) => {
@@ -212,44 +319,44 @@ function drawSubtestChart(
   })
 
   const slotW = plotW / groups.length
-  const barW = Math.min(52, slotW * 0.5)
+  const barW = Math.min(46, slotW * 0.46)
 
   groups.forEach((g, i) => {
     const cx = plotX + slotW * i + slotW / 2
+    const bx = cx - barW / 2
     const h = plotH * (Math.max(0, Math.min(100, g.pct)) / 100)
+
+    // Bingkai penuh (100%) sebagai bayangan skala
+    setFillHex(doc, STRIPE)
+    doc.rect(bx, baseY - plotH, barW, plotH, "F")
+    setDrawHex(doc, HAIRLINE)
+    doc.setLineWidth(0.4)
+    doc.rect(bx, baseY - plotH, barW, plotH)
+
     if (h > 0) {
+      setFillHex(doc, INK)
+      doc.rect(bx + 2.5, baseY - h + 2.5, barW, h, "F")
       setFillHex(doc, ACCENT)
-      doc.rect(cx - barW / 2, baseY - h, barW, h, "F")
       setDrawHex(doc, INK)
-      doc.setLineWidth(0.8)
-      doc.rect(cx - barW / 2, baseY - h, barW, h)
+      doc.setLineWidth(1.2)
+      doc.rect(bx, baseY - h, barW, h, "FD")
     }
-    setTextHex(doc, ACCENT_DEEP)
-    doc.setFont("helvetica", "bold")
-    doc.setFontSize(8)
-    doc.text(`${g.pct}%`, cx, baseY - h - 4, { align: "center" })
 
     setTextHex(doc, INK)
     doc.setFont("helvetica", "bold")
-    doc.setFontSize(7.2)
+    doc.setFontSize(8.2)
+    doc.text(`${g.pct}%`, cx, baseY - Math.max(h, 6) - 5, { align: "center" })
+
+    doc.setFontSize(6.6)
     doc.text(g.label, cx, baseY + 11, { align: "center" })
     setTextHex(doc, SOFT_INK)
     doc.setFont("helvetica", "normal")
-    doc.setFontSize(6.4)
-    doc.text(`${g.correct}/${g.total} benar`, cx, baseY + 20, { align: "center" })
+    doc.setFontSize(6.2)
+    doc.text(`${g.correct} / ${g.total} benar`, cx, baseY + 20, { align: "center" })
   })
 
-  setTextHex(doc, SOFT_INK)
-  doc.setFont("helvetica", "normal")
-  doc.setFontSize(6.4)
-  doc.text(
-    "Persentase jawaban benar per subtes (Bentuk A + B digabung).",
-    margin + 6,
-    baseY + 30,
-  )
   setTextHex(doc, INK)
-
-  return yIn + chartH + 40
+  return yIn + panelH
 }
 
 // ─── QR validasi (tengah bawah grafik) ───
@@ -259,20 +366,20 @@ function drawQrBlock(
   yIn: number,
   pageW: number,
 ): number {
-  const size = 64
+  const size = 56
   const x = (pageW - size) / 2
   drawQrCode(doc, qrPayload(code), x, yIn, size)
 
   let y = yIn + size + 9
   setTextHex(doc, INK)
   doc.setFont("helvetica", "bold")
-  doc.setFontSize(8.4)
+  doc.setFontSize(8.2)
   doc.text(code, pageW / 2, y, { align: "center" })
 
-  y += 9
+  y += 8
   setTextHex(doc, SOFT_INK)
   doc.setFont("helvetica", "normal")
-  doc.setFontSize(6.6)
+  doc.setFontSize(6.4)
   doc.text(
     "Pindai QR atau masukkan kode di atas untuk memvalidasi keaslian laporan ini.",
     pageW / 2,
@@ -280,10 +387,10 @@ function drawQrBlock(
     { align: "center" },
   )
   setTextHex(doc, INK)
-  return y + 6
+  return y
 }
 
-// ─── Dua blok tanda tangan ───
+// ─── Dua blok tanda tangan (rata tengah per kolom) ───
 function drawSignatures(
   doc: jsPDF,
   margin: number,
@@ -291,62 +398,71 @@ function drawSignatures(
   pageW: number,
   tanggal: string,
 ): number {
-  let y = yIn
-  setTextHex(doc, INK)
-  doc.setFont("helvetica", "normal")
-  doc.setFontSize(8)
-  doc.text(`${KOP_KOTA}, ${tanggal}`, pageW - margin, y, { align: "right" })
-  y += 14
-
-  const gap = 24
-  const colW = (pageW - margin * 2 - gap) / 2
+  const innerW = pageW - margin * 2
+  const gap = 28
+  const colW = (innerW - gap) / 2
   const cols = [
     {
-      x: margin,
-      jabatan: ["Ketua Program Studi", "Magister Bimbingan dan Konseling"],
+      cx: margin + colW / 2,
+      jabatan: ["Ketua Program Studi Magister", "Bimbingan dan Konseling"],
       nama: KAPRODI_NAMA,
       idLabel: "NIDN",
       idValue: KAPRODI_NIDN,
+      showDate: false,
     },
     {
-      x: margin + colW + gap,
+      cx: margin + colW + gap + colW / 2,
       jabatan: ["Tester"],
       nama: TESTER_NAMA,
       idLabel: "NA",
       idValue: TESTER_NA,
+      showDate: true,
     },
   ]
 
-  for (const c of cols) {
-    let cy = y
-    setTextHex(doc, INK)
-    doc.setFont("helvetica", "bold")
-    doc.setFontSize(8)
-    for (const line of c.jabatan) {
-      doc.text(line, c.x, cy)
-      cy += 10
-    }
+  const dateY = yIn
+  const jabatanY = yIn + 13
+  const nameY = jabatanY + 52
 
-    const nameY = y + 52
+  setTextHex(doc, INK)
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(8)
+  doc.text(`${KOP_KOTA}, ${tanggal}`, cols[1].cx, dateY, { align: "center" })
+
+  for (const c of cols) {
+    setTextHex(doc, INK)
+    doc.setFont("helvetica", "normal")
+    doc.setFontSize(8)
+    c.jabatan.forEach((line, i) => {
+      doc.text(line, c.cx, jabatanY + i * 10, { align: "center" })
+    })
+
+    const nama = c.nama || "..................................................."
     doc.setFont("helvetica", "bold")
     doc.setFontSize(8.6)
-    doc.text(c.nama || "(...............................................)", c.x, nameY)
+    doc.text(nama, c.cx, nameY, { align: "center" })
+
+    const lineW = Math.min(
+      colW - 10,
+      Math.max(150, doc.getTextWidth(nama) + 24),
+    )
     setDrawHex(doc, INK)
-    doc.setLineWidth(0.5)
-    doc.line(c.x, nameY + 3, c.x + Math.min(colW, 176), nameY + 3)
+    doc.setLineWidth(0.6)
+    doc.line(c.cx - lineW / 2, nameY + 3.5, c.cx + lineW / 2, nameY + 3.5)
 
     setTextHex(doc, SOFT_INK)
     doc.setFont("helvetica", "normal")
     doc.setFontSize(7.6)
     doc.text(
       `${c.idLabel}. ${c.idValue || "................................"}`,
-      c.x,
-      nameY + 13,
+      c.cx,
+      nameY + 14,
+      { align: "center" },
     )
     setTextHex(doc, INK)
   }
 
-  return y + 70
+  return nameY + 20
 }
 
 // ─── Laporan ───
@@ -397,22 +513,22 @@ export function buildCfitReportPDF(
   doc.text("IDENTITAS PESERTA", margin, 116)
 
   autoTable(doc, {
-    startY: 122,
+    startY: 121,
     margin: { left: margin, right: margin },
     theme: "grid",
     styles: {
       font: "helvetica",
-      fontSize: 8,
-      cellPadding: 3.5,
+      fontSize: 7.8,
+      cellPadding: 3,
       lineColor: hexToRGB(HAIRLINE),
       lineWidth: 0.4,
       textColor: hexToRGB(INK),
     },
     columnStyles: {
-      0: { cellWidth: 88, fontStyle: "bold", fillColor: hexToRGB(PANEL) },
-      1: { cellWidth: innerW / 2 - 88 },
-      2: { cellWidth: 88, fontStyle: "bold", fillColor: hexToRGB(PANEL) },
-      3: { cellWidth: innerW / 2 - 88 },
+      0: { cellWidth: 84, fontStyle: "bold", fillColor: hexToRGB(PANEL) },
+      1: { cellWidth: innerW / 2 - 84 },
+      2: { cellWidth: 84, fontStyle: "bold", fillColor: hexToRGB(PANEL) },
+      3: { cellWidth: innerW / 2 - 84 },
     },
     body: [
       ["Nama", sub.fullName ?? "-", "Bentuk Tes", FORM_LABEL[sub.form] ?? sub.form],
@@ -423,91 +539,44 @@ export function buildCfitReportPDF(
         sub.age != null ? `${sub.age} tahun` : "-",
       ],
       ["Kelas", sub.grade ?? "-", "Sekolah", sub.school ?? "-"],
-      [
-        "Mulai",
-        fmtDate(sub.startedAt),
-        "Selesai",
-        fmtDate(sub.finishedAt),
-      ],
+      ["Mulai", fmtDate(sub.startedAt), "Selesai", fmtDate(sub.finishedAt)],
     ],
   })
 
   // Kartu hasil IQ
-  let y = nextY(doc, 200) + 14
+  let y = nextY(doc, 190) + 16
   doc.setFont("helvetica", "bold")
   doc.setFontSize(9)
   setTextHex(doc, INK)
-  doc.text("HASIL PENGUKURAN", margin, y)
-  y += 6
-
-  const cardH = 62
-  setFillHex(doc, PANEL)
-  setDrawHex(doc, HAIRLINE)
-  doc.setLineWidth(0.6)
-  doc.rect(margin, y, innerW, cardH, "FD")
-
-  const scoreW = 120
-  setFillHex(doc, HIGHLIGHT)
-  setDrawHex(doc, ACCENT_DEEP)
-  doc.setLineWidth(0.8)
-  doc.rect(margin + 8, y + 8, scoreW, cardH - 16, "FD")
-  setTextHex(doc, ACCENT_DEEP)
-  doc.setFont("helvetica", "bold")
-  doc.setFontSize(7)
-  doc.text("SKOR IQ", margin + 8 + scoreW / 2, y + 22, { align: "center" })
-  setTextHex(doc, INK)
-  doc.setFontSize(28)
-  doc.text(
-    `${payload.belowNorm ? "≤" : ""}${result.iq}`,
-    margin + 8 + scoreW / 2,
-    y + 46,
-    { align: "center" },
+  doc.text("HASIL TES IQ (CFIT SKALA 3)", margin, y)
+  y = drawScoreCard(
+    doc,
+    result,
+    {
+      normGroup,
+      classificationEn: payload.classificationEn,
+      belowNorm: payload.belowNorm,
+    },
+    margin,
+    y + 6,
+    pageW,
   )
 
-  const infoX = margin + scoreW + 24
-  setTextHex(doc, SOFT_INK)
-  doc.setFont("helvetica", "normal")
-  doc.setFontSize(7.4)
-  doc.text(`Norma kelompok ${normGroupLabel}`, infoX, y + 18)
-  setTextHex(doc, INK)
-  doc.setFont("helvetica", "bold")
-  doc.setFontSize(13)
-  doc.text(result.classification, infoX, y + 36)
-  if (payload.classificationEn) {
-    setTextHex(doc, SOFT_INK)
-    doc.setFont("helvetica", "normal")
-    doc.setFontSize(7.4)
-    doc.text(payload.classificationEn, infoX, y + 47)
-  }
-
-  const rsX = pageW - margin - 150
-  setTextHex(doc, INK)
-  doc.setFont("helvetica", "bold")
-  doc.setFontSize(7)
-  doc.text("RAW SCORE", rsX, y + 18)
-  doc.setFont("helvetica", "normal")
-  doc.setFontSize(7.6)
-  doc.text(`Bentuk A : ${result.rawScoreA ?? "-"}`, rsX, y + 30)
-  doc.text(`Bentuk B : ${result.rawScoreB ?? "-"}`, rsX, y + 40)
-  doc.setFont("helvetica", "bold")
-  doc.text(`Total (A + B) : ${result.rawScoreTotal}`, rsX, y + 51)
-
-  y += cardH + 16
-
   // Rincian per subtes
+  y += 12
   setTextHex(doc, INK)
   doc.setFont("helvetica", "bold")
   doc.setFontSize(9)
   doc.text("RINCIAN PER SUBTES", margin, y)
 
   autoTable(doc, {
-    startY: y + 6,
+    startY: y + 5,
     margin: { left: margin, right: margin },
     theme: "grid",
     styles: {
       font: "helvetica",
-      fontSize: 7.6,
-      cellPadding: 3,
+      fontSize: 7.2,
+      cellPadding: 2.4,
       lineColor: hexToRGB(HAIRLINE),
       lineWidth: 0.4,
       textColor: hexToRGB(INK),
@@ -516,7 +585,7 @@ export function buildCfitReportPDF(
       fillColor: hexToRGB(INK),
       textColor: hexToRGB(WHITE),
       fontStyle: "bold",
-      fontSize: 7.4,
+      fontSize: 7,
     },
     alternateRowStyles: { fillColor: hexToRGB(STRIPE) },
     columnStyles: {
@@ -539,35 +608,28 @@ export function buildCfitReportPDF(
   y = nextY(doc, y + 60) + 12
 
   // Catatan penskoran
-  const noteLines = [
-    `Skor IQ diperoleh dengan mengonversi Raw Score total (A + B) = ${result.rawScoreTotal} memakai tabel norma CFIT Skala 3 kelompok ${normGroupLabel}.`,
-    payload.belowNorm
-      ? "Raw Score berada di bawah rentang tabel norma (baris terendah 20), sehingga skor IQ ditampilkan sebagai batas terendah norma."
-      : "Hasil ini bersifat skrining dan bukan pengganti pemeriksaan psikologis oleh psikolog berlisensi.",
-  ]
+  const noteText = payload.belowNorm
+    ? `Skor IQ diperoleh dengan mengonversi Raw Score total (A + B) = ${result.rawScoreTotal} memakai tabel norma CFIT Skala 3 kelompok ${normGroupLabel}. Raw Score berada di bawah rentang tabel norma (baris terendah 20), sehingga skor ditampilkan sebagai batas terendah norma.`
+    : `Skor IQ diperoleh dengan mengonversi Raw Score total (A + B) = ${result.rawScoreTotal} memakai tabel norma CFIT Skala 3 kelompok ${normGroupLabel}.`
+  const noteLines = doc.splitTextToSize(noteText, innerW - 16) as string[]
+  const noteH = 11 + noteLines.length * 8.4
   setFillHex(doc, HIGHLIGHT)
   setDrawHex(doc, ACCENT_DEEP)
-  doc.setLineWidth(0.5)
-  const noteH = 12 + noteLines.length * 9
+  doc.setLineWidth(0.6)
   doc.rect(margin, y, innerW, noteH, "FD")
   setTextHex(doc, INK)
   doc.setFont("helvetica", "normal")
   doc.setFontSize(6.8)
   noteLines.forEach((line, i) => {
-    const wrapped = doc.splitTextToSize(line, innerW - 12) as string[]
-    doc.text(wrapped[0] ?? "", margin + 6, y + 11 + i * 9)
+    doc.text(line, margin + 8, y + 10 + i * 8.4)
   })
-  y += noteH + 16
+  y += noteH + 14
 
   // Grafik pengganti tabel skala klasifikasi
-  doc.setFont("helvetica", "bold")
-  doc.setFontSize(9)
-  setTextHex(doc, INK)
-  doc.text("GRAFIK CAPAIAN PER SUBTES", margin, y)
-  y = drawSubtestChart(doc, perSubtest, margin, y + 14, pageW) + 10
+  y = drawSubtestChart(doc, perSubtest, margin, y, pageW) + 12
 
   // QR validasi (tengah), lalu dua blok tanda tangan
-  y = drawQrBlock(doc, reportCode, y, pageW) + 8
+  y = drawQrBlock(doc, reportCode, y, pageW) + 14
   drawSignatures(
     doc,
     margin,
