@@ -23,8 +23,8 @@ export type CfitPdfSubmission = {
   age: number | null
   grade: string | null
   school: string | null
-  startedAt: Date | string
-  finishedAt: Date | string | null
+  startedAt: Date
+  finishedAt: Date | null
 }
 
 export type CfitPdfResult = {
@@ -34,7 +34,7 @@ export type CfitPdfResult = {
   iq: number
   classification: string
   payload?: unknown
-  generatedAt?: Date | string | null
+  generatedAt?: Date | null
 }
 
 // ─── Palet ───
@@ -116,15 +116,15 @@ function nextY(doc: jsPDF, fallback: number): number {
   return last?.finalY ? last.finalY : fallback
 }
 
-function fmtDate(v: Date | string | null | undefined): string {
+function fmtDate(v: Date | null | undefined): string {
   if (!v) return "-"
-  const d = typeof v === "string" ? new Date(v) : v
+  const d = new Date(v)
   if (Number.isNaN(d.getTime())) return "-"
   return d.toLocaleString("id-ID", { dateStyle: "long", timeStyle: "short" })
 }
 
-function fmtDateOnly(v: Date | string | null | undefined): string {
-  const d = !v ? new Date() : typeof v === "string" ? new Date(v) : v
+function fmtDateOnly(v: Date | null | undefined): string {
+  const d = v ? new Date(v) : new Date()
   const safe = Number.isNaN(d.getTime()) ? new Date() : d
   return safe.toLocaleDateString("id-ID", { dateStyle: "long" })
 }
