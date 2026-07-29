@@ -28,6 +28,10 @@ type SubtestMeta = {
 // "example" = tahap contoh soal (TANPA TIMER), "test" = soal asli (timer jalan).
 type Phase = "example" | "test";
 
+// Jumlah soal yang ditampilkan dalam SATU halaman — supaya peserta tidak
+// bolak-balik terlalu banyak halaman.
+const PER_PAGE = 3;
+
 function fmt(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
@@ -56,7 +60,8 @@ export default function CfitSubtestRunnerPage() {
   const [phase, setPhase] = useState<Phase | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
-  const [idx, setIdx] = useState(0);
+  // Halaman aktif (berisi PER_PAGE soal), bukan indeks soal.
+  const [page, setPage] = useState(0);
   const [remaining, setRemaining] = useState<number | null>(null);
   // Alert sebelum soal asli dibuka: tunggu arahan tester.
   const [briefing, setBriefing] = useState(false);
@@ -121,9 +126,9 @@ export default function CfitSubtestRunnerPage() {
       setQuestions(qs);
       setAnswers(saved);
       setPhase(data.phase === "example" ? "example" : "test");
-      // Mulai dari soal pertama yang belum terjawab.
+      // Mulai dari halaman berisi soal pertama yang belum terjawab.
       const firstUnanswered = qs.findIndex((q) => !saved[q.id]);
-      setIdx(firstUnanswered >= 0 ? firstUnanswered : 0);
+      setPage(firstUnanswered > 0 ? Math.floor(firstUnanswered / PER_PAGE) : 0);
 
       if (data.phase === "test") {
         deadlineRef.current = Date.now() + data.remainingSec * 1000;
@@ -149,9 +154,9 @@ export default function CfitSubtestRunnerPage() {
   };
 
   // PRELOAD semua gambar soal & opsi begitu data diterima. Tanpa ini, gambar
-  // baru diunduh saat soalnya dibuka sehingga tiap pindah soal terasa lambat
+  // baru diunduh saat soalnya dibuka sehingga tiap pindah halaman terasa lambat
   // (padahal timer terus berjalan). Browser meng-cache hasil preload, jadi
-  // saat soal dibuka gambarnya langsung tampil.
+  // saat halaman dibuka gambarnya langsung tampil.
   useEffect(() => {
     if (questions.length === 0) return;
     const urls: string[] = [];
@@ -237,11 +242,13 @@ export default function CfitSubtestRunnerPage() {
   }
 
   const isExamplePhase = phase === "example";
-  const q = questions[idx];
+  const totalPages = Math.max(1, Math.ceil(questions.length / PER_PAGE));
+  const safePage = Math.min(page, totalPages - 1);
+  const pageQuestions = questions.slice(safePage * PER_PAGE, safePage * PER_PAGE + PER_PAGE);
   const timeLow = (remaining ?? 0) <= 30;
-  const hasOptionImages = q ? q.options.some((o) => o.imageUrl) : false;
   const showViolationBanner = anti.count > 0 && anti.lastAt > ackedAt;
-  const isLast = idx >= questions.length - 1;
+  const isLastPage = safePage >= totalPages - 1;
+  const answeredCount = questions.filter((q) => (answers[q.id] ?? []).length > 0).length;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -253,7 +260,8 @@ export default function CfitSubtestRunnerPage() {
           <div>
             <h1 className="text-lg md:text-xl font-black uppercase leading-none">{subtest.name}</h1>
             <p className="text-[10px] md:text-xs font-bold uppercase tracking-wider mt-0.5">
-              {isExamplePhase ? "Contoh soal" : "Soal"} {questions.length > 0 ? idx + 1 : 0} / {questions.length}
+              {isExamplePhase ? "Contoh" : "Halaman"} {safePage + 1} / {totalPages} · {answeredCount}/
+              {questions.length} terjawab
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -322,65 +330,75 @@ export default function CfitSubtestRunnerPage() {
           </div>
         ) : null}
 
-        {subtest.instructions && idx === 0 ? (
-          <div className="brut-card text-sm font-semibold whitespace-pre-wrap" style={{ background: "#fef9c3" }}>
-            {subtest.instructions}
+        {/* INSTRUKSI di bagian atas halaman contoh (di atas soal-soalnya). */}
+        {subtest.instructions && (isExamplePhase || safePage === 0) ? (
+          <div className="brut-card space-y-1" style={{ background: "#fef9c3" }}>
+            <p className="text-xs font-black uppercase tracking-widest">Instruksi</p>
+            <p className="text-sm font-semibold whitespace-pre-wrap">{subtest.instructions}</p>
           </div>
         ) : null}
 
-        {q ? (
-          <div className="brut-card space-y-4" style={{ background: "#fff" }}>
-            <div className="flex items-center gap-2">
-              <span className="brut-tag" style={{ background: "#000", color: "#fff" }}>
-                {q.isExample ? `CONTOH ${q.questionNo}` : `NO. ${q.questionNo}`}
-              </span>
-              {q.expectedAnswers > 1 ? (
-                <span className="brut-tag" style={{ background: "#ff4d8d" }}>PILIH {q.expectedAnswers} JAWABAN</span>
-              ) : null}
-            </div>
+        {pageQuestions.length > 0 ? (
+          pageQuestions.map((q) => {
+            const hasOptionImages = q.options.some((o) => o.imageUrl);
+            return (
+              <div key={q.id} className="brut-card space-y-4" style={{ background: "#fff" }}>
+                <div className="flex items-center gap-2">
+                  <span className="brut-tag" style={{ background: "#000", color: "#fff" }}>
+                    {q.isExample ? `CONTOH ${q.questionNo}` : `NO. ${q.questionNo}`}
+                  </span>
+                  {q.expectedAnswers > 1 ? (
+                    <span className="brut-tag" style={{ background: "#ff4d8d" }}>PILIH {q.expectedAnswers} JAWABAN</span>
+                  ) : null}
+                  {(answers[q.id] ?? []).length > 0 ? (
+                    <span className="brut-tag" style={{ background: "#a3e635" }}>TERJAWAB</span>
+                  ) : null}
+                </div>
 
-            {q.imageUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={q.imageUrl}
-                alt={`Soal ${q.questionNo}`}
-                className="w-full max-h-[420px] object-contain border-4 border-black bg-white"
-                loading="eager"
-                decoding="async"
-                draggable={false}
-              />
-            ) : null}
+                {q.imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={q.imageUrl}
+                    alt={`Soal ${q.questionNo}`}
+                    className="w-full max-h-[340px] object-contain border-4 border-black bg-white"
+                    loading="eager"
+                    decoding="async"
+                    draggable={false}
+                  />
+                ) : null}
 
-            {q.prompt ? <p className="font-semibold">{q.prompt}</p> : null}
+                {q.prompt ? <p className="font-semibold">{q.prompt}</p> : null}
 
-            <div className={hasOptionImages ? "grid grid-cols-2 md:grid-cols-3 gap-3" : "grid grid-cols-3 md:grid-cols-6 gap-3"}>
-              {q.options.map((opt) => {
-                const selected = (answers[q.id] ?? []).includes(opt.key);
-                return (
-                  <button
-                    key={opt.key}
-                    type="button"
-                    className={`brut-checkbox flex-col items-center justify-center gap-1 text-lg font-black uppercase ${selected ? "selected-cyan selected" : ""}`}
-                    onClick={() => choose(q, opt.key)}
-                  >
-                    {opt.imageUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={opt.imageUrl}
-                        alt={`Pilihan ${opt.key}`}
-                        className="w-full max-h-28 object-contain bg-white"
-                        loading="eager"
-                        decoding="async"
-                        draggable={false}
-                      />
-                    ) : null}
-                    <span>{opt.key}</span>
-                    {opt.label ? <span className="text-xs font-bold normal-case">{opt.label}</span> : null}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+                <div className={hasOptionImages ? "grid grid-cols-2 md:grid-cols-3 gap-3" : "grid grid-cols-3 md:grid-cols-6 gap-3"}>
+                  {q.options.map((opt) => {
+                    const selected = (answers[q.id] ?? []).includes(opt.key);
+                    return (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        className={`brut-checkbox flex-col items-center justify-center gap-1 text-lg font-black uppercase ${selected ? "selected-cyan selected" : ""}`}
+                        onClick={() => choose(q, opt.key)}
+                      >
+                        {opt.imageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={opt.imageUrl}
+                            alt={`Pilihan ${opt.key}`}
+                            className="w-full max-h-28 object-contain bg-white"
+                            loading="eager"
+                            decoding="async"
+                            draggable={false}
+                          />
+                        ) : null}
+                        <span>{opt.key}</span>
+                        {opt.label ? <span className="text-xs font-bold normal-case">{opt.label}</span> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })
         ) : (
           <div className="brut-card font-bold" style={{ background: "#fff" }}>
             {isExamplePhase
@@ -390,12 +408,16 @@ export default function CfitSubtestRunnerPage() {
         )}
 
         <div className="flex items-center justify-between gap-3">
-          <button className="brut-btn brut-btn-white" onClick={() => setIdx((v) => Math.max(0, v - 1))} disabled={idx === 0}>
-            ← SEBELUMNYA
+          <button
+            className="brut-btn brut-btn-white"
+            onClick={() => setPage((v) => Math.max(0, v - 1))}
+            disabled={safePage === 0}
+          >
+            ← HALAMAN SEBELUMNYA
           </button>
-          {!isLast ? (
-            <button className="brut-btn brut-btn-cyan" onClick={() => setIdx((v) => Math.min(questions.length - 1, v + 1))}>
-              BERIKUTNYA →
+          {!isLastPage ? (
+            <button className="brut-btn brut-btn-cyan" onClick={() => setPage((v) => Math.min(totalPages - 1, v + 1))}>
+              HALAMAN BERIKUTNYA →
             </button>
           ) : isExamplePhase ? (
             <button className="brut-btn brut-btn-lime" onClick={() => setBriefing(true)} disabled={starting}>
@@ -420,15 +442,16 @@ export default function CfitSubtestRunnerPage() {
           <div className="flex flex-wrap gap-2">
             {questions.map((item, i) => {
               const answered = (answers[item.id] ?? []).length > 0;
+              const onThisPage = Math.floor(i / PER_PAGE) === safePage;
               return (
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => setIdx(i)}
+                  onClick={() => setPage(Math.floor(i / PER_PAGE))}
                   className="brut-sm w-10 h-10 font-black text-sm"
                   style={{
-                    background: i === idx ? "#000" : answered ? "#a3e635" : "#fff",
-                    color: i === idx ? "#fff" : "#000",
+                    background: onThisPage ? "#000" : answered ? "#a3e635" : "#fff",
+                    color: onThisPage ? "#fff" : "#000",
                   }}
                 >
                   {item.isExample ? `C${item.questionNo}` : item.questionNo}
