@@ -49,11 +49,17 @@ const ACCENT = "#22D3EE"
 const ACCENT_DEEP = "#0E7490"
 const HIGHLIGHT = "#CFFAFE"
 
-// ─── Identitas penanda tangan (bisa diatur lewat environment variable) ───
+// ─── Identitas penanda tangan ───
+// Default sesuai penanda tangan resmi; masih bisa ditimpa lewat environment
+// variable bila suatu saat berganti.
 const KOP_KOTA = (process.env.REPORT_KOTA ?? "Metro").trim()
-const KAPRODI_NAMA = (process.env.REPORT_KAPRODI_NAMA ?? "").trim()
-const KAPRODI_NIDN = (process.env.REPORT_KAPRODI_NIDN ?? "").trim()
-const TESTER_NAMA = (process.env.REPORT_TESTER_NAMA ?? "").trim()
+const KAPRODI_NAMA = (
+  process.env.REPORT_KAPRODI_NAMA ?? "Dr. Eko Susanto, M.Pd., Kons."
+).trim()
+const KAPRODI_NIDN = (process.env.REPORT_KAPRODI_NIDN ?? "0213068302").trim()
+const TESTER_NAMA = (
+  process.env.REPORT_TESTER_NAMA ?? "Dr. Agus Wibowo, M.Pd."
+).trim()
 const TESTER_NA = (process.env.REPORT_TESTER_NA ?? "").trim()
 
 const FORM_LABEL: Record<string, string> = {
@@ -455,7 +461,7 @@ function drawSignatures(
     doc.setFont("helvetica", "normal")
     doc.setFontSize(7.6)
     doc.text(
-      `${c.idLabel}. ${c.idValue || "................................"}`,
+      c.idValue ? `${c.idLabel}. ${c.idValue}` : `${c.idLabel}.`,
       c.cx,
       nameY + 14,
       { align: "center" },
