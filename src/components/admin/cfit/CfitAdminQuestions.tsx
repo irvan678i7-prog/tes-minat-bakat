@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 
 // Bank Soal IQ (CFIT) — tampilan mengikuti Bank Soal minat-bakat:
-// tabel subtes dengan TEMPLATE (XLSX) / UPLOAD / INSTRUKSI / WAKTU / PREVIEW
-// (+ edit & hapus per soal, termasuk soal contoh). Soal & tiap pilihan
-// jawaban CFIT berupa GAMBAR.
+// tabel subtes dengan TEMPLATE (XLSX) / UPLOAD / GAMBAR (unggah massal) /
+// INSTRUKSI / WAKTU / PREVIEW (+ edit & hapus per soal, termasuk soal contoh).
+// Soal & tiap pilihan jawaban CFIT berupa GAMBAR.
 
 type Subtest = {
   id: string;
@@ -71,6 +71,7 @@ export default function CfitAdminQuestions() {
   const [imageBusy, setImageBusy] = useState(false);
   const [previewSub, setPreviewSub] = useState<Subtest | null>(null);
   const [editInstrSub, setEditInstrSub] = useState<Subtest | null>(null);
+  const [bulkSub, setBulkSub] = useState<Subtest | null>(null);
   const imgRef = useRef<HTMLInputElement>(null);
 
   const load = () =>
@@ -128,12 +129,33 @@ export default function CfitAdminQuestions() {
 
   return (
     <div className="space-y-6">
+      <div className="brut-card" style={{ background: "#a3e635" }}>
+        <h3 className="text-xl font-black uppercase mb-2">Cara Cepat: Unggah Banyak Gambar</h3>
+        <p className="text-sm font-bold mb-2">
+          Tekan tombol <span className="bg-black text-white px-1">GAMBAR</span> pada baris subtes,
+          lalu pilih/tarik SEMUA gambar subtes itu sekaligus. Sistem membaca nomor soal dari NAMA
+          FILE, jadi tidak perlu menempel URL satu per satu.
+        </p>
+        <ul className="text-sm font-semibold list-disc pl-5 space-y-0.5">
+          <li>
+            <code>01.png</code> → gambar soal nomor 1 (kalau pilihan a–f sudah tercetak di dalam
+            gambar, cukup file ini saja)
+          </li>
+          <li>
+            <code>01b.png</code> → gambar pilihan <b>b</b> soal 1 (boleh <code>01_b.png</code>)
+          </li>
+          <li>
+            <code>c01.png</code> → gambar CONTOH nomor 1 (boleh <code>contoh01.png</code>)
+          </li>
+        </ul>
+      </div>
+
       <div className="brut-card" style={{ background: "#22d3ee" }}>
-        <h3 className="text-xl font-black uppercase mb-2">Upload Gambar Soal</h3>
+        <h3 className="text-xl font-black uppercase mb-2">Upload 1 Gambar (Salin URL)</h3>
         <p className="text-sm font-bold mb-3">
-          Soal & tiap pilihan jawaban CFIT berupa gambar. Upload gambar di sini; URL otomatis
-          tersalin ke clipboard. Tempel ke kolom <code>imageUrl</code> (gambar soal) atau{" "}
-          <code>option*Image</code> (gambar pilihan) di template XLSX subtes.
+          Untuk kebutuhan satuan: upload satu gambar, URL otomatis tersalin ke clipboard. Tempel ke
+          kolom <code>imageUrl</code> (gambar soal) atau <code>option*Image</code> (gambar pilihan)
+          di template XLSX subtes.
         </p>
         <div className="flex flex-col sm:flex-row gap-2">
           <input ref={imgRef} type="file" accept="image/*" className="brut-input flex-1" />
@@ -148,6 +170,7 @@ export default function CfitAdminQuestions() {
         <p className="text-sm font-bold">
           Setiap subtes punya <span className="bg-black text-white px-1">TEMPLATE</span>,{" "}
           <span className="bg-black text-white px-1">UPLOAD</span>,{" "}
+          <span className="bg-black text-white px-1">GAMBAR</span>,{" "}
           <span className="bg-black text-white px-1">INSTRUKSI</span>, dan{" "}
           <span className="bg-black text-white px-1">PREVIEW</span> sendiri — sama seperti bank
           soal minat-bakat. Template memuat sheet <code>CONTOH SOAL</code> dan <code>SOAL</code>{" "}
@@ -204,6 +227,13 @@ export default function CfitAdminQuestions() {
                       }}
                     />
                     <button
+                      className="brut-btn brut-btn-lime text-xs"
+                      onClick={() => setBulkSub(s)}
+                      title="Unggah banyak gambar sekaligus untuk subtes ini"
+                    >
+                      GAMBAR
+                    </button>
+                    <button
                       className="brut-btn brut-btn-white text-xs"
                       onClick={() => setEditInstrSub(s)}
                       title="Edit instruksi yang tampil ke peserta sebelum timer"
@@ -227,6 +257,16 @@ export default function CfitAdminQuestions() {
       </div>
 
       {previewSub && <PreviewModal subtest={previewSub} onClose={() => setPreviewSub(null)} onChanged={() => void load()} />}
+      {bulkSub && (
+        <BulkImagesModal
+          subtest={bulkSub}
+          onClose={() => setBulkSub(null)}
+          onDone={() => {
+            setBulkSub(null);
+            void load();
+          }}
+        />
+      )}
       {editInstrSub && (
         <InstructionsModal
           subtest={editInstrSub}
@@ -234,6 +274,227 @@ export default function CfitAdminQuestions() {
           onSave={(text) => void saveInstructions(editInstrSub.code, text)}
         />
       )}
+    </div>
+  );
+}
+
+// Pembacaan nama file — HARUS sama dengan parseImageFileName di
+// /api/admin/cfit/subtests/[code]/bulk-images agar pratinjau akurat.
+type ParsedName = { isExample: boolean; questionNo: number; optionKey: string | null };
+
+function parseImageFileName(fileName: string): ParsedName | null {
+  const base = fileName.replace(/\.[^.]+$/, "").trim().toLowerCase();
+  if (!base) return null;
+  const isExample = /contoh/.test(base) || /(^|[_\-. ])c\s*0*\d/.test(base);
+  const m = base.match(/(\d{1,3})\s*[_\-. ]?\s*([a-h])?$/);
+  if (!m) return null;
+  const questionNo = parseInt(m[1], 10);
+  if (!Number.isFinite(questionNo) || questionNo < 1) return null;
+  return { isExample, questionNo, optionKey: m[2] ? m[2].toLowerCase() : null };
+}
+
+function BulkImagesModal({
+  subtest,
+  onClose,
+  onDone,
+}: {
+  subtest: Subtest;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [keys, setKeys] = useState("");
+  const [replaceAll, setReplaceAll] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const parsed = useMemo(() => {
+    const rows = new Map<
+      string,
+      { isExample: boolean; questionNo: number; stem: boolean; options: string[] }
+    >();
+    const bad: string[] = [];
+    for (const f of files) {
+      const p = parseImageFileName(f.name);
+      if (!p) {
+        bad.push(f.name);
+        continue;
+      }
+      const gk = `${p.isExample ? "c" : "s"}:${p.questionNo}`;
+      const cur = rows.get(gk) ?? {
+        isExample: p.isExample,
+        questionNo: p.questionNo,
+        stem: false,
+        options: [] as string[],
+      };
+      if (p.optionKey) cur.options = [...cur.options, p.optionKey].sort();
+      else cur.stem = true;
+      rows.set(gk, cur);
+    }
+    const list = [...rows.values()].sort(
+      (a, b) => Number(a.isExample) - Number(b.isExample) || a.questionNo - b.questionNo,
+    );
+    return { list, bad };
+  }, [files]);
+
+  const submit = async () => {
+    if (files.length === 0) {
+      toast.error("Pilih dulu gambar-gambarnya.");
+      return;
+    }
+    if (parsed.bad.length > 0) {
+      toast.error(`Nama file tanpa nomor soal: ${parsed.bad.join(", ")}`);
+      return;
+    }
+    if (
+      replaceAll &&
+      !window.confirm(
+        `GANTI SEMUA soal pada ${subtest.name}?\nSoal lama subtes ini (beserta jawaban peserta pada soal tersebut) akan dihapus.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      for (const f of files) fd.append("files", f);
+      fd.append("keys", keys);
+      fd.append("replaceAll", replaceAll ? "1" : "0");
+      const res = await fetch(
+        `/api/admin/cfit/subtests/${encodeURIComponent(subtest.code)}/bulk-images`,
+        { method: "POST", body: fd },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "Gagal mengunggah", { duration: 8000 });
+        return;
+      }
+      toast.success(
+        `${data.uploaded} gambar terunggah · ${data.created} soal baru · ${data.updated} soal diperbarui`,
+        { duration: 6000 },
+      );
+      onDone();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/60 flex items-start md:items-center justify-center p-2 md:p-6 overflow-y-auto"
+      onClick={onClose}
+    >
+      <div
+        className="brut-card w-full max-w-3xl my-4 space-y-3"
+        style={{ background: "#fff" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-black uppercase">CFIT • {subtest.code}</p>
+            <h3 className="text-2xl font-black uppercase">Unggah Banyak Gambar</h3>
+          </div>
+          <button className="brut-btn brut-btn-black" onClick={onClose} disabled={busy}>
+            TUTUP
+          </button>
+        </div>
+
+        <div className="brut-card text-sm font-semibold space-y-1" style={{ background: "#fef9c3" }}>
+          <p className="font-black uppercase">Aturan nama file</p>
+          <p>
+            <code>01.png</code> = gambar soal 1 · <code>01b.png</code> = pilihan b soal 1 ·{" "}
+            <code>c01.png</code> = contoh 1 · <code>c01a.png</code> = pilihan a contoh 1. Prefiks
+            bebas, yang dibaca adalah angka (dan huruf opsi) di AKHIR nama file, mis.{" "}
+            <code>3A_SERIES_07_d.png</code>.
+          </p>
+        </div>
+
+        <label className="text-xs font-black uppercase block">
+          Pilih / tarik banyak gambar sekaligus
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="brut-input w-full mt-1"
+            onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
+            disabled={busy}
+          />
+        </label>
+
+        {files.length > 0 ? (
+          <div className="brut-card space-y-2" style={{ background: "#f5f5f5" }}>
+            <p className="text-xs font-black uppercase">
+              {files.length} file · {parsed.list.length} soal terbaca
+            </p>
+            {parsed.bad.length > 0 ? (
+              <p className="text-sm font-bold" style={{ color: "#be123c" }}>
+                ⚠ Tidak terbaca (tidak ada nomor soal): {parsed.bad.join(", ")}
+              </p>
+            ) : null}
+            <div className="max-h-48 overflow-y-auto">
+              <table className="brut-table text-xs">
+                <thead>
+                  <tr>
+                    <th>Jenis</th>
+                    <th>No</th>
+                    <th>Gambar soal</th>
+                    <th>Gambar pilihan</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {parsed.list.map((r) => (
+                    <tr key={`${r.isExample ? "c" : "s"}${r.questionNo}`}>
+                      <td className="font-black">{r.isExample ? "CONTOH" : "SOAL"}</td>
+                      <td className="font-black">{r.questionNo}</td>
+                      <td>{r.stem ? "✓" : "—"}</td>
+                      <td className="font-mono">{r.options.length > 0 ? r.options.join(", ") : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+
+        <label className="text-xs font-black uppercase block">
+          Kunci jawaban (tempel sekali untuk semua soal)
+          <textarea
+            value={keys}
+            onChange={(e) => setKeys(e.target.value)}
+            rows={4}
+            className="brut-input w-full mt-1 font-mono text-sm"
+            placeholder={"1=c, 2=a, 3=e, 4=b\n5=b+d   (dua kunci)\nc1=a    (kunci contoh 1)"}
+            disabled={busy}
+          />
+        </label>
+        <p className="text-xs font-semibold">
+          Soal ASLI wajib punya kunci. Kalau soalnya sudah ada di bank soal dan kuncinya tidak
+          diubah, kolom ini boleh dikosongkan — kunci lama dipakai.
+        </p>
+
+        <label className="flex items-center gap-2 text-sm font-black uppercase">
+          <input
+            type="checkbox"
+            checked={replaceAll}
+            onChange={(e) => setReplaceAll(e.target.checked)}
+            disabled={busy}
+          />
+          Ganti semua soal lama subtes ini
+        </label>
+        <p className="text-xs font-semibold">
+          Tanpa dicentang: gambar hanya menimpa soal dengan nomor yang sama, soal lain tetap utuh.
+        </p>
+
+        <div className="flex justify-end gap-2">
+          <button className="brut-btn brut-btn-white" onClick={onClose} disabled={busy}>
+            BATAL
+          </button>
+          <button className="brut-btn brut-btn-black" onClick={submit} disabled={busy}>
+            {busy ? "MENGUNGGAH..." : `UNGGAH ${files.length || ""} GAMBAR`}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -345,8 +606,8 @@ function InstructionsModal({
           </button>
         </div>
         <p className="text-sm font-bold mb-2">
-          Tampil ke peserta sebelum timer mulai. Jelaskan cara kerja subtes dan contoh tipe soal
-          (mis. “Pilih 1 gambar yang melanjutkan deret di sebelah kiri”).
+          Tampil ke peserta di bagian atas halaman contoh soal. Jelaskan cara kerja subtes dan
+          contoh tipe soal (mis. “Pilih 1 gambar yang melanjutkan deret di sebelah kiri”).
         </p>
         <textarea
           value={text}
