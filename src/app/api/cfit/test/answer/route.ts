@@ -38,7 +38,9 @@ export async function POST(req: NextRequest) {
     subtestId: question.subtestId,
     durationSec: question.subtest.durationSec,
   });
-  if (!lock.started) {
+  // SOAL CONTOH dikerjakan pada tahap latihan yang TANPA TIMER, jadi tidak
+  // mensyaratkan subtes sudah dimulai. Soal asli tetap wajib timer aktif.
+  if (!question.isExample && !lock.started) {
     return NextResponse.json({ error: "Subtes belum dimulai." }, { status: 409 });
   }
   if (lock.locked) {
