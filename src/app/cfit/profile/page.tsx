@@ -34,6 +34,9 @@ export default function CfitProfilePage() {
   const [grade, setGrade] = useState("");
   const [birthDate, setBirthDate] = useState("");
   const [testDate, setTestDate] = useState<Date | null>(null);
+  // Alert setelah biodata tersimpan: peserta TIDAK boleh mulai tes sebelum
+  // ada pengarahan dari tester.
+  const [briefing, setBriefing] = useState(false);
 
   // Ambil tanggal tes (waktu token di-redeem) + prefill kalau sudah pernah isi.
   useEffect(() => {
@@ -107,7 +110,7 @@ export default function CfitProfilePage() {
       }
       if (data.normWarning) toast(data.normWarning, { icon: "⚠️", duration: 6000 });
       toast.success("Biodata tersimpan!");
-      router.push("/cfit/test");
+      setBriefing(true);
     });
   };
 
@@ -231,6 +234,35 @@ export default function CfitProfilePage() {
           </button>
         </form>
       </main>
+
+      {briefing ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-5"
+          style={{ background: "rgba(0,0,0,0.75)" }}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="brut-card w-full max-w-lg space-y-4" style={{ background: "#fef08a" }}>
+            <h2 className="text-2xl font-black uppercase leading-tight">
+              ⚠️ Jangan mulai tes dulu!
+            </h2>
+            <p className="font-bold">
+              Biodata kamu sudah tersimpan. JANGAN MEMULAI TES SEBELUM ADA PENGARAHAN DARI TESTER.
+            </p>
+            <p className="text-sm font-semibold">
+              Tunggu di halaman daftar subtes dan dengarkan instruksi tester. Begitu subtes pertama
+              dimulai, waktu langsung berjalan dan tidak bisa dihentikan.
+            </p>
+            <button
+              type="button"
+              className="brut-btn brut-btn-black w-full"
+              onClick={() => router.push("/cfit/test")}
+            >
+              SAYA MENGERTI, TUNGGU PENGARAHAN TESTER
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

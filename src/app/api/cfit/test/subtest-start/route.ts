@@ -2,12 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { formsFor, getCfitFromRequest } from "@/lib/cfit/auth";
-import { computeCfitSubtestLock, ensureCfitSubtestStarted } from "@/lib/cfit/lock";
+import { computeCfitSubtestLock, ensureCfitSubtestStarted, type CfitSubtestLockInfo } from "@/lib/cfit/lock";
+import { cfitBreakRemainingSec, cfitBreakSecBetween } from "@/lib/cfit/breaks";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const Body = z.object({ subtestCode: z.string().min(1) });
+// phase:
+// - "example" → tahap CONTOH SOAL: TANPA TIMER, timer server tidak dinyalakan.
+// - "test"    → tahap soal asli: timer server mulai berjalan.
+const Body = z.object({
+  subtestCode: z.string().min(1),
+  phase: z.enum(["example", "test"]).optional(),
+});
 
 // Normalisasi opsi ke bentuk { key, label, imageUrl } — mendukung format lama
 // (array string huruf) dan format baru (array objek dengan gambar per opsi).
@@ -80,14 +87,15 @@ function shuffleOptionsIfSafe(opts: NormOption[], seed: string, isExample: boole
   return seededShuffle(opts, seed);
 }
 
-// Mulai (atau resume) satu subtes: nyalakan timer server-side lalu kirim
-// soal TANPA kunci jawaban. Kalau subtes sudah terkunci → 423.
+// Mulai (atau resume) satu subtes. Kunci jawaban TIDAK PERNAH dikirim ke
+// peserta. Kalau subtes sudah terkunci → 423.
 export async function POST(req: NextRequest) {
   const p = getCfitFromRequest(req);
   if (!p) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ error: "Input tidak valid" }, { status: 400 });
+  const requestedPhase = parsed.data.phase ?? "test";
 
   const submission = await prisma.cfitSubmission.findUnique({ where: { id: p.sub } });
   if (!submission) return NextResponse.json({ error: "Submission tidak ditemukan" }, { status: 404 });
@@ -105,9 +113,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Subtes tidak ditemukan untuk bentuk tes ini." }, { status: 404 });
   }
 
-  // WAJIB BERURUTAN (sesuai prosedur CFIT): subtes hanya boleh dimulai kalau
-  // semua subtes dengan urutan lebih kecil sudah TERKUNCI (selesai manual /
-  // waktu habis). Mencegah timer beberapa subtes berjalan bersamaan.
+  // WAJIB BERURUTAN (sesuai prosedur CFIT): subtes hanya boleh dibuka kalau
+  // semua subtes dengan urutan lebih kecil sudah TERKUNCI (waktu habis).
+  // Mencegah timer beberapa subtes berjalan bersamaan.
   const earlier = await prisma.cfitSubtest.findMany({
     where: {
       form: { in: formsFor(submission.form as never) },
@@ -115,6 +123,9 @@ export async function POST(req: NextRequest) {
     },
     orderBy: { orderIndex: "asc" },
   });
+  // Subtes tepat sebelum ini — dipakai untuk menghitung jeda otomatis.
+  let prevLock: CfitSubtestLockInfo | null = null;
+  let prevForm: string | null = null;
   for (const s of earlier) {
     const l = await computeCfitSubtestLock({
       submissionId: submission.id,
@@ -127,8 +138,108 @@ export async function POST(req: NextRequest) {
         { status: 409 },
       );
     }
+    prevLock = l;
+    prevForm = s.form;
   }
 
+  const current = await computeCfitSubtestLock({
+    submissionId: submission.id,
+    subtestId: subtest.id,
+    durationSec: subtest.durationSec,
+  });
+  if (current.locked) {
+    return NextResponse.json(
+      { error: "Subtes ini sudah terkunci.", finishReason: current.finishReason },
+      { status: 423 },
+    );
+  }
+
+  // JEDA OTOMATIS antar subtes: 2 menit, dan 3 menit saat berganti bentuk
+  // (3A → 3B). Hanya berlaku sebelum subtes dimulai — resume tidak terganggu.
+  if (!current.started && prevLock?.finishedAt && prevForm) {
+    const breakSec = cfitBreakSecBetween(prevForm, subtest.form);
+    const breakRemainingSec = cfitBreakRemainingSec(prevLock.finishedAt, breakSec);
+    if (breakRemainingSec > 0) {
+      return NextResponse.json(
+        {
+          error: "Masih dalam jeda antar subtes. Tunggu sampai jeda selesai.",
+          breakSec,
+          breakRemainingSec,
+        },
+        { status: 425 },
+      );
+    }
+  }
+
+  const meta = {
+    code: subtest.code,
+    name: subtest.name,
+    description: subtest.description,
+    instructions: subtest.instructions,
+    durationSec: subtest.durationSec,
+  };
+
+  const questionSelect = {
+    id: true,
+    questionNo: true,
+    prompt: true,
+    imageUrl: true,
+    options: true,
+    isExample: true,
+    correct: true,
+  } as const;
+
+  // KUNCI JAWABAN (`correct`) SENGAJA TIDAK DIKIRIM ke peserta — hanya
+  // jumlah jawaban yang diminta (expectedAnswers) untuk soal multi-jawaban.
+  const toClient = (
+    rows: Array<{
+      id: string;
+      questionNo: number;
+      prompt: string;
+      imageUrl: string | null;
+      options: unknown;
+      isExample: boolean;
+      correct: unknown;
+    }>,
+  ) =>
+    rows.map(({ correct, options, ...q }) => ({
+      ...q,
+      options: shuffleOptionsIfSafe(
+        normalizeOptions(options),
+        `${submission.randomSeed}:${q.id}`,
+        q.isExample,
+      ),
+      expectedAnswers: Array.isArray(correct) ? (correct as unknown[]).length : 1,
+    }));
+
+  const savedFor = (ids: string[]) =>
+    prisma.cfitAnswer.findMany({
+      where: { submissionId: submission.id, questionId: { in: ids } },
+      select: { questionId: true, selected: true },
+    });
+
+  // ── TAHAP CONTOH SOAL: TANPA TIMER ──
+  // Timer server TIDAK dinyalakan di tahap ini. Kalau timer sudah berjalan
+  // (peserta refresh di tengah subtes), permintaan dialihkan ke tahap tes.
+  if (requestedPhase === "example" && !current.started) {
+    const rows = await prisma.cfitQuestion.findMany({
+      where: { subtestId: subtest.id, isExample: true },
+      orderBy: { questionNo: "asc" },
+      select: questionSelect,
+    });
+    const saved = await savedFor(rows.map((q) => q.id));
+    return NextResponse.json({
+      phase: "example",
+      alreadyStarted: false,
+      subtest: meta,
+      startedAt: null,
+      remainingSec: null,
+      questions: toClient(rows),
+      savedAnswers: saved,
+    });
+  }
+
+  // ── TAHAP SOAL ASLI: timer mulai / lanjut berjalan ──
   const lock = await ensureCfitSubtestStarted({
     submissionId: submission.id,
     subtestId: subtest.id,
@@ -142,53 +253,26 @@ export async function POST(req: NextRequest) {
   }
 
   const rows = await prisma.cfitQuestion.findMany({
-    where: { subtestId: subtest.id },
+    where: { subtestId: subtest.id, isExample: false },
     // Urutan SOAL standar booklet (questionNo) — JANGAN diacak.
-    orderBy: [{ isExample: "desc" }, { questionNo: "asc" }],
-    select: {
-      id: true,
-      questionNo: true,
-      prompt: true,
-      imageUrl: true,
-      options: true,
-      isExample: true,
-      correct: true,
-    },
+    orderBy: { questionNo: "asc" },
+    select: questionSelect,
   });
-
-  // KUNCI JAWABAN (`correct`) SENGAJA TIDAK DIKIRIM ke peserta — hanya
-  // jumlah jawaban yang diminta (expectedAnswers) untuk soal multi-jawaban.
-  const questions = rows.map(({ correct, options, ...q }) => ({
-    ...q,
-    options: shuffleOptionsIfSafe(
-      normalizeOptions(options),
-      `${submission.randomSeed}:${q.id}`,
-      q.isExample,
-    ),
-    expectedAnswers: Array.isArray(correct) ? (correct as unknown[]).length : 1,
-  }));
 
   // Jawaban yang sudah tersimpan (resume setelah refresh).
-  const saved = await prisma.cfitAnswer.findMany({
-    where: { submissionId: submission.id, questionId: { in: rows.map((q) => q.id) } },
-    select: { questionId: true, selected: true },
-  });
+  const saved = await savedFor(rows.map((q) => q.id));
 
   const remainingSec = lock.startedAt
     ? Math.max(0, Math.round((lock.startedAt.getTime() + subtest.durationSec * 1000 - Date.now()) / 1000))
     : subtest.durationSec;
 
   return NextResponse.json({
-    subtest: {
-      code: subtest.code,
-      name: subtest.name,
-      description: subtest.description,
-      instructions: subtest.instructions,
-      durationSec: subtest.durationSec,
-    },
+    phase: "test",
+    alreadyStarted: current.started,
+    subtest: meta,
     startedAt: lock.startedAt,
     remainingSec,
-    questions,
+    questions: toClient(rows),
     savedAnswers: saved,
   });
 }
