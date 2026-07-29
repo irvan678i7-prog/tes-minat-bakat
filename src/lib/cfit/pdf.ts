@@ -398,6 +398,8 @@ function drawQrBlock(
 }
 
 // ─── Dua blok tanda tangan (rata tengah per kolom) ───
+// Tanggal ditulis SEJAJAR dengan baris jabatan di kolom sebelahnya (bukan di
+// atasnya), dan jarak jabatan → nama diberi ruang lebih lega untuk tanda tangan.
 function drawSignatures(
   doc: jsPDF,
   margin: number,
@@ -415,26 +417,20 @@ function drawSignatures(
       nama: KAPRODI_NAMA,
       idLabel: "NIDN",
       idValue: KAPRODI_NIDN,
-      showDate: false,
     },
     {
       cx: margin + colW + gap + colW / 2,
-      jabatan: ["Tester"],
+      jabatan: [`${KOP_KOTA}, ${tanggal}`, "Tester"],
       nama: TESTER_NAMA,
       idLabel: "NA",
       idValue: TESTER_NA,
-      showDate: true,
     },
   ]
 
-  const dateY = yIn
-  const jabatanY = yIn + 13
-  const nameY = jabatanY + 52
-
-  setTextHex(doc, INK)
-  doc.setFont("helvetica", "normal")
-  doc.setFontSize(8)
-  doc.text(`${KOP_KOTA}, ${tanggal}`, cols[1].cx, dateY, { align: "center" })
+  // Baris pertama kedua kolom sejajar: kiri "Ketua Program Studi Magister",
+  // kanan "Metro, <tanggal>".
+  const jabatanY = yIn
+  const nameY = jabatanY + 66
 
   for (const c of cols) {
     setTextHex(doc, INK)
@@ -641,7 +637,7 @@ export function buildCfitReportPDF(
   y = drawSubtestChart(doc, perSubtest, margin, y, pageW) + 10
 
   // QR validasi (tengah), lalu dua blok tanda tangan
-  y = drawQrBlock(doc, reportCode, y, pageW) + 13
+  y = drawQrBlock(doc, reportCode, y, pageW) + 15
   drawSignatures(
     doc,
     margin,
