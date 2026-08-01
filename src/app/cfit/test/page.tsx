@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
+import { cfitSubtestLabel } from "@/lib/cfit/subtest-label";
 
 type SubtestInfo = {
   code: string;
@@ -163,23 +164,23 @@ export default function CfitDashboardPage() {
             <p className="text-xs font-black uppercase tracking-widest">
               {breakInfo.formChanged
                 ? "Jeda pergantian bentuk tes — 3 menit"
-                : "Jeda antar subtes — 2 menit"}
+                : "Jeda antar tes — 2 menit"}
             </p>
             <h1 className="text-3xl font-black uppercase leading-none">Istirahat Sebentar</h1>
             <div className="brut-sm mx-auto inline-block px-6 py-3 font-mono text-5xl font-black" style={{ background: "#fff" }}>
               {fmt(breakLeft)}
             </div>
             <p className="font-bold">
-              Subtes berikutnya: <span className="uppercase">{breakInfo.name}</span>
+              Berikutnya: <span className="uppercase">{cfitSubtestLabel(breakInfo.code, breakInfo.name)}</span>
             </p>
             <p className="text-sm font-semibold">
-              Subtes akan DIBUKA OTOMATIS saat hitungan mencapai 0:00. Jangan menutup halaman ini dan
+              Tes berikutnya akan DIBUKA OTOMATIS saat hitungan mencapai 0:00. Jangan menutup halaman ini dan
               tunggu instruksi tester.
             </p>
           </div>
           <div className="brut-card text-sm font-semibold" style={{ background: "#fef9c3" }}>
-            Gunakan jeda ini untuk mengistirahatkan mata. Waktu subtes berikutnya baru berjalan setelah
-            subtesnya terbuka.
+            Gunakan jeda ini untuk mengistirahatkan mata. Waktu tes berikutnya baru berjalan setelah
+            tesnya terbuka.
           </div>
         </div>
       </div>
@@ -195,7 +196,7 @@ export default function CfitDashboardPage() {
             <p className="text-xs font-bold uppercase tracking-wider mt-0.5">{FORM_LABEL[form] ?? form}</p>
           </div>
           <span className="brut-tag" style={{ background: "#000", color: "#fff" }}>
-            {subtests.filter((s) => s.locked).length}/{subtests.length} SUBTES
+            {subtests.filter((s) => s.locked).length}/{subtests.length} TES
           </span>
         </div>
       </header>
@@ -204,17 +205,17 @@ export default function CfitDashboardPage() {
         <div className="brut-card" style={{ background: "#fef9c3" }}>
           <p className="font-black uppercase mb-1">Jangan mulai sebelum ada pengarahan dari tester.</p>
           <p className="font-bold">
-            Kerjakan subtes secara BERURUTAN. Setiap subtes dimulai dari CONTOH SOAL yang tidak ada batas
-            waktunya, lalu soal asli dikerjakan dengan waktu berjalan. TIDAK ADA tombol selesai — subtes
-            berakhir otomatis saat waktu habis, lalu ada JEDA 2 MENIT dan subtes berikutnya terbuka sendiri.
+            Kerjakan setiap tes secara BERURUTAN. Setiap tes dimulai dari CONTOH SOAL yang tidak ada batas
+            waktunya, lalu soal asli dikerjakan dengan waktu berjalan. TIDAK ADA tombol selesai — tes
+            berakhir otomatis saat waktu habis, lalu ada JEDA 2 MENIT dan tes berikutnya terbuka sendiri.
             Saat Bentuk A selesai, jedanya 3 MENIT sebelum lanjut ke Bentuk B. Seluruh tes juga ditutup
-            otomatis setelah subtes terakhir habis waktunya.
+            otomatis setelah tes terakhir habis waktunya.
           </p>
         </div>
 
         {finishing ? (
           <div className="brut-card font-black uppercase brut-blink" style={{ background: "#a3e635" }}>
-            Semua subtes selesai — memproses hasil...
+            Semua tes selesai — memproses hasil...
           </div>
         ) : null}
 
@@ -223,7 +224,7 @@ export default function CfitDashboardPage() {
             <div className="flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="brut-tag" style={{ background: "#000", color: "#fff" }}>{i + 1}</span>
-                <h2 className="text-xl font-black uppercase">{s.name}</h2>
+                <h2 className="text-xl font-black uppercase">{cfitSubtestLabel(s.code, s.name)}</h2>
                 <span className="brut-tag">{FORM_LABEL[s.form]}</span>
               </div>
               {s.description ? <p className="font-semibold text-sm mt-1">{s.description}</p> : null}
@@ -249,7 +250,7 @@ export default function CfitDashboardPage() {
                   {s.started ? "LANJUTKAN" : "MULAI"}
                 </button>
               ) : (
-                <button className="brut-btn brut-btn-white" disabled title="Selesaikan subtes sebelumnya dulu">
+                <button className="brut-btn brut-btn-white" disabled title="Selesaikan tes sebelumnya dulu">
                   MENUNGGU GILIRAN
                 </button>
               )}

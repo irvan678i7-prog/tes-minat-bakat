@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import { useAntiCheat } from "@/components/student/useAntiCheat";
+import { cfitSubtestLabel } from "@/lib/cfit/subtest-label";
 
 type Option = { key: string; label: string; imageUrl: string | null };
 
@@ -82,7 +83,7 @@ export default function CfitSubtestRunnerPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ subtestCode }),
     }).catch(() => null);
-    toast.error("Waktu habis! Subtes dikunci.");
+    toast.error("Waktu habis! Tes ini dikunci.");
     router.replace("/cfit/test");
   }, [router, subtestCode]);
 
@@ -100,18 +101,18 @@ export default function CfitSubtestRunnerPage() {
         return;
       }
       if (res.status === 423) {
-        toast.error("Subtes ini sudah terkunci.");
+        toast.error("Tes ini sudah terkunci.");
         router.replace("/cfit/test");
         return;
       }
       if (res.status === 425) {
         // Masih dalam jeda antar subtes — kembalikan ke layar jeda.
-        toast(data.error || "Masih dalam jeda antar subtes.", { icon: "⏳" });
+        toast(data.error || "Masih dalam jeda antar tes.", { icon: "⏳" });
         router.replace("/cfit/test");
         return;
       }
       if (!res.ok) {
-        toast.error(data.error || "Gagal memuat subtes");
+        toast.error(data.error || "Gagal memuat tes");
         router.replace("/cfit/test");
         return;
       }
@@ -236,7 +237,7 @@ export default function CfitSubtestRunnerPage() {
   if (!loaded) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="brut-card font-black uppercase brut-blink">Memuat subtes...</div>
+        <div className="brut-card font-black uppercase brut-blink">Memuat tes...</div>
       </div>
     );
   }
@@ -258,7 +259,9 @@ export default function CfitSubtestRunnerPage() {
       >
         <div className="max-w-4xl mx-auto px-4 md:px-6 py-3 flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-lg md:text-xl font-black uppercase leading-none">{subtest.name}</h1>
+            <h1 className="text-lg md:text-xl font-black uppercase leading-none">
+              {cfitSubtestLabel(subtest.code, subtest.name)}
+            </h1>
             <p className="text-[10px] md:text-xs font-bold uppercase tracking-wider mt-0.5">
               {isExamplePhase ? "Contoh" : "Halaman"} {safePage + 1} / {totalPages} · {answeredCount}/
               {questions.length} terjawab
@@ -324,7 +327,7 @@ export default function CfitSubtestRunnerPage() {
           <div className="brut-card space-y-1" style={{ background: "#a3e635" }}>
             <p className="font-black uppercase">Tahap contoh soal — tidak dinilai, tidak ada batas waktu.</p>
             <p className="text-sm font-semibold">
-              Kerjakan contoh sambil mendengarkan penjelasan tester. Waktu subtes baru mulai berjalan setelah
+              Kerjakan contoh sambil mendengarkan penjelasan tester. Waktu tes baru mulai berjalan setelah
               tahap ini selesai.
             </p>
           </div>
@@ -402,8 +405,8 @@ export default function CfitSubtestRunnerPage() {
         ) : (
           <div className="brut-card font-bold" style={{ background: "#fff" }}>
             {isExamplePhase
-              ? "Subtes ini tidak memiliki contoh soal. Lanjutkan setelah mendapat arahan tester."
-              : "Belum ada soal untuk subtes ini. Hubungi admin."}
+              ? "Tes ini tidak memiliki contoh soal. Lanjutkan setelah mendapat arahan tester."
+              : "Belum ada soal untuk tes ini. Hubungi admin."}
           </div>
         )}
 
@@ -424,15 +427,15 @@ export default function CfitSubtestRunnerPage() {
               SELESAI CONTOH →
             </button>
           ) : (
-            <button className="brut-btn brut-btn-white" disabled title="Subtes berakhir otomatis saat waktu habis">
-              SUBTES BERAKHIR SAAT WAKTU HABIS
+            <button className="brut-btn brut-btn-white" disabled title="Tes berakhir otomatis saat waktu habis">
+              TES BERAKHIR SAAT WAKTU HABIS
             </button>
           )}
         </div>
 
         {!isExamplePhase ? (
           <div className="brut-card text-sm font-semibold" style={{ background: "#fef9c3" }}>
-            Tidak ada tombol selesai. Subtes berakhir OTOMATIS saat waktu habis, supaya seluruh peserta satu
+            Tidak ada tombol selesai. Tes berakhir OTOMATIS saat waktu habis, supaya seluruh peserta satu
             kelas selesai bersamaan. Periksa kembali jawabanmu selagi waktu tersisa.
           </div>
         ) : null}
@@ -477,7 +480,7 @@ export default function CfitSubtestRunnerPage() {
               Contoh soal sudah selesai. TUNGGU ARAHAN TESTER sebelum menekan tombol di bawah.
             </p>
             <p className="text-sm font-semibold">
-              Begitu ditekan, waktu subtes langsung berjalan dan tidak bisa dihentikan. Subtes berakhir
+              Begitu ditekan, waktu tes langsung berjalan dan tidak bisa dihentikan. Tes berakhir
               otomatis saat waktu habis.
             </p>
             <div className="flex flex-col md:flex-row gap-3">
@@ -495,7 +498,7 @@ export default function CfitSubtestRunnerPage() {
                 onClick={startTest}
                 disabled={starting}
               >
-                {starting ? "MEMBUKA..." : "MULAI SUBTES SEKARANG"}
+                {starting ? "MEMBUKA..." : "MULAI TES SEKARANG"}
               </button>
             </div>
           </div>
