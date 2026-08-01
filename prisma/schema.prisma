@@ -37,6 +37,14 @@ model AccessToken {
   id          String      @id @default(cuid())
   code        String      @unique
   testKind    TestKind
+  // Nama sekolah SESI TES — OPSIONAL, diisi admin saat membuat token. Pola
+  // meniru token Tes IQ (CfitAccessToken.school), TAPI tabelnya tetap
+  // terpisah penuh: token minat-bakat dan token CFIT tidak digabung.
+  // Kalau diisi  → semua peserta token ini otomatis memakai tulisan sekolah
+  //                yang sama persis (rekap & laporan jadi seragam).
+  // Kalau kosong → perilaku LAMA tidak berubah sama sekali: siswa mengetik
+  //                sendiri nama sekolah di form data diri.
+  school      String?
   expiresAt   DateTime
   createdAt   DateTime    @default(now())
   createdById String?
