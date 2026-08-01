@@ -22,6 +22,8 @@ type TokenRow = {
   id: string;
   code: string;
   form: CfitForm;
+  school: string | null;
+  grade: string | null;
   expiresAt: string;
   createdAt: string;
   redeemedAt: string | null;
@@ -43,6 +45,8 @@ export default function CfitAdminTokens() {
   const [showAll, setShowAll] = useState(false);
   const [count, setCount] = useState(1);
   const [ttlHours, setTtlHours] = useState(3);
+  const [school, setSchool] = useState("");
+  const [grade, setGrade] = useState("");
   const [openToken, setOpenToken] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -62,11 +66,20 @@ export default function CfitAdminTokens() {
   }, [load]);
 
   const create = async () => {
+    if (!school.trim()) {
+      toast.error("Nama sekolah wajib diisi");
+      return;
+    }
     setCreating(true);
     const res = await fetch("/api/admin/cfit/tokens", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ count, ttlSec: ttlHours * 3600 }),
+      body: JSON.stringify({
+        count,
+        ttlSec: ttlHours * 3600,
+        school: school.trim(),
+        grade: grade.trim() || undefined,
+      }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -87,6 +100,26 @@ export default function CfitAdminTokens() {
     <div className="space-y-6">
       <div className="brut-card" style={{ background: "#22d3ee" }}>
         <h2 className="text-xl font-black uppercase mb-3">Buat Token CFIT</h2>
+        <div className="grid md:grid-cols-2 gap-3 mb-3">
+          <div>
+            <label className="block text-xs font-black uppercase mb-1">Sekolah *</label>
+            <input
+              className="brut-input w-full"
+              placeholder="cth: SMA Negeri 1 Metro"
+              value={school}
+              onChange={(e) => setSchool(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-black uppercase mb-1">Kelas (opsional)</label>
+            <input
+              className="brut-input w-full"
+              placeholder="cth: XII IPA 1"
+              value={grade}
+              onChange={(e) => setGrade(e.target.value)}
+            />
+          </div>
+        </div>
         <div className="grid md:grid-cols-3 gap-3">
           <div>
             <label className="block text-xs font-black uppercase mb-1">Jumlah</label>
@@ -113,6 +146,9 @@ export default function CfitAdminTokens() {
         </div>
         <p className="text-xs font-semibold mt-2">
           Token CFIT hanya <span className="font-black">1 macam</span>: bentuk lengkap 3A + 3B. 1 token bisa dipakai banyak peserta (token kelas) di halaman <span className="font-black">/cfit</span>.
+        </p>
+        <p className="text-xs font-semibold mt-1">
+          Sekolah &amp; kelas di atas otomatis dipakai SEMUA peserta token ini — siswa tidak mengetiknya lagi, jadi tulisannya selalu seragam di filter rekap dan laporan PDF. Buat token terpisah untuk tiap kelas.
         </p>
       </div>
 
@@ -147,6 +183,7 @@ export default function CfitAdminTokens() {
             <thead>
               <tr>
                 <th>Token</th>
+                <th>Sekolah / Kelas</th>
                 <th>Kadaluarsa</th>
                 <th>Peserta</th>
                 <th>Status</th>
@@ -158,6 +195,10 @@ export default function CfitAdminTokens() {
                 <>
                   <tr key={t.id}>
                     <td className="font-mono font-black tracking-widest">{t.code}</td>
+                    <td className="font-bold">
+                      {t.school ?? "—"}
+                      {t.grade ? <span className="font-semibold"> · {t.grade}</span> : null}
+                    </td>
                     <td className={new Date(t.expiresAt) < new Date() ? "line-through opacity-60" : ""}>{fmtDate(t.expiresAt)}</td>
                     <td className="font-bold">{t.participantCount}</td>
                     <td className="font-bold">
@@ -192,6 +233,7 @@ export default function CfitAdminTokens() {
                             {s.result ? `IQ ${s.result.iq} · ${s.result.classification}` : "-"}
                           </td>
                           <td>{s.flaggedCheating || s.violationCount >= 5 ? `⚠️ ${s.violationCount} pelanggaran` : ""}</td>
+                          <td></td>
                         </tr>
                       ))
                     : null}

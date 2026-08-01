@@ -196,6 +196,12 @@ model CfitAccessToken {
   id          String    @id @default(cuid())
   code        String    @unique
   form        CfitForm  @default(FORM_3AB)
+  // Sekolah & kelas SESI TES, diisi admin saat membuat token. Semua peserta
+  // yang memakai token ini otomatis memakai tulisan yang sama persis, jadi
+  // filter rekap dan identitas di laporan PDF tidak lagi bergantung pada
+  // ketikan bebas siswa (mis. "SMKN 1" vs "SMK Negeri 1").
+  school      String?
+  grade       String?
   expiresAt   DateTime
   createdAt   DateTime  @default(now())
   createdById String? // id AdminUser (tanpa FK, biar tabel lama tak tersentuh)

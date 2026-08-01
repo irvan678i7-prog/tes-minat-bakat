@@ -14,6 +14,11 @@ const CFIT_TOKEN_FORM = "FORM_3AB" as const;
 const Body = z.object({
   count: z.number().int().min(1).max(100).default(1),
   ttlSec: z.number().int().min(60).max(24 * 60 * 60).default(3600),
+  // Sekolah & kelas sesi tes. Ditempel di token supaya SEMUA peserta yang
+  // memakai token ini punya tulisan yang identik — siswa tidak lagi mengetik
+  // sendiri, sehingga filter rekap dan laporan PDF selalu seragam.
+  school: z.string().max(160).optional(),
+  grade: z.string().max(60).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -23,6 +28,14 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return NextResponse.json({ error: "Invalid input" }, { status: 400 });
 
   const { count, ttlSec } = parsed.data;
+  const school = (parsed.data.school ?? "").trim();
+  const grade = (parsed.data.grade ?? "").trim();
+  if (!school) {
+    return NextResponse.json(
+      { error: "Nama sekolah wajib diisi — dipakai untuk semua peserta token ini." },
+      { status: 400 },
+    );
+  }
   const expiresAt = new Date(Date.now() + ttlSec * 1000);
 
   const created = [];
@@ -32,7 +45,14 @@ export async function POST(req: NextRequest) {
       code = generateTokenCode();
     }
     const t = await prisma.cfitAccessToken.create({
-      data: { code, form: CFIT_TOKEN_FORM, expiresAt, createdById: admin.sub },
+      data: {
+        code,
+        form: CFIT_TOKEN_FORM,
+        school,
+        grade: grade || null,
+        expiresAt,
+        createdById: admin.sub,
+      },
     });
     created.push(t);
   }
