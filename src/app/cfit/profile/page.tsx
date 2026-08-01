@@ -32,6 +32,10 @@ export default function CfitProfilePage() {
   const [gender, setGender] = useState<"" | "L" | "P">("");
   const [school, setSchool] = useState("");
   const [grade, setGrade] = useState("");
+  // Sekolah & kelas bisa sudah ditempel admin di token sesi tes. Kalau begitu,
+  // peserta hanya melihatnya (read-only) supaya tulisannya seragam sekelas.
+  const [schoolLocked, setSchoolLocked] = useState(false);
+  const [gradeLocked, setGradeLocked] = useState(false);
   const [birthDate, setBirthDate] = useState("");
   const [testDate, setTestDate] = useState<Date | null>(null);
   // Alert setelah biodata tersimpan: peserta TIDAK boleh mulai tes sebelum
@@ -56,6 +60,8 @@ export default function CfitProfilePage() {
         if (data.gender === "L" || data.gender === "P") setGender(data.gender);
         if (data.school) setSchool(String(data.school));
         if (data.grade) setGrade(String(data.grade));
+        setSchoolLocked(!!data.schoolLocked);
+        setGradeLocked(!!data.gradeLocked);
         if (data.birthDate) setBirthDate(String(data.birthDate).slice(0, 10));
         setTestDate(data.testDate ? new Date(data.testDate) : new Date());
       } else {
@@ -81,7 +87,7 @@ export default function CfitProfilePage() {
     e.preventDefault();
     if (!fullName.trim()) return void toast.error("Nama lengkap wajib diisi");
     if (!gender) return void toast.error("Pilih jenis kelamin");
-    if (!school.trim()) return void toast.error("Sekolah asal wajib diisi");
+    if (!schoolLocked && !school.trim()) return void toast.error("Sekolah asal wajib diisi");
     if (!birthDate) return void toast.error("Tanggal lahir wajib diisi");
     if (age == null || age < 5 || age > 99) return void toast.error("Tanggal lahir tidak valid");
     startTransition(async () => {
@@ -92,7 +98,7 @@ export default function CfitProfilePage() {
           fullName: fullName.trim(),
           nis: nis.trim() || undefined,
           gender,
-          school: school.trim(),
+          school: school.trim() || undefined,
           grade: grade.trim() || undefined,
           birthDate,
           age,
@@ -172,14 +178,23 @@ export default function CfitProfilePage() {
           </div>
 
           <div>
-            <label className="block text-sm font-black uppercase mb-1">Sekolah Asal *</label>
+            <label className="block text-sm font-black uppercase mb-1">
+              Sekolah Asal {schoolLocked ? "" : "*"}
+            </label>
             <input
               className="brut-input w-full"
               placeholder="cth: SMA Negeri 1 Bandung"
               value={school}
               onChange={(e) => setSchool(e.target.value)}
               disabled={pending}
+              readOnly={schoolLocked}
+              style={schoolLocked ? { background: "#f3f4f6" } : undefined}
             />
+            {schoolLocked ? (
+              <p className="text-xs font-semibold mt-1">
+                🔒 Otomatis dari token sesi tes — tidak perlu diketik. Kalau keliru, lapor ke tester.
+              </p>
+            ) : null}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -217,15 +232,23 @@ export default function CfitProfilePage() {
               </p>
             </div>
             <div>
-              <label className="block text-sm font-black uppercase mb-1">Kelas (opsional)</label>
+              <label className="block text-sm font-black uppercase mb-1">
+                Kelas {gradeLocked ? "" : "(opsional)"}
+              </label>
               <input
                 className="brut-input w-full"
                 placeholder="cth: XII TKJ 1"
                 value={grade}
                 onChange={(e) => setGrade(e.target.value)}
                 disabled={pending}
+                readOnly={gradeLocked}
+                style={gradeLocked ? { background: "#f3f4f6" } : undefined}
               />
-              <p className="text-xs font-semibold mt-1">Dipakai untuk filter rekap per kelas.</p>
+              <p className="text-xs font-semibold mt-1">
+                {gradeLocked
+                  ? "🔒 Otomatis dari token sesi tes — tidak perlu diketik."
+                  : "Dipakai untuk filter rekap per kelas."}
+              </p>
             </div>
           </div>
 

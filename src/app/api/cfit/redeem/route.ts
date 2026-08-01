@@ -60,8 +60,16 @@ export async function POST(req: NextRequest) {
       if (tok.expiresAt < new Date()) {
         return NextResponse.json({ error: "Token sudah kadaluarsa. Minta token baru ke admin." }, { status: 410 });
       }
+      // Sekolah & kelas diwarisi dari token (diisi admin saat membuat token),
+      // supaya semua peserta satu sesi punya tulisan yang identik.
       submission = await prisma.cfitSubmission.create({
-        data: { tokenId: tok.id, form: tok.form, randomSeed: randomUUID() },
+        data: {
+          tokenId: tok.id,
+          form: tok.form,
+          school: tok.school,
+          grade: tok.grade,
+          randomSeed: randomUUID(),
+        },
       });
       if (!tok.redeemedAt) {
         await prisma.cfitAccessToken.updateMany({
