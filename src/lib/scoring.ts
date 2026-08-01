@@ -138,6 +138,31 @@ function normalizeIdent(v: unknown): string {
     .toUpperCase();
 }
 
+/**
+ * Normalisasi NAMA SEKOLAH untuk pencocokan cross-link.
+ *
+ * Peserta menulis sekolahnya dengan sangat bervariasi: "SMKN 1", "SMK N 1",
+ * "SMK Negeri 1", bahkan "Sekolah Menengah Kejuruan Negeri 1". Tanpa
+ * penyeragaman ini, cross-link BAKAT → MINAT gagal diam-diam padahal
+ * sekolahnya sama, sehingga skor minat tidak ikut mengoreksi penjurusan
+ * IPA / IPS.
+ */
+function normalizeSchoolIdent(v: unknown): string {
+  let s = normalizeIdent(v);
+  if (!s) return "";
+  // Bentuk panjang → singkatan baku.
+  s = s.replace(/\bSEKOLAH MENENGAH KEJURUAN\b/g, "SMK");
+  s = s.replace(/\bSEKOLAH MENENGAH ATAS\b/g, "SMA");
+  s = s.replace(/\bSEKOLAH MENENGAH PERTAMA\b/g, "SMP");
+  s = s.replace(/\bSEKOLAH DASAR\b/g, "SD");
+  s = s.replace(/\bMADRASAH ALIYAH\b/g, "MA");
+  s = s.replace(/\bMADRASAH TSANAWIYAH\b/g, "MTS");
+  s = s.replace(/\bMADRASAH IBTIDAIYAH\b/g, "MI");
+  // "SMKN" / "SMK N" → "SMK NEGERI" (juga SMAN, SMPN, SDN, MAN, MTSN, MIN).
+  s = s.replace(/\b(SMK|SMA|SMP|MTS|MI|MA|SD)\s*N\b/g, "$1 NEGERI");
+  return s.replace(/\s+/g, " ").trim();
+}
+
 type SubWithAnswers = {
   testKind: "BAKAT" | "MINAT";
   answers: AnswerRow[];
@@ -305,6 +330,12 @@ function isCrossLink(v: unknown): v is MinatCrossLink {
   return !!v && typeof v === "object" && "bidangScores" in (v as object);
 }
 
+// Batas pemindaian kandidat cross-link. Pemindaian dilakukan berpaginasi
+// supaya pencocokan ternormalisasi bisa dikerjakan di memori tanpa memuat
+// seluruh tabel sekaligus.
+const CROSSLINK_SCAN_BATCH = 500;
+const CROSSLINK_SCAN_LIMIT = 5000;
+
 /**
  * Cari submission MINAT milik peserta yang sama untuk dijadikan koreksi
  * pada penjurusan IPA / IPS. Lihat catatan pada `MinatCrossLink`.
@@ -317,29 +348,40 @@ export async function findMatchingMinatCrossLink(idents: {
   if (!idents.fullName || !idents.school) return null;
 
   const targetName = normalizeIdent(idents.fullName);
-  const targetSchool = normalizeIdent(idents.school);
+  const targetSchool = normalizeSchoolIdent(idents.school);
   const targetGrade = normalizeIdent(idents.grade);
   if (!targetName || !targetSchool) return null;
 
-  // Ambil kandidat berdasarkan sekolah saja (query longgar), lalu cocokkan
-  // nama & kelas secara ternormalisasi di memori. Ini mencegah cross-link
-  // gagal diam-diam hanya karena beda spasi / tanda baca / kapitalisasi.
-  const candidates = await prisma.submission.findMany({
-    where: {
-      testKind: "MINAT",
-      finishedAt: { not: null },
-      school: { equals: idents.school, mode: "insensitive" },
-    },
-    select: { id: true, fullName: true, grade: true, finishedAt: true },
-    orderBy: { finishedAt: "desc" },
-    take: 500,
-  });
-
-  const matched = candidates.filter((c) => {
-    if (normalizeIdent(c.fullName) !== targetName) return false;
-    if (targetGrade && normalizeIdent(c.grade) !== targetGrade) return false;
-    return true;
-  });
+  // Cocokkan SEKOLAH, NAMA, dan KELAS secara ternormalisasi DI MEMORI.
+  // Sebelumnya sekolah difilter lewat SQL `equals` (case-insensitive) tanpa
+  // normalisasi, sehingga "SMKN 1" tidak pernah cocok dengan
+  // "SMK Negeri 1" dan cross-link gagal diam-diam. Kandidat dipindai
+  // berpaginasi dengan cursor supaya tidak memuat seluruh tabel sekaligus.
+  const matched: { id: string }[] = [];
+  let cursor: string | undefined;
+  let scanned = 0;
+  while (scanned < CROSSLINK_SCAN_LIMIT) {
+    const batch = await prisma.submission.findMany({
+      where: {
+        testKind: "MINAT",
+        finishedAt: { not: null },
+      },
+      select: { id: true, fullName: true, school: true, grade: true },
+      orderBy: { id: "asc" },
+      take: CROSSLINK_SCAN_BATCH,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+    });
+    if (batch.length === 0) break;
+    scanned += batch.length;
+    cursor = batch[batch.length - 1].id;
+    for (const c of batch) {
+      if (normalizeSchoolIdent(c.school) !== targetSchool) continue;
+      if (normalizeIdent(c.fullName) !== targetName) continue;
+      if (targetGrade && normalizeIdent(c.grade) !== targetGrade) continue;
+      matched.push({ id: c.id });
+    }
+    if (batch.length < CROSSLINK_SCAN_BATCH) break;
+  }
 
   if (matched.length === 0) return null;
   if (matched.length > 1) {
