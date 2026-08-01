@@ -63,34 +63,40 @@ export async function POST(req: NextRequest) {
     belowNorm: computed.belowNorm,
   };
 
-  const result = await prisma.cfitResult.upsert({
-    where: { submissionId: submission.id },
-    create: {
-      submissionId: submission.id,
-      rawScoreA: computed.rawScoreA,
-      rawScoreB: computed.rawScoreB,
-      rawScoreTotal: computed.rawScoreTotal,
-      iq: computed.iq,
-      classification: computed.classification,
-      payload,
-    },
-    update: {
-      rawScoreA: computed.rawScoreA,
-      rawScoreB: computed.rawScoreB,
-      rawScoreTotal: computed.rawScoreTotal,
-      iq: computed.iq,
-      classification: computed.classification,
-      payload,
-      generatedAt: new Date(),
-    },
-  });
+  const finishedAt = new Date();
 
-  if (!submission.finishedAt) {
-    await prisma.cfitSubmission.update({
-      where: { id: submission.id },
-      data: { finishedAt: new Date() },
-    });
-  }
+  // SATU TRANSAKSI: menyimpan hasil dan menandai submission selesai harus
+  // atomik. Kalau dipisah, crash di antara keduanya meninggalkan submission
+  // yang punya hasil tapi belum berstatus selesai (atau sebaliknya).
+  // `updateMany` dengan filter `finishedAt: null` bersifat race-safe dan
+  // tidak menimpa waktu selesai yang sudah ada.
+  const [result] = await prisma.$transaction([
+    prisma.cfitResult.upsert({
+      where: { submissionId: submission.id },
+      create: {
+        submissionId: submission.id,
+        rawScoreA: computed.rawScoreA,
+        rawScoreB: computed.rawScoreB,
+        rawScoreTotal: computed.rawScoreTotal,
+        iq: computed.iq,
+        classification: computed.classification,
+        payload,
+      },
+      update: {
+        rawScoreA: computed.rawScoreA,
+        rawScoreB: computed.rawScoreB,
+        rawScoreTotal: computed.rawScoreTotal,
+        iq: computed.iq,
+        classification: computed.classification,
+        payload,
+        generatedAt: new Date(),
+      },
+    }),
+    prisma.cfitSubmission.updateMany({
+      where: { id: submission.id, finishedAt: null },
+      data: { finishedAt },
+    }),
+  ]);
 
   return NextResponse.json({
     ok: true,

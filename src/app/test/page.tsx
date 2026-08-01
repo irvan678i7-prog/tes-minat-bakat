@@ -14,8 +14,10 @@ function computeLocks(
 ) {
   const progressBySubtest = new Map(progressRecords.map((p) => [p.subtestId, p]));
   const lockBySubtest = new Map<string, { locked: boolean; finishReason: string | null }>();
-  const expiredSubtestIds: string[] = [];
-  let firstDeadline: Date | null = null;
+  // Setiap subtes yang kedaluwarsa punya DEADLINE-nya SENDIRI
+  // (startedAt + durationSec). Menyimpan satu deadline bersama untuk semua
+  // subtes membuat `finishedAt` salah pada subtes kedua dan seterusnya.
+  const expired: { subtestId: string; deadline: Date }[] = [];
   const now = Date.now();
   for (const s of subtests) {
     const p = progressBySubtest.get(s.id);
@@ -30,13 +32,12 @@ function computeLocks(
     const deadline = new Date(p.startedAt.getTime() + s.durationSec * 1000);
     if (now >= deadline.getTime() + TIME_UP_GRACE_MS) {
       lockBySubtest.set(s.id, { locked: true, finishReason: "TIME_UP" });
-      expiredSubtestIds.push(s.id);
-      if (!firstDeadline) firstDeadline = deadline;
+      expired.push({ subtestId: s.id, deadline });
     } else {
       lockBySubtest.set(s.id, { locked: false, finishReason: null });
     }
   }
-  return { lockBySubtest, expiredSubtestIds, firstDeadline };
+  return { lockBySubtest, expired };
 }
 
 export default async function TestHome() {
@@ -71,18 +72,23 @@ export default async function TestHome() {
   for (const a of answered) counts[a.question.subtestId] = (counts[a.question.subtestId] || 0) + 1;
 
   // Compute lock status in-memory from batch-fetched progress records.
-  const { lockBySubtest, expiredSubtestIds, firstDeadline } = computeLocks(subtests, progressRecords);
+  const { lockBySubtest, expired } = computeLocks(subtests, progressRecords);
 
-  // Batch auto-finish expired subtests in one updateMany (fire-and-forget).
-  if (expiredSubtestIds.length > 0 && firstDeadline) {
-    prisma.subtestProgress.updateMany({
-      where: {
-        submissionId: sub.id,
-        subtestId: { in: expiredSubtestIds },
-        finishedAt: null,
-      },
-      data: { finishReason: "TIME_UP", finishedAt: firstDeadline },
-    }).catch(() => {});
+  // Auto-finish subtes yang kedaluwarsa (fire-and-forget). Satu update per
+  // subtes supaya `finishedAt` = deadline milik subtes itu sendiri.
+  if (expired.length > 0) {
+    Promise.all(
+      expired.map(({ subtestId, deadline }) =>
+        prisma.subtestProgress.updateMany({
+          where: {
+            submissionId: sub.id,
+            subtestId,
+            finishedAt: null,
+          },
+          data: { finishReason: "TIME_UP", finishedAt: deadline },
+        }),
+      ),
+    ).catch(() => {});
   }
 
   return (
