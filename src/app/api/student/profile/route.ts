@@ -22,6 +22,14 @@ const Body = z.object({
   email: z.string().email().optional().or(z.literal("")),
 });
 
+// Nama sekolah dari token (opsional, diisi admin saat membuat token) selalu
+// menang atas ketikan siswa — supaya semua peserta satu token punya tulisan
+// yang identik. Kalau token tidak membawa sekolah, perilaku lama dipakai:
+// nama sekolah murni dari isian siswa.
+function cleanOrEmpty(v: string | null | undefined): string {
+  return (v ?? "").trim();
+}
+
 export async function POST(req: NextRequest) {
   const student = getStudentFromRequest(req);
   if (!student) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -30,6 +38,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Data tidak valid", issues: parsed.error.issues }, { status: 400 });
   }
   const d = parsed.data;
+  const current = await prisma.submission.findUnique({
+    where: { id: student.sub },
+    select: { id: true, token: { select: { school: true } } },
+  });
+  if (!current) return NextResponse.json({ error: "Submission tidak ditemukan" }, { status: 404 });
+  const tokenSchool = cleanOrEmpty(current.token?.school);
   const sub = await prisma.submission.update({
     where: { id: student.sub },
     data: {
@@ -40,7 +54,7 @@ export async function POST(req: NextRequest) {
       birthDate: d.birthDate ? new Date(d.birthDate) : null,
       age: d.age || null,
       grade: d.grade || null,
-      school: d.school,
+      school: tokenSchool || d.school,
       major: d.major || null,
       phone: d.phone || null,
       email: d.email || null,
@@ -69,7 +83,19 @@ export async function GET(req: NextRequest) {
       phone: true,
       email: true,
       finishedAt: true,
+      token: { select: { school: true } },
     },
   });
-  return NextResponse.json({ submission: sub });
+  if (!sub) return NextResponse.json({ submission: null });
+  const { token, ...rest } = sub;
+  const tokenSchool = cleanOrEmpty(token?.school);
+  return NextResponse.json({
+    submission: {
+      ...rest,
+      school: tokenSchool || rest.school,
+      // true → nama sekolah sudah ditetapkan admin lewat token, tidak perlu
+      // (dan tidak akan) diubah oleh isian siswa.
+      schoolLocked: tokenSchool.length > 0,
+    },
+  });
 }
