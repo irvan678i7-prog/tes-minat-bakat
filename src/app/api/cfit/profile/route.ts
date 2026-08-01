@@ -30,11 +30,26 @@ function computeAgeAt(birth: Date, ref: Date): number | null {
   return age;
 }
 
+function cleanOrNull(v: string | null | undefined): string | null {
+  const s = (v ?? "").trim();
+  return s.length > 0 ? s : null;
+}
+
 export async function GET(req: NextRequest) {
   const p = getCfitFromRequest(req);
   if (!p) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const s = await prisma.cfitSubmission.findUnique({ where: { id: p.sub } });
+  const s = await prisma.cfitSubmission.findUnique({
+    where: { id: p.sub },
+    include: { token: { select: { school: true, grade: true } } },
+  });
   if (!s) return NextResponse.json({ error: "Submission tidak ditemukan" }, { status: 404 });
+
+  // Sekolah & kelas milik SESI TES (ditempel admin di token). Kalau token
+  // sudah membawanya, peserta tidak boleh mengetik sendiri — supaya tulisan
+  // seragam untuk semua peserta dan filter rekap tidak pecah.
+  const tokenSchool = cleanOrNull(s.token?.school);
+  const tokenGrade = cleanOrNull(s.token?.grade);
+
   return NextResponse.json({
     fullName: s.fullName,
     nis: s.nis,
@@ -42,8 +57,10 @@ export async function GET(req: NextRequest) {
     birthPlace: s.birthPlace,
     birthDate: s.birthDate,
     age: s.age,
-    grade: s.grade,
-    school: s.school,
+    grade: tokenGrade ?? s.grade,
+    school: tokenSchool ?? s.school,
+    schoolLocked: tokenSchool != null,
+    gradeLocked: tokenGrade != null,
     phone: s.phone,
     email: s.email,
     form: s.form,
@@ -63,7 +80,10 @@ export async function POST(req: NextRequest) {
 
   const d = parsed.data;
 
-  const sub = await prisma.cfitSubmission.findUnique({ where: { id: p.sub } });
+  const sub = await prisma.cfitSubmission.findUnique({
+    where: { id: p.sub },
+    include: { token: { select: { school: true, grade: true } } },
+  });
   if (!sub) return NextResponse.json({ error: "Submission tidak ditemukan" }, { status: 404 });
   // Biodata dikunci setelah tes selesai — mencegah identitas diganti-ganti
   // setelah hasil terbit.
@@ -83,6 +103,12 @@ export async function POST(req: NextRequest) {
     age = computed;
   }
 
+  // Nilai dari token selalu menang atas kiriman klien.
+  const tokenSchool = cleanOrNull(sub.token?.school);
+  const tokenGrade = cleanOrNull(sub.token?.grade);
+  const school = tokenSchool ?? d.school;
+  const grade = tokenGrade ?? d.grade;
+
   const submission = await prisma.cfitSubmission.update({
     where: { id: p.sub },
     data: {
@@ -92,8 +118,8 @@ export async function POST(req: NextRequest) {
       birthPlace: d.birthPlace,
       birthDate: d.birthDate ? new Date(d.birthDate) : undefined,
       age,
-      grade: d.grade,
-      school: d.school,
+      grade,
+      school,
       phone: d.phone,
       email: d.email,
     },
