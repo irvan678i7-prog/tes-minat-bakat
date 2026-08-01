@@ -13,6 +13,7 @@ import {
   qrPayload,
   verificationFooterText,
 } from "../report-verification"
+import { CFIT_TEST_GROUPS } from "./subtest-label"
 import type { CfitSubtestScore } from "./scoring"
 
 export type CfitPdfSubmission = {
@@ -68,24 +69,21 @@ const FORM_LABEL: Record<string, string> = {
   FORM_3AB: "Bentuk A + B",
 }
 
-const SUBTEST_LABEL: Record<string, string> = {
-  "3A_SERIES": "A — Subtes 1: Series",
-  "3A_CLASSIFICATION": "A — Subtes 2: Classification",
-  "3A_MATRICES": "A — Subtes 3: Matrices",
-  "3A_CONDITIONS": "A — Subtes 4: Conditions (Topology)",
-  "3B_SERIES": "B — Subtes 1: Series",
-  "3B_CLASSIFICATION": "B — Subtes 2: Classification",
-  "3B_MATRICES": "B — Subtes 3: Matrices",
-  "3B_CONDITIONS": "B — Subtes 4: Conditions (Topology)",
+/**
+ * Kelompok tes untuk tabel rincian & grafik: 4 tes CFIT, nilai Bentuk A + B
+ * LANGSUNG DIGABUNG (bukan 8 baris terpisah). Nama teknis subtes tidak
+ * ditampilkan — cukup TES 1..TES 4.
+ */
+function groupPerTest(perSubtest: CfitSubtestScore[]) {
+  return CFIT_TEST_GROUPS.map((g) => {
+    const rows = perSubtest.filter((s) => s.subtestCode.endsWith(`_${g.kind}`))
+    const correct = rows.reduce((n, s) => n + s.correct, 0)
+    const answered = rows.reduce((n, s) => n + s.answered, 0)
+    const total = rows.reduce((n, s) => n + s.total, 0)
+    const pct = total > 0 ? Math.round((correct / total) * 100) : 0
+    return { label: g.label, correct, answered, total, pct }
+  })
 }
-
-/** Kelompok grafik: 4 subtes CFIT, nilai Bentuk A + B digabung. */
-const CHART_GROUPS: Array<{ key: string; label: string }> = [
-  { key: "SERIES", label: "SERIES" },
-  { key: "CLASSIFICATION", label: "CLASSIFICATION" },
-  { key: "MATRICES", label: "MATRICES" },
-  { key: "CONDITIONS", label: "CONDITIONS" },
-]
 
 const NORM_GROUP_LABEL: Record<string, string> = {
   "15": "usia 15 tahun",
@@ -271,7 +269,7 @@ function drawScoreCard(
   return yIn + cardH + 4
 }
 
-// ─── Grafik batang bergaya UI: % benar per subtes (A + B digabung) ───
+// ─── Grafik batang bergaya UI: % benar per tes (A + B digabung) ───
 function drawSubtestChart(
   doc: jsPDF,
   perSubtest: CfitSubtestScore[],
@@ -293,7 +291,7 @@ function drawSubtestChart(
   setTextHex(doc, WHITE)
   doc.setFont("helvetica", "bold")
   doc.setFontSize(8.4)
-  doc.text("GRAFIK CAPAIAN PER SUBTES", margin + 8, yIn + 12)
+  doc.text("GRAFIK CAPAIAN PER TES", margin + 8, yIn + 12)
   setTextHex(doc, ACCENT)
   doc.setFontSize(6.8)
   doc.text(
@@ -317,13 +315,7 @@ function drawSubtestChart(
     doc.text(`${p}%`, plotX - 6, gy + 2, { align: "right" })
   }
 
-  const groups = CHART_GROUPS.map((g) => {
-    const rows = perSubtest.filter((s) => s.subtestCode.endsWith(`_${g.key}`))
-    const correct = rows.reduce((n, s) => n + s.correct, 0)
-    const total = rows.reduce((n, s) => n + s.total, 0)
-    const pct = total > 0 ? Math.round((correct / total) * 100) : 0
-    return { ...g, correct, total, pct }
-  })
+  const groups = groupPerTest(perSubtest)
 
   const slotW = plotW / groups.length
   const barW = Math.min(46, slotW * 0.46)
@@ -570,12 +562,12 @@ export function buildCfitReportPDF(
     pageW,
   )
 
-  // Rincian per subtes
+  // Rincian per tes — Bentuk A + B LANGSUNG DIGABUNG (4 baris).
   y += 11
   setTextHex(doc, INK)
   doc.setFont("helvetica", "bold")
   doc.setFontSize(9)
-  doc.text("RINCIAN PER SUBTES", margin, y)
+  doc.text("RINCIAN PER TES (BENTUK A + B)", margin, y)
 
   autoTable(doc, {
     startY: y + 5,
@@ -597,19 +589,19 @@ export function buildCfitReportPDF(
     },
     alternateRowStyles: { fillColor: hexToRGB(STRIPE) },
     columnStyles: {
-      0: { cellWidth: innerW - 4 * 62 },
+      0: { cellWidth: innerW - 4 * 62, fontStyle: "bold" },
       1: { cellWidth: 62, halign: "center" },
       2: { cellWidth: 62, halign: "center" },
       3: { cellWidth: 62, halign: "center" },
       4: { cellWidth: 62, halign: "center", fontStyle: "bold" },
     },
-    head: [["Subtes", "Benar", "Dijawab", "Jumlah Soal", "% Benar"]],
-    body: perSubtest.map((s) => [
-      SUBTEST_LABEL[s.subtestCode] ?? s.subtestCode,
-      String(s.correct),
-      String(s.answered),
-      String(s.total),
-      s.total > 0 ? `${Math.round((s.correct / s.total) * 100)}%` : "-",
+    head: [["Tes", "Benar", "Dijawab", "Jumlah Soal", "% Benar"]],
+    body: groupPerTest(perSubtest).map((g) => [
+      g.label,
+      String(g.correct),
+      String(g.answered),
+      String(g.total),
+      g.total > 0 ? `${g.pct}%` : "-",
     ]),
   })
 
