@@ -190,19 +190,6 @@ export default function CfitAdminResults() {
           nomor halaman menyambung — siap cetak sekali unduh. Filter sekolah/kelas juga berlaku ke tabel
           di bawah dan ekspor CSV.
         </div>
-        <div className="flex flex-wrap items-center gap-2 pt-2 border-t-2 border-black">
-          <span className="text-xs font-black uppercase">Contoh laporan (data dummy):</span>
-          <a className="brut-btn brut-btn-white text-xs px-2 py-1" href="/api/admin/cfit/report-contoh?jenis=individu">
-            ⬇ INDIVIDU
-          </a>
-          <a className="brut-btn brut-btn-white text-xs px-2 py-1" href="/api/admin/cfit/report-contoh?jenis=rekap">
-            ⬇ REKAP
-          </a>
-          <a className="brut-btn brut-btn-white text-xs px-2 py-1" href="/api/admin/cfit/report-contoh?jenis=lengkap">
-            ⬇ REKAP + INDIVIDU
-          </a>
-          <span className="text-xs font-bold opacity-60">8 peserta fiktif — tidak menyentuh database.</span>
-        </div>
       </div>
 
       <div className="flex items-center justify-between flex-wrap gap-3">
