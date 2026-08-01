@@ -36,6 +36,8 @@ type Token = {
   id: string;
   code: string;
   testKind: "MINAT" | "BAKAT";
+  // Nama sekolah sesi tes (opsional, diisi admin saat membuat token).
+  school: string | null;
   expiresAt: string;
   createdAt: string;
   redeemedAt: string | null;
@@ -155,6 +157,9 @@ export default function AdminTokens() {
   const [testKind, setTestKind] = useState<"MINAT" | "BAKAT">("BAKAT");
   const [count, setCount] = useState(1);
   const [ttlSec, setTtlSec] = useState(3600);
+  // Nama sekolah sesi tes — OPSIONAL. Boleh dikosongkan; kalau kosong, alur
+  // lama tetap jalan (siswa mengetik sendiri nama sekolah di data diri).
+  const [school, setSchool] = useState("");
   const [includeRedeemed, setIncludeRedeemed] = useState(false);
   const [pending, startTransition] = useTransition();
   const [, setTick] = useState(0);
@@ -191,10 +196,17 @@ export default function AdminTokens() {
 
   const generate = () =>
     startTransition(async () => {
+      const trimmedSchool = school.trim();
       const res = await fetch("/api/admin/tokens", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ testKind, count, ttlSec }),
+        body: JSON.stringify({
+          testKind,
+          count,
+          ttlSec,
+          // Hanya dikirim kalau diisi — request lama tanpa school tetap valid.
+          ...(trimmedSchool ? { school: trimmedSchool } : {}),
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -286,7 +298,7 @@ export default function AdminTokens() {
           grup kelas — semua peserta otomatis terdaftar dengan submission masing-masing.
           Pastikan waktu berlaku cukup untuk semua siswa membuka link.
         </p>
-        <div className="grid md:grid-cols-4 gap-3 items-end">
+        <div className="grid md:grid-cols-5 gap-3 items-end">
           <div>
             <label className="text-xs font-black uppercase block mb-1">Jenis Tes</label>
             <select
@@ -297,6 +309,23 @@ export default function AdminTokens() {
               <option value="BAKAT">BAKAT</option>
               <option value="MINAT">MINAT</option>
             </select>
+          </div>
+          <div>
+            <label className="text-xs font-black uppercase block mb-1">
+              Nama Sekolah (opsional)
+            </label>
+            <input
+              type="text"
+              maxLength={160}
+              className="brut-input w-full"
+              placeholder="mis. SMKN 1 Malang"
+              value={school}
+              onChange={(e) => setSchool(e.target.value)}
+            />
+            <p className="text-xs font-bold mt-1">
+              Kalau diisi, semua peserta token ini otomatis pakai sekolah ini. Kosongkan =
+              siswa mengetik sendiri.
+            </p>
           </div>
           <div>
             <label className="text-xs font-black uppercase block mb-1">Jumlah Token</label>
@@ -403,6 +432,7 @@ export default function AdminTokens() {
             <tr>
               <th>Kode</th>
               <th>Tes</th>
+              <th>Sekolah</th>
               <th>Sisa</th>
               <th>Dibuat</th>
               <th>Status</th>
@@ -414,7 +444,7 @@ export default function AdminTokens() {
           <tbody>
             {tokens.length === 0 && (
               <tr>
-                <td colSpan={8} className="text-center font-bold py-6">
+                <td colSpan={9} className="text-center font-bold py-6">
                   Belum ada token aktif.
                 </td>
               </tr>
@@ -430,6 +460,13 @@ export default function AdminTokens() {
                   <tr>
                     <td className="font-mono font-black">{t.code}</td>
                     <td>{t.testKind}</td>
+                    <td className="text-xs">
+                      {t.school ? (
+                        <span className="font-bold">{t.school}</span>
+                      ) : (
+                        <span className="opacity-50">—</span>
+                      )}
+                    </td>
                     <td className={expired ? "text-red-600 font-black" : "font-mono font-bold"}>
                       {tl}
                     </td>
@@ -503,7 +540,7 @@ export default function AdminTokens() {
                   </tr>
                   {expanded && hasParticipants && (
                     <tr>
-                      <td colSpan={8} style={{ background: "#f5f5f5" }}>
+                      <td colSpan={9} style={{ background: "#f5f5f5" }}>
                         <div className="p-3 space-y-2">
                           <p className="text-xs font-black uppercase">
                             Daftar Peserta · {t.participantCount} orang
