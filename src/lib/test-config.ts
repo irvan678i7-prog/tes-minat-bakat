@@ -468,11 +468,11 @@ export function estimateIQ(perSubtest: Record<string, { raw: number; max: number
 // Wechsler" (Suryani dkk., SNIMed 2019): 7 kategori dengan batas
 // ≥130, 120–129, 110–119, 90–109, 80–89, 70–79, ≤69.
 export function iqInterpretation(iq: number): { band: string; description: string } {
-  if (iq >= 130) return { band: "Sangat Superior", description: "IQ ≥ 130 — kemampuan kognitif jauh di atas rata-rata." };
-  if (iq >= 120) return { band: "Superior", description: "IQ 120–129 — kemampuan kognitif di atas rata-rata." };
-  if (iq >= 110) return { band: "Di Atas Rata-rata", description: "IQ 110–119 — kemampuan kognitif sedikit di atas rata-rata." };
-  if (iq >= 90) return { band: "Rata-rata", description: "IQ 90–109 — kemampuan kognitif setara dengan rata-rata populasi." };
-  if (iq >= 80) return { band: "Di Bawah Rata-rata", description: "IQ 80–89 — kemampuan kognitif sedikit di bawah rata-rata." };
-  if (iq >= 70) return { band: "Lambat Belajar", description: "IQ 70–79 — cukup di bawah rata-rata, perlu pendampingan belajar." };
-  return { band: "Keterbelakangan Mental", description: "IQ ≤ 69 — jauh di bawah rata-rata, perlu evaluasi profesional." };
+  if (iq >= 130) return { band: "Sangat Superior", description: "EKIU ≥ 130 — kemampuan kognitif jauh di atas rata-rata." };
+  if (iq >= 120) return { band: "Superior", description: "EKIU 120–129 — kemampuan kognitif di atas rata-rata." };
+  if (iq >= 110) return { band: "Di Atas Rata-rata", description: "EKIU 110–119 — kemampuan kognitif sedikit di atas rata-rata." };
+  if (iq >= 90) return { band: "Rata-rata", description: "EKIU 90–109 — kemampuan kognitif setara dengan rata-rata populasi." };
+  if (iq >= 80) return { band: "Di Bawah Rata-rata", description: "EKIU 80–89 — kemampuan kognitif sedikit di bawah rata-rata." };
+  if (iq >= 70) return { band: "Lambat Belajar", description: "EKIU 70–79 — cukup di bawah rata-rata, perlu pendampingan belajar." };
+  return { band: "Keterbelakangan Mental", description: "EKIU ≤ 69 — jauh di bawah rata-rata, perlu evaluasi profesional." };
 }

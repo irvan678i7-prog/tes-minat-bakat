@@ -28,7 +28,12 @@ export async function POST(req: NextRequest) {
     }),
     prisma.question.findUnique({
       where: { id: parsed.data.questionId },
-      select: { id: true, subtestId: true, subtest: { select: { testKind: true, durationSec: true } } },
+      select: {
+        id: true,
+        subtestId: true,
+        isExample: true,
+        subtest: { select: { testKind: true, durationSec: true } },
+      },
     }),
   ]);
   if (!sub) return NextResponse.json({ error: "Submission tidak ditemukan" }, { status: 404 });
@@ -48,6 +53,22 @@ export async function POST(req: NextRequest) {
     where: { submissionId_subtestId: { submissionId: sub.id, subtestId: q.subtestId } },
     select: { startedAt: true, finishedAt: true, finishReason: true },
   });
+
+  // Subtes BELUM dimulai (tidak ada SubtestProgress) → jawaban ditolak.
+  // Tanpa penjagaan ini, peserta bisa mengirim jawaban lewat API sebelum
+  // timer subtes berjalan ("pre-answering") karena semua pemeriksaan waktu
+  // di bawah hanya berlaku saat `progress` ada. Soal contoh dikecualikan,
+  // sama seperti pada alur CFIT.
+  if (!progress && !q.isExample) {
+    return NextResponse.json(
+      {
+        error: "Subtes belum dimulai. Buka subtes terlebih dahulu.",
+        locked: true,
+        finishReason: null,
+      },
+      { status: 409 },
+    );
+  }
 
   if (progress?.finishedAt) {
     return NextResponse.json(

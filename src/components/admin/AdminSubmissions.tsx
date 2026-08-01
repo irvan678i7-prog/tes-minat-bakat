@@ -1,8 +1,9 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useState, type CSSProperties } from "react";
 import toast from "react-hot-toast";
 import { useBrutConfirm } from "@/components/BrutConfirm";
+import { schoolKey, gradeKey } from "@/lib/rekap-key";
 
 type ViolationEntry = { type: string; subtestCode?: string | null; at: string };
 
@@ -19,10 +20,49 @@ type Sub = {
   hasResult: boolean;
   violationCount: number;
   flaggedCheating: boolean;
-  violationLog?: ViolationEntry[];
 };
 
-type ClassRow = { school: string; grade: string; testKind: "MINAT" | "BAKAT"; count: number };
+type ClassRow = {
+  schoolKey: string;
+  school: string;
+  gradeKey: string;
+  grade: string;
+  testKind: "MINAT" | "BAKAT";
+  count: number;
+};
+
+// ── Style konstan (dipisah dari JSX supaya tidak ada kurawal ganda yang rawan
+// rusak saat copy-paste). ───────────────────────────────────────────────────
+const rekapCardStyle: CSSProperties = { background: "#a3e635" };
+const liveBadgeStyle: CSSProperties = {
+  padding: "4px 8px",
+  border: "2px solid #000",
+  background: "#fff",
+};
+const liveDotStyle: CSSProperties = {
+  display: "inline-block",
+  width: 8,
+  height: 8,
+  borderRadius: "50%",
+  background: "#22c55e",
+  marginRight: 6,
+  verticalAlign: "middle",
+};
+const flaggedRowStyle: CSSProperties = { background: "#fee2e2" };
+const berlangsungStyle: CSSProperties = { background: "#facc15" };
+const hapusBtnStyle: CSSProperties = { background: "#ff4d8d" };
+const detailRowStyle: CSSProperties = { background: "#fff7ed" };
+const detailScrollStyle: CSSProperties = { maxHeight: 220, overflowY: "auto" };
+const detailTableStyle: CSSProperties = { fontSize: 12 };
+
+function violationTagStyle(isFlagged: boolean, count: number): CSSProperties {
+  return {
+    background: isFlagged ? "#ef4444" : count > 0 ? "#fb923c" : "#a3e635",
+    color: isFlagged ? "#fff" : "#000",
+    cursor: count > 0 ? "pointer" : "default",
+    fontWeight: 900,
+  };
+}
 
 function violationLabel(t: string): string {
   switch (t) {
@@ -79,15 +119,13 @@ function fmt(dt: string | null): string {
 }
 
 // Helper untuk download PDF via fetch+blob — supaya error bisa ditangkap
-// dan ditampilkan ke user lewat toast brutalism (tidak silent fail seperti
-// pakai <a target="_blank">).
+// dan ditampilkan ke user lewat toast brutalism (tidak silent fail).
 async function downloadPdf(url: string, fallbackFilename: string): Promise<void> {
   const res = await fetch(url, { credentials: "same-origin" });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error((data as { error?: string }).error || `Gagal mengunduh PDF (${res.status}).`);
   }
-  // Ambil filename dari Content-Disposition kalau ada.
   const cd = res.headers.get("Content-Disposition") || "";
   const m = /filename="?([^";]+)"?/i.exec(cd);
   const filename = m?.[1] || fallbackFilename;
@@ -99,14 +137,13 @@ async function downloadPdf(url: string, fallbackFilename: string): Promise<void>
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  // Bebaskan memori setelah browser sempat baca URL-nya.
   setTimeout(() => URL.revokeObjectURL(objUrl), 1000);
 }
 
-// Polling refresh tiap 3 detik supaya dasbor peserta tampak mendekati
-// real-time tanpa membebani server. UI tick di 1 detik supaya label
-// "sync x detik lalu" bergerak halus.
-const REFRESH_INTERVAL_MS = 3000;
+// Auto-refresh dasbor. Dinaikkan dari 3 detik -> 15 detik untuk MENGHEMAT
+// egress database (dasbor menarik data lebih jarang). UI tick tetap 1 detik
+// supaya label "sync x detik lalu" bergerak halus.
+const REFRESH_INTERVAL_MS = 15000;
 
 export default function AdminSubmissions() {
   const [items, setItems] = useState<Sub[]>([]);
@@ -117,15 +154,16 @@ export default function AdminSubmissions() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [onlyFlagged, setOnlyFlagged] = useState(false);
   const [openLogId, setOpenLogId] = useState<string | null>(null);
+  const [logCache, setLogCache] = useState<Record<string, ViolationEntry[]>>({});
+  const [logLoadingId, setLogLoadingId] = useState<string | null>(null);
   const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
   const [rekapBusy, setRekapBusy] = useState(false);
+  const [rekapFullBusy, setRekapFullBusy] = useState(false);
   const [lastSync, setLastSync] = useState<number>(0);
   const [, setTick] = useState(0);
   const { confirm, ConfirmModal } = useBrutConfirm();
 
   const refresh = () => {
-    // cache: no-store supaya CDN/Browser tidak nge-cache hasil polling —
-    // dasbor admin harus selalu lihat data terbaru tiap siklus.
     Promise.allSettled([
       fetch("/api/admin/submissions", { cache: "no-store" })
         .then((r) => r.json())
@@ -138,7 +176,6 @@ export default function AdminSubmissions() {
 
   useEffect(() => {
     refresh();
-    // Auto-refresh data peserta + tick 1 detik untuk label "x detik lalu".
     const refreshId = setInterval(refresh, REFRESH_INTERVAL_MS);
     const tickId = setInterval(() => setTick((n) => n + 1), 1000);
     return () => {
@@ -172,6 +209,29 @@ export default function AdminSubmissions() {
     }
   };
 
+  // Ambil detail log pelanggaran HANYA saat baris di-klik, lalu simpan di
+  // cache supaya tidak diminta ulang. Ini kunci penghematan egress.
+  const toggleLog = async (s: Sub) => {
+    if (openLogId === s.id) {
+      setOpenLogId(null);
+      return;
+    }
+    setOpenLogId(s.id);
+    if (s.violationCount > 0 && !logCache[s.id]) {
+      setLogLoadingId(s.id);
+      try {
+        const res = await fetch(`/api/admin/submissions/${s.id}`, { cache: "no-store" });
+        const data = await res.json().catch(() => ({}));
+        const log: ViolationEntry[] = Array.isArray(data.violationLog) ? data.violationLog : [];
+        setLogCache((prev) => ({ ...prev, [s.id]: log }));
+      } catch {
+        toast.error("Gagal memuat detail pelanggaran");
+      } finally {
+        setLogLoadingId(null);
+      }
+    }
+  };
+
   const onDownloadPdf = async (s: Sub) => {
     if (pdfBusyId) return;
     setPdfBusyId(s.id);
@@ -195,8 +255,10 @@ export default function AdminSubmissions() {
     try {
       const params = new URLSearchParams({
         testKind: filterKind,
-        school: filterSchool,
-        grade: filterGrade,
+        schoolKey: filterSchool,
+        gradeKey: filterGrade,
+        schoolLabel: classes.find((c) => c.schoolKey === filterSchool)?.school || "",
+        gradeLabel: classes.find((c) => c.gradeKey === filterGrade)?.grade || "",
       });
       const safe = (filterSchool || "semua").replace(/[^A-Za-z0-9]+/g, "_").slice(0, 30);
       const safeGrade = (filterGrade || "semua").replace(/[^A-Za-z0-9]+/g, "_").slice(0, 20);
@@ -212,24 +274,65 @@ export default function AdminSubmissions() {
     }
   };
 
-  const filteredItems = items.filter(
-    (s) =>
-      (!filterSchool || s.school === filterSchool) &&
-      (!filterGrade || s.grade === filterGrade) &&
-      (!filterKind || s.testKind === filterKind) &&
-      (!onlyFlagged || s.flaggedCheating || s.violationCount >= 5),
-  );
+  const onDownloadRekapFull = async () => {
+    if (!filterKind || rekapFullBusy) return;
+    setRekapFullBusy(true);
+    try {
+      const params = new URLSearchParams({
+        testKind: filterKind,
+        schoolKey: filterSchool,
+        gradeKey: filterGrade,
+        schoolLabel: classes.find((c) => c.schoolKey === filterSchool)?.school || "",
+        gradeLabel: classes.find((c) => c.gradeKey === filterGrade)?.grade || "",
+      });
+      const safe = (filterSchool || "semua").replace(/[^A-Za-z0-9]+/g, "_").slice(0, 30);
+      const safeGrade = (filterGrade || "semua").replace(/[^A-Za-z0-9]+/g, "_").slice(0, 20);
+      await downloadPdf(
+        `/api/admin/rekap-full?${params.toString()}`,
+        `rekap-lengkap-${filterKind}-${safe}-${safeGrade}.pdf`,
+      );
+      toast.success("Rekap + laporan individu berhasil diunduh");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Gagal mengunduh rekap lengkap");
+    } finally {
+      setRekapFullBusy(false);
+    }
+  };
+
+  const filteredItems = items
+    .filter(
+      (s) =>
+        (!filterSchool || schoolKey(s.school) === filterSchool) &&
+        (!filterGrade || gradeKey(s.grade) === filterGrade) &&
+        (!filterKind || s.testKind === filterKind) &&
+        (!onlyFlagged || s.flaggedCheating || s.violationCount >= 5),
+    )
+    .sort((a, b) =>
+      (a.fullName || "").localeCompare(b.fullName || "", "id", { sensitivity: "base" }),
+    );
   const flaggedCount = items.filter((s) => s.flaggedCheating || s.violationCount >= 5).length;
 
-  const schools = Array.from(new Set(classes.map((c) => c.school).filter(Boolean)));
-  const grades = Array.from(
-    new Set(classes.filter((c) => !filterSchool || c.school === filterSchool).map((c) => c.grade).filter(Boolean)),
+  const schoolOptions = Array.from(
+    new Map(
+      classes
+        .filter((c) => c.schoolKey)
+        .map((c) => [c.schoolKey, c.school || c.schoolKey] as const),
+    ),
+    ([key, label]) => ({ key, label }),
+  );
+  const gradeOptions = Array.from(
+    new Map(
+      classes
+        .filter((c) => (!filterSchool || c.schoolKey === filterSchool) && c.gradeKey)
+        .map((c) => [c.gradeKey, c.grade || c.gradeKey] as const),
+    ),
+    ([key, label]) => ({ key, label }),
   );
 
   return (
     <div className="space-y-6">
       {ConfirmModal}
-      <div className="brut-card" style={{ background: "#a3e635" }}>
+      <div className="brut-card" style={rekapCardStyle}>
         <h3 className="text-xl font-black uppercase mb-3">Rekap per Kelas / Sekolah</h3>
         <p className="text-sm font-semibold mb-3">
           Pilih sekolah, kelas, dan jenis tes untuk mengunduh laporan rekap dengan persentase.
@@ -237,25 +340,44 @@ export default function AdminSubmissions() {
         <div className="grid md:grid-cols-4 gap-3 items-end">
           <div>
             <label className="text-xs font-black uppercase block mb-1">Sekolah</label>
-            <select className="brut-input w-full" value={filterSchool} onChange={(e) => { setFilterSchool(e.target.value); setFilterGrade(""); }}>
+            <select
+              className="brut-input w-full"
+              value={filterSchool}
+              onChange={(e) => {
+                setFilterSchool(e.target.value);
+                setFilterGrade("");
+              }}
+            >
               <option value="">Semua</option>
-              {schools.map((s) => (
-                <option key={s} value={s}>{s}</option>
+              {schoolOptions.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
+                </option>
               ))}
             </select>
           </div>
           <div>
             <label className="text-xs font-black uppercase block mb-1">Kelas</label>
-            <select className="brut-input w-full" value={filterGrade} onChange={(e) => setFilterGrade(e.target.value)}>
+            <select
+              className="brut-input w-full"
+              value={filterGrade}
+              onChange={(e) => setFilterGrade(e.target.value)}
+            >
               <option value="">Semua</option>
-              {grades.map((g) => (
-                <option key={g} value={g}>{g}</option>
+              {gradeOptions.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
+                </option>
               ))}
             </select>
           </div>
           <div>
             <label className="text-xs font-black uppercase block mb-1">Jenis Tes</label>
-            <select className="brut-input w-full" value={filterKind} onChange={(e) => setFilterKind(e.target.value as "" | "MINAT" | "BAKAT")}>
+            <select
+              className="brut-input w-full"
+              value={filterKind}
+              onChange={(e) => setFilterKind(e.target.value as "" | "MINAT" | "BAKAT")}
+            >
               <option value="">Pilih</option>
               <option value="BAKAT">BAKAT</option>
               <option value="MINAT">MINAT</option>
@@ -269,6 +391,14 @@ export default function AdminSubmissions() {
           >
             {rekapBusy ? "MEMPROSES..." : "UNDUH REKAP PDF"}
           </button>
+          <button
+            type="button"
+            className="brut-btn brut-btn-black text-center"
+            disabled={!filterKind || rekapFullBusy}
+            onClick={onDownloadRekapFull}
+          >
+            {rekapFullBusy ? "MEMPROSES..." : "UNDUH REKAP + INDIVIDU"}
+          </button>
         </div>
       </div>
 
@@ -277,31 +407,22 @@ export default function AdminSubmissions() {
         <div className="flex items-center gap-3 flex-wrap">
           <span
             className="text-xs font-bold"
-            style={{ padding: "4px 8px", border: "2px solid #000", background: "#fff" }}
+            style={liveBadgeStyle}
             title={`Auto-refresh tiap ${REFRESH_INTERVAL_MS / 1000} detik`}
           >
-            <span
-              style={{
-                display: "inline-block",
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                background: "#22c55e",
-                marginRight: 6,
-                verticalAlign: "middle",
-              }}
-            />
+            <span style={liveDotStyle} />
             LIVE · sync {syncLabel(lastSync)}
           </span>
-          <label className="brut-checkbox" title="Tampilkan hanya peserta dengan minimal 5 pelanggaran (terdeteksi curang)">
+          <label
+            className="brut-checkbox"
+            title="Tampilkan hanya peserta dengan minimal 5 pelanggaran (terdeteksi curang)"
+          >
             <input
               type="checkbox"
               checked={onlyFlagged}
               onChange={(e) => setOnlyFlagged(e.target.checked)}
             />
-            <span>
-              Hanya tampilkan yang dicurigai ({flaggedCount})
-            </span>
+            <span>Hanya tampilkan yang dicurigai ({flaggedCount})</span>
           </label>
         </div>
       </div>
@@ -316,7 +437,7 @@ export default function AdminSubmissions() {
               <th>Kelas</th>
               <th>Mulai</th>
               <th>Selesai</th>
-              <th>IQ</th>
+              <th>EKIU</th>
               <th>Pelanggaran</th>
               <th>Aksi</th>
             </tr>
@@ -324,16 +445,18 @@ export default function AdminSubmissions() {
           <tbody>
             {filteredItems.length === 0 && (
               <tr>
-                <td colSpan={10} className="text-center font-bold py-6">Tidak ada peserta sesuai filter.</td>
+                <td colSpan={10} className="text-center font-bold py-6">
+                  Tidak ada peserta sesuai filter.
+                </td>
               </tr>
             )}
             {filteredItems.map((s) => {
               const isFlagged = s.flaggedCheating || s.violationCount >= 5;
               const isOpen = openLogId === s.id;
-              const log = Array.isArray(s.violationLog) ? s.violationLog : [];
+              const log = logCache[s.id] || [];
               return (
                 <Fragment key={s.id}>
-                  <tr style={isFlagged ? { background: "#fee2e2" } : undefined}>
+                  <tr style={isFlagged ? flaggedRowStyle : undefined}>
                     <td className="font-mono font-bold">{s.tokenCode}</td>
                     <td>{s.testKind}</td>
                     <td>{s.fullName || "—"}</td>
@@ -341,31 +464,21 @@ export default function AdminSubmissions() {
                     <td>{s.grade || "—"}</td>
                     <td>{fmt(s.startedAt)}</td>
                     <td>{fmt(s.finishedAt)}</td>
-                    <td className="font-mono font-black text-center">
-                      {s.iqEstimate ?? "—"}
-                    </td>
+                    <td className="font-mono font-black text-center">{s.iqEstimate ?? "—"}</td>
                     <td>
                       <button
                         type="button"
-                        onClick={() => setOpenLogId(isOpen ? null : s.id)}
+                        onClick={() => toggleLog(s)}
                         title={
                           s.violationCount > 0
                             ? "Klik untuk lihat detail log pelanggaran"
                             : "Tidak ada pelanggaran terdeteksi"
                         }
                         className="brut-tag"
-                        style={{
-                          background: isFlagged
-                            ? "#ef4444"
-                            : s.violationCount > 0
-                              ? "#fb923c"
-                              : "#a3e635",
-                          color: isFlagged ? "#fff" : "#000",
-                          cursor: s.violationCount > 0 ? "pointer" : "default",
-                          fontWeight: 900,
-                        }}
+                        style={violationTagStyle(isFlagged, s.violationCount)}
                       >
-                        {isFlagged ? "⚠ " : ""}{s.violationCount}
+                        {isFlagged ? "⚠ " : ""}
+                        {s.violationCount}
                       </button>
                     </td>
                     <td>
@@ -381,12 +494,14 @@ export default function AdminSubmissions() {
                             {pdfBusyId === s.id ? "..." : "PDF"}
                           </button>
                         ) : (
-                          <span className="brut-tag" style={{ background: "#facc15" }}>BERLANGSUNG</span>
+                          <span className="brut-tag" style={berlangsungStyle}>
+                            BERLANGSUNG
+                          </span>
                         )}
                         <button
                           type="button"
                           className="brut-btn brut-btn-black text-xs"
-                          style={{ background: "#ff4d8d" }}
+                          style={hapusBtnStyle}
                           onClick={() => onDelete(s)}
                           disabled={deleting === s.id}
                           title="Hapus data peserta ini"
@@ -396,40 +511,48 @@ export default function AdminSubmissions() {
                       </div>
                     </td>
                   </tr>
-                  {isOpen && log.length > 0 && (
+                  {isOpen && (
                     <tr>
-                      <td colSpan={10} style={{ background: "#fff7ed" }}>
+                      <td colSpan={10} style={detailRowStyle}>
                         <div className="p-3">
-                          <p className="text-xs font-black uppercase mb-2">
-                            Detail Pelanggaran ({log.length})
-                          </p>
-                          <div style={{ maxHeight: 220, overflowY: "auto" }}>
-                            <table className="brut-table" style={{ fontSize: 12 }}>
-                              <thead>
-                                <tr>
-                                  <th>Waktu</th>
-                                  <th>Subtes</th>
-                                  <th>Jenis</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {[...log]
-                                  .slice(-50)
-                                  .reverse()
-                                  .map((v, i) => (
-                                    <tr key={i}>
-                                      <td className="font-mono">{fmt(v.at)}</td>
-                                      <td className="font-mono">{v.subtestCode || "—"}</td>
-                                      <td className="font-bold">{violationLabel(v.type)}</td>
+                          {logLoadingId === s.id ? (
+                            <p className="text-xs font-bold">Memuat detail pelanggaran…</p>
+                          ) : log.length === 0 ? (
+                            <p className="text-xs font-bold">Tidak ada detail pelanggaran.</p>
+                          ) : (
+                            <>
+                              <p className="text-xs font-black uppercase mb-2">
+                                Detail Pelanggaran ({log.length})
+                              </p>
+                              <div style={detailScrollStyle}>
+                                <table className="brut-table" style={detailTableStyle}>
+                                  <thead>
+                                    <tr>
+                                      <th>Waktu</th>
+                                      <th>Subtes</th>
+                                      <th>Jenis</th>
                                     </tr>
-                                  ))}
-                              </tbody>
-                            </table>
-                          </div>
-                          <p className="text-xs font-semibold opacity-70 mt-2">
-                            Menampilkan 50 entri terakhir. Total: {log.length}.
-                            {isFlagged && " Siswa otomatis ditandai karena ≥ 5 pelanggaran."}
-                          </p>
+                                  </thead>
+                                  <tbody>
+                                    {[...log]
+                                      .slice(-50)
+                                      .reverse()
+                                      .map((v, i) => (
+                                        <tr key={i}>
+                                          <td className="font-mono">{fmt(v.at)}</td>
+                                          <td className="font-mono">{v.subtestCode || "—"}</td>
+                                          <td className="font-bold">{violationLabel(v.type)}</td>
+                                        </tr>
+                                      ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                              <p className="text-xs font-semibold opacity-70 mt-2">
+                                Menampilkan 50 entri terakhir. Total: {log.length}.
+                                {isFlagged && " Siswa otomatis ditandai karena ≥ 5 pelanggaran."}
+                              </p>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>

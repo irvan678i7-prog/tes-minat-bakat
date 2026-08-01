@@ -1,5 +1,6 @@
 import Link from "next/link";
 import StudentTokenForm from "@/components/StudentTokenForm";
+import CfitTokenForm from "@/components/cfit/CfitTokenForm";
 
 export default function Home() {
   return (
@@ -26,18 +27,40 @@ export default function Home() {
             Masukkan <span className="bg-pink-400 px-2 border-4 border-black">TOKEN</span>
           </h2>
           <p className="mt-3 text-lg font-semibold max-w-2xl">
-            Masukkan token yang diberikan oleh admin / guru pembimbing.
-            Jenis tes (Minat atau Bakat) otomatis terdeteksi dari token.
+            Masukkan token yang diberikan oleh admin / guru pembimbing pada kartu
+            yang sesuai: Tes Minat / Bakat, atau Tes IQ (CFIT).
           </p>
         </section>
 
-        <section className="max-w-md">
+        <section className="grid md:grid-cols-2 gap-8 max-w-4xl">
           <div className="brut-card" style={{ background: "#facc15" }}>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-lg font-black uppercase">Tes Minat / Bakat</h3>
+              <span className="brut-tag text-xs" style={{ background: "#000", color: "#fff" }}>
+                OTOMATIS
+              </span>
+            </div>
             <StudentTokenForm />
+            <p className="text-xs font-semibold mt-2">
+              Jenis tes (Minat atau Bakat) otomatis terdeteksi dari token.
+            </p>
+          </div>
+
+          <div className="brut-card" style={{ background: "#22d3ee" }}>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-lg font-black uppercase">Tes IQ</h3>
+              <span className="brut-tag text-xs" style={{ background: "#000", color: "#fff" }}>
+                CFIT SKALA 3
+              </span>
+            </div>
+            <CfitTokenForm />
+            <p className="text-xs font-semibold mt-2">
+              Bentuk tes (3A / 3B / gabungan) otomatis terdeteksi dari token.
+            </p>
           </div>
         </section>
 
-        <section className="grid md:grid-cols-2 gap-8 mt-10">
+        <section className="grid md:grid-cols-3 gap-8 mt-10">
           <div className="brut-card" style={{ background: "#22d3ee" }}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-2xl font-black uppercase">Tes Minat</h3>
@@ -64,7 +87,22 @@ export default function Home() {
             </p>
             <ul className="font-semibold list-disc list-inside text-sm">
               <li>Tiap subtes punya batas waktu</li>
-              <li>Hasil: profil bakat + IQ prediksi + rekomendasi</li>
+              <li>Hasil: profil bakat + EKIU prediksi + rekomendasi</li>
+            </ul>
+          </div>
+
+          <div className="brut-card" style={{ background: "#ff4d8d" }}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-2xl font-black uppercase">Tes IQ</h3>
+              <span className="brut-tag" style={{ background: "#000", color: "#fff" }}>4 SUBTES</span>
+            </div>
+            <p className="font-semibold mb-2">
+              Mengukur kecerdasan umum secara culture-fair lewat soal gambar non-verbal
+              CFIT Skala 3: Series, Classification, Matrices, &amp; Conditions (bentuk A &amp; B).
+            </p>
+            <ul className="font-semibold list-disc list-inside text-sm">
+              <li>Semua soal berupa gambar, tiap subtes berbatas waktu</li>
+              <li>Hasil: skor IQ + klasifikasi (dilihat admin/guru)</li>
             </ul>
           </div>
         </section>
@@ -73,7 +111,7 @@ export default function Home() {
           <h3 className="text-2xl font-black uppercase mb-3">Bagaimana cara mengikuti tes?</h3>
           <ol className="list-decimal list-inside font-semibold space-y-2">
             <li>Minta token kepada admin / guru.</li>
-            <li>Masukkan token di atas.</li>
+            <li>Masukkan token di atas (kartu Minat/Bakat atau kartu Tes IQ).</li>
             <li>Isi data diri.</li>
             <li>Kerjakan soal sesuai waktu yang disediakan tiap subtes.</li>
             <li>Selesai. Hasil akan dilihat &amp; diunduh oleh admin/guru.</li>

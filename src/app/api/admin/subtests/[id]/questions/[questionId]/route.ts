@@ -3,11 +3,16 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getAdminFromRequest } from "@/lib/auth";
+import { validateQuestionKey } from "@/lib/question-validation";
 
 // Endpoint admin untuk edit / hapus 1 soal individu lewat halaman "Preview
 // Bank Soal" di panel admin. Skema PATCH menerima semua field yang aman
 // diubah; `correct` & `options` divalidasi dengan z.unknown() lalu disimpan
 // apa adanya sebagai JSON.
+//
+// Sejak perbaikan integritas kunci jawaban, soal BAKAT (non-contoh) TIDAK
+// boleh disimpan dengan kunci kosong atau jumlah kunci != parts. Dulu kunci
+// kosong membuat semua peserta mendapat poin penuh tanpa peringatan apa pun.
 
 const OptionItem = z.object({
   key: z.string().min(1).max(4),
@@ -98,14 +103,41 @@ export async function PATCH(
   if (body.options !== undefined) {
     data.options = normalizeOptions(body.options) as Prisma.InputJsonValue;
   }
+
+  // Nilai efektif setelah update — dipakai untuk validasi integritas kunci.
+  const nextCorrect =
+    body.correct !== undefined
+      ? normalizeCorrect(body.correct, nextParts, nextInputMode)
+      : existing.correct;
+  const nextIsExample = body.isExample ?? existing.isExample;
+
   if (body.correct !== undefined) {
-    data.correct = normalizeCorrect(body.correct, nextParts, nextInputMode) as Prisma.InputJsonValue;
+    data.correct = nextCorrect as Prisma.InputJsonValue;
   }
   if (body.partLabels !== undefined) {
     if (body.partLabels === null) {
       data.partLabels = Prisma.JsonNull;
     } else {
       data.partLabels = body.partLabels as Prisma.InputJsonValue;
+    }
+  }
+
+  // Validasi kunci jawaban. Dijalankan juga ketika hanya `parts` yang berubah,
+  // karena jumlah kunci lama bisa jadi tidak lagi cocok dengan parts baru.
+  if (body.correct !== undefined || body.parts !== undefined || body.isExample !== undefined) {
+    const subtest = await prisma.subtest.findUnique({
+      where: { id },
+      select: { testKind: true },
+    });
+    const check = validateQuestionKey({
+      testKind: (subtest?.testKind ?? "BAKAT") as "BAKAT" | "MINAT",
+      parts: nextParts,
+      correct: nextCorrect,
+      isExample: nextIsExample,
+      label: body.questionNo ?? existing.questionNo,
+    });
+    if (!check.ok) {
+      return NextResponse.json({ error: check.error }, { status: 400 });
     }
   }
 

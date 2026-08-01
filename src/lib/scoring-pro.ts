@@ -13,8 +13,19 @@
 // IQ klinis. Norma diturunkan dari cut-off `CATEGORY_RANGES` di test-config.ts
 // menggunakan equipercentile mapping. Untuk validitas klinis, butuh data
 // standardisasi pada populasi rujukan; itu di luar lingkup tes skrining ini.
+//
+// PEMETAAN SUBTES: anggota tiap composite index dan tiap kategori IQ TIDAK
+// lagi ditulis manual di file ini. Semuanya diturunkan dari tabel tunggal di
+// `subtest-map.ts`, yang juga dipakai `penjurusan.ts`.
 
 import { CATEGORY_RANGES } from "./test-config";
+import {
+  COMPOSITE_MEMBERS,
+  IQ_CATEGORY_MEMBERS,
+  type IqCategoryCode,
+} from "./subtest-map";
+
+export type { IqCategoryCode };
 
 // ── Statistik dasar ───────────────────────────────────────────────────────
 
@@ -150,27 +161,29 @@ export function standardScoresFromRaw(
 //   VSI (Visual-Spasial)       — manipulasi mental bentuk
 //   PSI (Kecepatan Klerikal)   — speed of clerical processing
 //   VCI (Pemahaman Verbal)     — kosakata + analisa verbal
+//
+// `members` diturunkan dari subtest-map.ts — jangan tulis manual di sini.
 
 export const COMPOSITE_GROUPS: Record<string, { name: string; short: string; members: string[] }> = {
   GRI: {
     name: "Penalaran Umum",
     short: "GRI",
-    members: ["BAKAT_1_VISUAL", "BAKAT_2_NUMERIK", "BAKAT_3_VERBAL", "BAKAT_4_URUTAN"],
+    members: COMPOSITE_MEMBERS.GRI,
   },
   VSI: {
     name: "Visual-Spasial",
     short: "VSI",
-    members: ["BAKAT_5_SPASIAL", "BAKAT_6_3DIMENSI"],
+    members: COMPOSITE_MEMBERS.VSI,
   },
   PSI: {
     name: "Kecepatan Klerikal",
     short: "PSI",
-    members: ["BAKAT_7_SISTEMATISASI", "BAKAT_9_FIGURAL"],
+    members: COMPOSITE_MEMBERS.PSI,
   },
   VCI: {
     name: "Pemahaman Verbal",
     short: "VCI",
-    members: ["BAKAT_3_VERBAL", "BAKAT_8_KOSAKATA"],
+    members: COMPOSITE_MEMBERS.VCI,
   },
 };
 
@@ -184,8 +197,8 @@ export const COMPOSITE_GROUPS: Record<string, { name: string; short: string; mem
 //
 // Sistematisasi (klerikal murni) tidak masuk formula IQ — tetap dilaporkan
 // sebagai bagian indeks komposit PSI.
-
-export type IqCategoryCode = "P" | "V" | "K" | "S";
+//
+// `members` diturunkan dari subtest-map.ts — jangan tulis manual di sini.
 
 export const IQ_CATEGORY_GROUPS: Record<
   IqCategoryCode,
@@ -195,25 +208,25 @@ export const IQ_CATEGORY_GROUPS: Record<
     name: "Penalaran",
     short: "Penalaran",
     weight: 0.30,
-    members: ["BAKAT_1_VISUAL", "BAKAT_4_URUTAN"],
+    members: IQ_CATEGORY_MEMBERS.P,
   },
   V: {
     name: "Verbal",
     short: "Verbal",
     weight: 0.25,
-    members: ["BAKAT_3_VERBAL", "BAKAT_8_KOSAKATA"],
+    members: IQ_CATEGORY_MEMBERS.V,
   },
   K: {
     name: "Kuantitatif",
     short: "Kuantitatif",
     weight: 0.25,
-    members: ["BAKAT_2_NUMERIK", "BAKAT_9_FIGURAL"],
+    members: IQ_CATEGORY_MEMBERS.K,
   },
   S: {
     name: "Spasial",
     short: "Spasial",
     weight: 0.20,
-    members: ["BAKAT_5_SPASIAL", "BAKAT_6_3DIMENSI"],
+    members: IQ_CATEGORY_MEMBERS.S,
   },
 };
 
@@ -258,13 +271,13 @@ export type WechslerBand =
 // Wechsler" (Suryani dkk., SNIMed 2019). Batas IQ: ≥130, 120–129, 110–119,
 // 90–109, 80–89, 70–79, ≤69.
 export function wechslerBand(score: number): WechslerBandInfo {
-  if (score >= 130) return { code: "Very Superior", label: "Sangat Superior", descId: "IQ ≥ 130 — jauh di atas rata-rata populasi." };
-  if (score >= 120) return { code: "Superior", label: "Superior", descId: "IQ 120–129 — di atas rata-rata populasi." };
-  if (score >= 110) return { code: "High Average", label: "Di Atas Rata-rata", descId: "IQ 110–119 — sedikit di atas rata-rata populasi." };
-  if (score >= 90) return { code: "Average", label: "Rata-rata", descId: "IQ 90–109 — sebanding dengan rata-rata populasi seusia." };
-  if (score >= 80) return { code: "Low Average", label: "Di Bawah Rata-rata", descId: "IQ 80–89 — sedikit di bawah rata-rata populasi." };
-  if (score >= 70) return { code: "Borderline", label: "Lambat Belajar", descId: "IQ 70–79 — cukup di bawah rata-rata, perlu pendampingan belajar." };
-  return { code: "Extremely Low", label: "Keterbelakangan Mental", descId: "IQ ≤ 69 — jauh di bawah rata-rata, perlu evaluasi profesional." };
+  if (score >= 130) return { code: "Very Superior", label: "Sangat Superior", descId: "EKIU ≥ 130 — jauh di atas rata-rata populasi." };
+  if (score >= 120) return { code: "Superior", label: "Superior", descId: "EKIU 120–129 — di atas rata-rata populasi." };
+  if (score >= 110) return { code: "High Average", label: "Di Atas Rata-rata", descId: "EKIU 110–119 — sedikit di atas rata-rata populasi." };
+  if (score >= 90) return { code: "Average", label: "Rata-rata", descId: "EKIU 90–109 — sebanding dengan rata-rata populasi seusia." };
+  if (score >= 80) return { code: "Low Average", label: "Di Bawah Rata-rata", descId: "EKIU 80–89 — sedikit di bawah rata-rata populasi." };
+  if (score >= 70) return { code: "Borderline", label: "Lambat Belajar", descId: "EKIU 70–79 — cukup di bawah rata-rata, perlu pendampingan belajar." };
+  return { code: "Extremely Low", label: "Keterbelakangan Mental", descId: "EKIU ≤ 69 — jauh di bawah rata-rata, perlu evaluasi profesional." };
 }
 
 // ── Full Scale IQ ─────────────────────────────────────────────────────────
@@ -395,7 +408,7 @@ export function computeProBakat(
     band: wechslerBand(fsiqScore),
     percentile: scoreToPercentile(fsiqScore),
     formula:
-      "IQ = (0.30 \u00D7 Penalaran) + (0.25 \u00D7 Verbal) + (0.25 \u00D7 Kuantitatif) + (0.20 \u00D7 Spasial)",
+      "EKIU = (0.30 \u00D7 Penalaran) + (0.25 \u00D7 Verbal) + (0.25 \u00D7 Kuantitatif) + (0.20 \u00D7 Spasial)",
     categories: iqCategories,
   };
 
