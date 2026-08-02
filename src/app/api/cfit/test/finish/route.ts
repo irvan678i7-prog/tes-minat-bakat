@@ -61,6 +61,9 @@ export async function POST(req: NextRequest) {
     perSubtest: computed.perSubtest,
     normGroup: computed.normGroup,
     belowNorm: computed.belowNorm,
+    // Ditandai kalau tes hanya satu bentuk (3A/3B): norma yang dipakai adalah
+    // norma RS gabungan A + B, sehingga IQ-nya underestimate.
+    singleForm: computed.singleForm,
   };
 
   const result = await prisma.cfitResult.upsert({

@@ -8,6 +8,11 @@ const Body = z.object({
   testKind: z.enum(["MINAT", "BAKAT"]),
   count: z.number().int().min(1).max(100).default(1),
   ttlSec: z.number().int().min(60).max(24 * 60 * 60).default(3600),
+  // Nama sekolah sesi tes — OPSIONAL. Kalau diisi, semua peserta token ini
+  // otomatis memakai tulisan sekolah yang sama (pola sama seperti token Tes
+  // IQ, tapi tabel tokennya tetap terpisah). Kalau dikosongkan, perilaku
+  // lama dipertahankan: siswa mengetik sendiri nama sekolahnya.
+  school: z.string().max(160).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -17,6 +22,7 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return NextResponse.json({ error: "Invalid input" }, { status: 400 });
 
   const { testKind, count, ttlSec } = parsed.data;
+  const school = (parsed.data.school ?? "").trim();
   const expiresAt = new Date(Date.now() + ttlSec * 1000);
 
   const created = [];
@@ -27,7 +33,13 @@ export async function POST(req: NextRequest) {
       code = generateTokenCode();
     }
     const t = await prisma.accessToken.create({
-      data: { code, testKind, expiresAt, createdById: admin.sub },
+      data: {
+        code,
+        testKind,
+        school: school || null,
+        expiresAt,
+        createdById: admin.sub,
+      },
     });
     created.push(t);
   }
@@ -199,6 +211,7 @@ export async function GET(req: NextRequest) {
       id: t.id,
       code: t.code,
       testKind: t.testKind,
+      school: t.school,
       expiresAt: t.expiresAt,
       createdAt: t.createdAt,
       createdById: t.createdById,

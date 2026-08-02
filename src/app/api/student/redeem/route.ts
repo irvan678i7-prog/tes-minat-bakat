@@ -93,10 +93,15 @@ export async function POST(req: NextRequest) {
       if (tok.expiresAt < new Date()) {
         return NextResponse.json({ error: "Token sudah kadaluarsa. Minta token baru ke admin." }, { status: 410 });
       }
+      // Nama sekolah OPSIONAL diwarisi dari token (diisi admin saat membuat
+      // token). Kalau token tidak membawanya → null, alur lama tidak berubah:
+      // siswa mengetik sendiri di form data diri.
+      const tokenSchool = (tok.school ?? "").trim();
       submission = await prisma.submission.create({
         data: {
           tokenId: tok.id,
           testKind: tok.testKind,
+          school: tokenSchool || null,
           randomSeed: randomUUID(),
         },
       });

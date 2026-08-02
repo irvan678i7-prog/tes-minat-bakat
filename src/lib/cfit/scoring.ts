@@ -31,6 +31,20 @@ export type CfitComputedResult = {
   normGroup: CfitNormGroup
   /** True bila RS total di bawah baris terendah tabel norma (20). */
   belowNorm: boolean
+  /**
+   * True bila tes hanya memakai SATU bentuk (3A saja atau 3B saja).
+   *
+   * Tabel norma CFIT Skala 3 di `norms.ts` disusun untuk RS GABUNGAN A + B
+   * (rentang 20–99 dari 100 soal). Kalau hanya satu bentuk yang dikerjakan,
+   * RS maksimum cuma 50, sehingga IQ hasil konversi UNDERESTIMATE (mis. RS
+   * sempurna 50 hanya menghasilkan IQ 114). Nilai tetap dihitung supaya data
+   * lama tidak berubah, tapi ditandai agar laporan/rekap bisa memberi catatan
+   * dan hasilnya tidak ditafsirkan seperti hasil bentuk lengkap.
+   *
+   * Token CFIT yang dibuat admin selalu FORM_3AB, jadi kondisi ini hanya
+   * muncul pada data lama atau token yang dibuat manual.
+   */
+  singleForm: boolean
   perSubtest: CfitSubtestScore[]
 }
 
@@ -70,6 +84,7 @@ export function computeCfitResult(
     classificationEn: cls.labelEn,
     normGroup,
     belowNorm: isBelowCfitNormRange(rawScoreTotal),
+    singleForm: form !== "FORM_3AB",
     perSubtest,
   }
 }

@@ -29,6 +29,9 @@ type SubtestMeta = {
 // "example" = tahap contoh soal (TANPA TIMER), "test" = soal asli (timer jalan).
 type Phase = "example" | "test";
 
+// Alasan subtes ditutup otomatis.
+type FinishReason = "time" | "cheat";
+
 // Jumlah soal yang ditampilkan dalam SATU halaman — supaya peserta tidak
 // bolak-balik terlalu banyak halaman.
 const PER_PAGE = 3;
@@ -72,20 +75,30 @@ export default function CfitSubtestRunnerPage() {
   // Banner peringatan yang bisa ditutup — muncul lagi setiap ada pelanggaran baru.
   const [ackedAt, setAckedAt] = useState(0);
 
-  // Subtes HANYA berakhir karena waktu habis (tidak ada penyelesaian manual),
-  // supaya seluruh peserta satu kelas selesai bersamaan. Setelah terkunci,
-  // peserta kembali ke layar jeda dan subtes berikutnya terbuka otomatis.
-  const finishSubtest = useCallback(async () => {
-    if (finishedRef.current) return;
-    finishedRef.current = true;
-    await fetch("/api/cfit/test/subtest-finish", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subtestCode }),
-    }).catch(() => null);
-    toast.error("Waktu habis! Tes ini dikunci.");
-    router.replace("/cfit/test");
-  }, [router, subtestCode]);
+  // Subtes berakhir karena waktu habis (tidak ada penyelesaian manual), supaya
+  // seluruh peserta satu kelas selesai bersamaan — ATAU karena peserta sudah
+  // menembus batas pelanggaran anti-curang. Setelah terkunci, peserta kembali
+  // ke layar jeda dan subtes berikutnya terbuka otomatis.
+  const finishSubtest = useCallback(
+    async (reason: FinishReason = "time") => {
+      if (finishedRef.current) return;
+      finishedRef.current = true;
+      await fetch("/api/cfit/test/subtest-finish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subtestCode }),
+        // keepalive: permintaan tetap dikirim walau halaman langsung berpindah.
+        keepalive: true,
+      }).catch(() => null);
+      toast.error(
+        reason === "cheat"
+          ? "Batas pelanggaran terlampaui! Tes ini dikunci dan hasilmu ditandai."
+          : "Waktu habis! Tes ini dikunci.",
+      );
+      router.replace("/cfit/test");
+    },
+    [router, subtestCode],
+  );
 
   // Muat satu tahap subtes. Tahap "example" tidak menyalakan timer sama sekali.
   const loadPhase = useCallback(
@@ -183,7 +196,7 @@ export default function CfitSubtestRunnerPage() {
       setRemaining(left);
       if (left <= 0) {
         clearInterval(t);
-        void finishSubtest();
+        void finishSubtest("time");
       }
     }, 250);
     return () => clearInterval(t);
@@ -199,6 +212,14 @@ export default function CfitSubtestRunnerPage() {
     endpoint: "/api/cfit/test/violation",
   });
 
+  // Peserta menembus batas pelanggaran → subtes ditutup otomatis, sama seperti
+  // pada runner tes minat-bakat. Tanpa ini, peserta yang sudah ditandai
+  // menyontek masih bisa melanjutkan mengerjakan sampai waktu habis.
+  useEffect(() => {
+    if (!loaded || !anti.flagged) return;
+    void finishSubtest("cheat");
+  }, [loaded, anti.flagged, finishSubtest]);
+
   const saveAnswer = useCallback(
     async (q: Question, sel: string[]) => {
       const selected = q.expectedAnswers > 1 ? sel : sel[0];
@@ -206,10 +227,13 @@ export default function CfitSubtestRunnerPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ questionId: q.id, selected }),
+        // keepalive: jawaban terakhir tetap terkirim walau peserta langsung
+        // menutup / berpindah halaman sebelum request selesai.
+        keepalive: true,
       });
       if (res.status === 423) {
         toast.error("Waktu sudah habis — jawaban terakhir tidak tersimpan.");
-        void finishSubtest();
+        void finishSubtest("time");
       } else if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         toast.error(data.error || "Gagal menyimpan jawaban");
