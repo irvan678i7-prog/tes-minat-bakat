@@ -26,10 +26,18 @@ export function cfitSubtestLabel(code: string, fallback?: string | null): string
   return n ? `TES ${n}` : (fallback ?? code)
 }
 
-/** Urutan kelompok untuk tabel & grafik laporan (A + B digabung). */
-export const CFIT_TEST_GROUPS: Array<{ kind: string; label: string }> = [
-  { kind: "SERIES", label: "TES 1" },
-  { kind: "CLASSIFICATION", label: "TES 2" },
-  { kind: "MATRICES", label: "TES 3" },
-  { kind: "CONDITIONS", label: "TES 4" },
+/**
+ * Urutan kelompok untuk tabel & grafik laporan (A + B digabung).
+ * - `label`: versi pendek untuk sumbu grafik ("TES 1").
+ * - `name`: versi lengkap dengan nama subtes untuk tabel rincian laporan.
+ */
+export const CFIT_TEST_GROUPS: Array<{
+  kind: string
+  label: string
+  name: string
+}> = [
+  { kind: "SERIES", label: "TES 1", name: "Subtes 1: Series" },
+  { kind: "CLASSIFICATION", label: "TES 2", name: "Subtes 2: Classification" },
+  { kind: "MATRICES", label: "TES 3", name: "Subtes 3: Matrices" },
+  { kind: "CONDITIONS", label: "TES 4", name: "Subtes 4: Conditions (Topology)" },
 ]
