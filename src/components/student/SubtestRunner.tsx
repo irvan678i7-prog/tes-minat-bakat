@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import toast from "react-hot-toast";
 import { useAntiCheat } from "./useAntiCheat";
 import { useAnswerSync } from "./useAnswerSync";
@@ -358,6 +358,35 @@ export default function SubtestRunner({
   const goNext = () => setIdx((i) => Math.min(i + 1, questions.length - 1));
   const goPrev = () => setIdx((i) => Math.max(i - 1, 0));
 
+  // ── Gulir ke ATAS setiap ganti soal ───────────────────────────────
+  // Tombol SEBELUMNYA/SELANJUTNYA dan panel "Loncat ke Soal" ada di BAWAH
+  // halaman. Tanpa ini, posisi scroll bertahan di bawah setelah pindah soal,
+  // sehingga siswa melihat bagian bawah soal baru (pilihan jawaban / navigasi)
+  // lebih dulu dan harus menggulir manual ke atas untuk membaca teks soalnya.
+  // Soal panjang / bergambar paling terasa. Ref dipakai supaya kita tidak
+  // menggulir saat render pertama (mis. siswa reload di tengah subtes).
+  const lastScrolledIdx = useRef<number | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    // Hanya di layar pengerjaan; layar intro/selesai tidak perlu.
+    if (!started || isCompleted) return;
+    if (lastScrolledIdx.current === null) {
+      lastScrolledIdx.current = idx;
+      return;
+    }
+    if (lastScrolledIdx.current === idx) return;
+    lastScrolledIdx.current = idx;
+    const reduceMotion =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    try {
+      window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
+    } catch {
+      // Browser lama tanpa dukungan ScrollToOptions.
+      window.scrollTo(0, 0);
+    }
+  }, [idx, started, isCompleted]);
+
   // Cegah double-call kalau siswa cepat-cepat klik selesai dan timer
   // habis bersamaan, atau klik SELESAI berulang kali.
   const [locking, setLocking] = useState(false);
@@ -411,6 +440,9 @@ export default function SubtestRunner({
   const handleStart = () => {
     if (typeof window !== "undefined") {
       window.localStorage.setItem(STARTED_KEY(subtest.code), "1");
+      // Mulai dari atas halaman soal pertama, bukan posisi scroll layar intro
+      // (siswa biasanya sudah menggulir ke bawah untuk menekan MULAI).
+      window.scrollTo(0, 0);
     }
     setStartedManual(true);
     // Enter fullscreen immediately while we still have the user gesture.
