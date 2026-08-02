@@ -291,8 +291,10 @@ function drawKop(doc: jsPDF, margin: number, pageW: number): number {
 	fillHex(doc, INK);
 	doc.rect(0, 0, pageW, 5, "F");
 
-	// Logo di kiri kop. Bila berkas logo belum dipasang, kop tetap tercetak.
-	drawReportLogo(doc, margin + 2, 13, 46);
+	// Logo diletakkan agak ke kanan supaya berdekatan dengan teks kop, dengan
+	// latar putih agar tidak terlihat berlatar gelap. Bila berkas logo belum
+	// dipasang, kop tetap tercetak normal tanpa logo.
+	drawReportLogo(doc, margin + 40, 13, 46);
 
 	textHex(doc, INK);
 	doc.setFont("helvetica", "bold");
