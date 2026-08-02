@@ -61,42 +61,39 @@ export async function POST(req: NextRequest) {
     perSubtest: computed.perSubtest,
     normGroup: computed.normGroup,
     belowNorm: computed.belowNorm,
+    // Ditandai kalau tes hanya satu bentuk (3A/3B): norma yang dipakai adalah
+    // norma RS gabungan A + B, sehingga IQ-nya underestimate.
+    singleForm: computed.singleForm,
   };
 
-  const finishedAt = new Date();
+  const result = await prisma.cfitResult.upsert({
+    where: { submissionId: submission.id },
+    create: {
+      submissionId: submission.id,
+      rawScoreA: computed.rawScoreA,
+      rawScoreB: computed.rawScoreB,
+      rawScoreTotal: computed.rawScoreTotal,
+      iq: computed.iq,
+      classification: computed.classification,
+      payload,
+    },
+    update: {
+      rawScoreA: computed.rawScoreA,
+      rawScoreB: computed.rawScoreB,
+      rawScoreTotal: computed.rawScoreTotal,
+      iq: computed.iq,
+      classification: computed.classification,
+      payload,
+      generatedAt: new Date(),
+    },
+  });
 
-  // SATU TRANSAKSI: menyimpan hasil dan menandai submission selesai harus
-  // atomik. Kalau dipisah, crash di antara keduanya meninggalkan submission
-  // yang punya hasil tapi belum berstatus selesai (atau sebaliknya).
-  // `updateMany` dengan filter `finishedAt: null` bersifat race-safe dan
-  // tidak menimpa waktu selesai yang sudah ada.
-  const [result] = await prisma.$transaction([
-    prisma.cfitResult.upsert({
-      where: { submissionId: submission.id },
-      create: {
-        submissionId: submission.id,
-        rawScoreA: computed.rawScoreA,
-        rawScoreB: computed.rawScoreB,
-        rawScoreTotal: computed.rawScoreTotal,
-        iq: computed.iq,
-        classification: computed.classification,
-        payload,
-      },
-      update: {
-        rawScoreA: computed.rawScoreA,
-        rawScoreB: computed.rawScoreB,
-        rawScoreTotal: computed.rawScoreTotal,
-        iq: computed.iq,
-        classification: computed.classification,
-        payload,
-        generatedAt: new Date(),
-      },
-    }),
-    prisma.cfitSubmission.updateMany({
-      where: { id: submission.id, finishedAt: null },
-      data: { finishedAt },
-    }),
-  ]);
+  if (!submission.finishedAt) {
+    await prisma.cfitSubmission.update({
+      where: { id: submission.id },
+      data: { finishedAt: new Date() },
+    });
+  }
 
   return NextResponse.json({
     ok: true,

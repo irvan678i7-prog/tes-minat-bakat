@@ -125,11 +125,14 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // Norma yang tersedia saat ini: usia 17 tahun ke atas. Usia < 17 tetap
-  // boleh mengerjakan, tapi beri peringatan agar hasil ditafsirkan hati-hati.
+  // Tabel norma yang dipakai (src/lib/cfit/norms.ts) PUNYA kolom sendiri
+  // untuk usia 15, 16, dan 17 tahun ke atas — jadi peserta usia 15 & 16
+  // sudah dikonversi memakai norma yang tepat dan TIDAK perlu diperingatkan.
+  // Peringatan hanya relevan untuk usia di bawah 15 tahun, karena usia itu
+  // tidak punya kolom norma sendiri dan otomatis memakai kolom 17+.
   const normWarning =
-    typeof age === "number" && age < 17
-      ? "Norma IQ yang tersedia saat ini untuk usia 17 tahun ke atas. Hasil peserta di bawah 17 tahun perlu ditafsirkan dengan hati-hati."
+    typeof age === "number" && age < 15
+      ? "Tabel norma IQ yang tersedia mencakup usia 15, 16, dan 17 tahun ke atas. Peserta berusia di bawah 15 tahun akan dikonversi memakai norma usia 17 tahun ke atas, sehingga hasilnya perlu ditafsirkan dengan hati-hati."
       : null;
 
   return NextResponse.json({ ok: true, submissionId: submission.id, age, normWarning });
