@@ -1,4 +1,4 @@
-// ─────────────────────────────────────────────────
+// ─────────────────────────────────
 // Logo Program Pascasarjana UM Metro untuk kop laporan PDF.
 //
 // Sumber gambar dicari berurutan:
@@ -8,7 +8,7 @@
 //
 // Bila tidak satu pun ditemukan, kop tetap tercetak TANPA logo (tidak error),
 // sehingga laporan tetap bisa diunduh walau berkas logo belum dipasang.
-// ─────────────────────────────────────────────────
+// ─────────────────────────────────
 
 import fs from "node:fs"
 import path from "node:path"
@@ -61,8 +61,25 @@ export function getReportLogo(): ReportLogo | null {
   return cache
 }
 
+function hexToRGB(hex: string): [number, number, number] {
+  const h = hex.replace("#", "")
+  return [
+    parseInt(h.slice(0, 2), 16),
+    parseInt(h.slice(2, 4), 16),
+    parseInt(h.slice(4, 6), 16),
+  ]
+}
+
 /**
  * Cetak logo pada kop laporan (bujur sangkar).
+ *
+ * Sebelum gambar dicetak, area logo DIBERI LATAR PUTIH lebih dulu. Ini penting
+ * karena PNG beralpha kadang dirender jsPDF dengan latar gelap; dengan latar
+ * putih di bawahnya, logo tetap tampil bersih di atas kertas.
+ *
+ * @param opts.background warna latar (default putih). Isi `null` untuk
+ *                        mencetak logo tanpa latar sama sekali.
+ * @param opts.padding    ketebalan margin latar putih di sekeliling logo.
  * @returns true bila logo berhasil dicetak.
  */
 export function drawReportLogo(
@@ -70,10 +87,25 @@ export function drawReportLogo(
   x: number,
   y: number,
   size: number,
+  opts?: { background?: string | null; padding?: number },
 ): boolean {
   const logo = getReportLogo()
   if (!logo) return false
   try {
+    const background =
+      opts?.background === undefined ? "#FFFFFF" : opts.background
+    const padding = opts?.padding ?? 2
+    if (background) {
+      const [r, g, b] = hexToRGB(background)
+      doc.setFillColor(r, g, b)
+      doc.rect(
+        x - padding,
+        y - padding,
+        size + padding * 2,
+        size + padding * 2,
+        "F",
+      )
+    }
     doc.addImage(logo.dataUrl, logo.format, x, y, size, size)
     return true
   } catch {
