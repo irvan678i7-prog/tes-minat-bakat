@@ -1,8 +1,8 @@
-// ─────────────────────────────────
+// ───────────────────────────────
 // Laporan individual Tes IQ — CFIT Skala 3 (Bentuk A + B), satu halaman A4.
 // TERPISAH dari laporan minat-bakat (src/lib/pdf.ts).
 // Palet dokumen: DOMINAN HIJAU (permintaan pembimbing).
-// ─────────────────────────────────
+// ───────────────────────────────
 
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
@@ -166,8 +166,10 @@ function drawKop(doc: jsPDF, margin: number, pageW: number): number {
   setFillHex(doc, INK)
   doc.rect(0, 0, pageW, 5, "F")
 
-  // Logo di kiri kop. Bila berkas logo belum dipasang, kop tetap tercetak.
-  drawReportLogo(doc, margin + 2, 13, 48)
+  // Logo diletakkan agak ke kanan supaya berdekatan dengan teks kop, dengan
+  // latar putih agar tidak terlihat berlatar gelap. Bila berkas logo belum
+  // dipasang, kop tetap tercetak normal tanpa logo.
+  drawReportLogo(doc, margin + 76, 13, 48)
 
   setTextHex(doc, INK)
   doc.setFont("helvetica", "bold")
