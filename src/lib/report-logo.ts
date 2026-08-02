@@ -4,7 +4,12 @@
 // Sumber gambar dicari berurutan:
 //   1. env REPORT_LOGO_DATA_URL → "data:image/png;base64,..."
 //   2. env REPORT_LOGO_PATH     → path file (relatif terhadap root proyek)
-//   3. public/logo-pps-um-metro.png (dan beberapa nama cadangan)
+//   3. public/logo-pps-um-metro.png (dan beberapa nama cadangan, .png & .jpg)
+//
+// PENTING — PNG TRANSPARAN:
+// jsPDF merender sebagian PNG beralpha dengan area transparan menjadi HITAM.
+// Karena itu setiap PNG DIRATAKAN dulu ke latar putih (lihat png-flatten.ts)
+// sebelum ditempel ke dokumen, sehingga logo selalu tampil bersih.
 //
 // Bila tidak satu pun ditemukan, kop tetap tercetak TANPA logo (tidak error),
 // sehingga laporan tetap bisa diunduh walau berkas logo belum dipasang.
@@ -13,16 +18,22 @@
 import fs from "node:fs"
 import path from "node:path"
 import type jsPDF from "jspdf"
+import { flattenPngOnBackground, isPngBuffer } from "./png-flatten"
 
 export type ReportLogo = { dataUrl: string; format: "PNG" | "JPEG" }
 
 const CANDIDATE_FILES: string[] = [
   process.env.REPORT_LOGO_PATH,
   "public/logo-pps-um-metro.png",
+  "public/logo-pps-um-metro.jpg",
   "public/logo-pps.png",
+  "public/logo-pps.jpg",
   "public/logo-pascasarjana.png",
+  "public/logo-pascasarjana.jpg",
   "public/logo-um-metro.png",
+  "public/logo-um-metro.jpg",
   "public/logo.png",
+  "public/logo.jpg",
 ].filter((v): v is string => typeof v === "string" && v.trim().length > 0)
 
 // undefined = belum pernah dicari, null = sudah dicari & memang tidak ada.
@@ -32,13 +43,36 @@ function formatOf(source: string): "PNG" | "JPEG" {
   return /\.jpe?g$|^data:image\/jpe?g/i.test(source) ? "JPEG" : "PNG"
 }
 
+/**
+ * Ubah isi berkas gambar menjadi data URL siap pakai jsPDF.
+ * Khusus PNG, alpha diratakan ke latar putih lebih dulu.
+ */
+function toLogo(bytes: Buffer, format: "PNG" | "JPEG"): ReportLogo {
+  if (format === "PNG" && isPngBuffer(bytes)) {
+    const flat = flattenPngOnBackground(bytes, [255, 255, 255])
+    if (flat) {
+      return { dataUrl: `data:image/png;base64,${flat.toString("base64")}`, format: "PNG" }
+    }
+  }
+  return {
+    dataUrl: `data:image/${format === "JPEG" ? "jpeg" : "png"};base64,${bytes.toString("base64")}`,
+    format,
+  }
+}
+
 export function getReportLogo(): ReportLogo | null {
   if (cache !== undefined) return cache
   cache = null
 
   const inline = (process.env.REPORT_LOGO_DATA_URL ?? "").trim()
   if (inline.startsWith("data:image/")) {
-    cache = { dataUrl: inline, format: formatOf(inline) }
+    const format = formatOf(inline)
+    const base64 = inline.slice(inline.indexOf(",") + 1)
+    try {
+      cache = toLogo(Buffer.from(base64, "base64"), format)
+    } catch {
+      cache = { dataUrl: inline, format }
+    }
     return cache
   }
 
@@ -46,12 +80,7 @@ export function getReportLogo(): ReportLogo | null {
     try {
       const abs = path.isAbsolute(rel) ? rel : path.join(process.cwd(), rel)
       if (!fs.existsSync(abs)) continue
-      const format = formatOf(abs)
-      const base64 = fs.readFileSync(abs).toString("base64")
-      cache = {
-        dataUrl: `data:image/${format === "JPEG" ? "jpeg" : "png"};base64,${base64}`,
-        format,
-      }
+      cache = toLogo(fs.readFileSync(abs), formatOf(abs))
       return cache
     } catch {
       // Berkas tidak terbaca → coba kandidat berikutnya.
@@ -73,9 +102,8 @@ function hexToRGB(hex: string): [number, number, number] {
 /**
  * Cetak logo pada kop laporan (bujur sangkar).
  *
- * Sebelum gambar dicetak, area logo DIBERI LATAR PUTIH lebih dulu. Ini penting
- * karena PNG beralpha kadang dirender jsPDF dengan latar gelap; dengan latar
- * putih di bawahnya, logo tetap tampil bersih di atas kertas.
+ * Area logo diberi LATAR PUTIH lebih dulu sebagai pengaman tambahan, lalu
+ * gambar (yang alpha-nya sudah diratakan) ditempel di atasnya.
  *
  * @param opts.background warna latar (default putih). Isi `null` untuk
  *                        mencetak logo tanpa latar sama sekali.
