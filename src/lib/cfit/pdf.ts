@@ -1,7 +1,8 @@
-// ───────────────────────────────────────────────────────────
+// ───────────────────────────────
 // Laporan individual Tes IQ — CFIT Skala 3 (Bentuk A + B), satu halaman A4.
 // TERPISAH dari laporan minat-bakat (src/lib/pdf.ts).
-// ───────────────────────────────────────────────────────────
+// Palet dokumen: DOMINAN HIJAU (permintaan pembimbing).
+// ───────────────────────────────
 
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
@@ -13,6 +14,7 @@ import {
   qrPayload,
   verificationFooterText,
 } from "../report-verification"
+import { drawReportLogo } from "../report-logo"
 import { CFIT_TEST_GROUPS } from "./subtest-label"
 import type { CfitSubtestScore } from "./scoring"
 
@@ -39,16 +41,16 @@ export type CfitPdfResult = {
   generatedAt?: Date | null
 }
 
-// ─── Palet ───
-const INK = "#0F172A"
-const SOFT_INK = "#475569"
-const HAIRLINE = "#CBD5E1"
-const STRIPE = "#F8FAFC"
-const PANEL = "#F1F5F9"
+// ─── Palet (dominan hijau) ───
+const INK = "#14532D"
+const SOFT_INK = "#4B6E5A"
+const HAIRLINE = "#BBDFC8"
+const STRIPE = "#F4FBF6"
+const PANEL = "#E8F6ED"
 const WHITE = "#FFFFFF"
-const ACCENT = "#22D3EE"
-const ACCENT_DEEP = "#0E7490"
-const HIGHLIGHT = "#CFFAFE"
+const ACCENT = "#22C55E"
+const ACCENT_DEEP = "#15803D"
+const HIGHLIGHT = "#DCFCE7"
 
 // ─── Identitas penanda tangan ───
 // Default sesuai penanda tangan resmi; masih bisa ditimpa lewat environment
@@ -71,8 +73,9 @@ const FORM_LABEL: Record<string, string> = {
 
 /**
  * Kelompok tes untuk tabel rincian & grafik: 4 tes CFIT, nilai Bentuk A + B
- * LANGSUNG DIGABUNG (bukan 8 baris terpisah). Nama teknis subtes tidak
- * ditampilkan — cukup TES 1..TES 4.
+ * LANGSUNG DIGABUNG (bukan 8 baris terpisah).
+ * - `label` (TES 1..TES 4) dipakai sebagai keterangan sumbu grafik.
+ * - `name` (Subtes 1: Series, dst.) dipakai pada tabel rincian.
  */
 function groupPerTest(perSubtest: CfitSubtestScore[]) {
   return CFIT_TEST_GROUPS.map((g) => {
@@ -81,7 +84,7 @@ function groupPerTest(perSubtest: CfitSubtestScore[]) {
     const answered = rows.reduce((n, s) => n + s.answered, 0)
     const total = rows.reduce((n, s) => n + s.total, 0)
     const pct = total > 0 ? Math.round((correct / total) * 100) : 0
-    return { label: g.label, correct, answered, total, pct }
+    return { label: g.label, name: g.name, correct, answered, total, pct }
   })
 }
 
@@ -158,10 +161,15 @@ function drawBrutBox(
   doc.rect(x, y, w, h, "FD")
 }
 
-// ─── Kop resmi ───
+// ─── Kop resmi (dengan logo Pascasarjana UM Metro) ───
 function drawKop(doc: jsPDF, margin: number, pageW: number): number {
   setFillHex(doc, INK)
   doc.rect(0, 0, pageW, 5, "F")
+
+  // Logo diletakkan agak ke kanan supaya berdekatan dengan teks kop, dengan
+  // latar putih agar tidak terlihat berlatar gelap. Bila berkas logo belum
+  // dipasang, kop tetap tercetak normal tanpa logo.
+  drawReportLogo(doc, margin + 76, 13, 48)
 
   setTextHex(doc, INK)
   doc.setFont("helvetica", "bold")
@@ -225,8 +233,10 @@ function drawScoreCard(
   doc.text("SKOR IQ (CFIT)", scoreCx, yIn + 20, { align: "center" })
   setTextHex(doc, WHITE)
   doc.setFontSize(30)
+  // Catatan: tanda "kurang dari sama dengan" ditulis ASCII karena font bawaan
+  // jsPDF (WinAnsi) tidak punya glyph untuk simbol matematis.
   doc.text(
-    `${info.belowNorm ? "≤" : ""}${result.iq}`,
+    `${info.belowNorm ? "<=" : ""}${result.iq}`,
     scoreCx,
     yIn + 48,
     { align: "center" },
@@ -270,6 +280,8 @@ function drawScoreCard(
 }
 
 // ─── Grafik batang bergaya UI: % benar per tes (A + B digabung) ───
+// Catatan tata letak: area plot diberi HEADROOM di bawah bilah judul supaya
+// angka persentase di atas batang 100% tidak tertutup bilah judul.
 function drawSubtestChart(
   doc: jsPDF,
   perSubtest: CfitSubtestScore[],
@@ -279,13 +291,14 @@ function drawSubtestChart(
 ): number {
   const innerW = pageW - margin * 2
   const headerH = 17
-  const plotH = 68
-  const panelH = 122
-  const baseY = yIn + headerH + 8 + plotH
+  const headroom = 17 // ruang untuk label % di atas batang tertinggi
+  const plotH = 66
+  const panelH = 130
+  const baseY = yIn + headerH + headroom + plotH
 
   drawBrutBox(doc, margin, yIn, innerW, panelH, WHITE)
 
-  // Bilah judul hitam
+  // Bilah judul
   setFillHex(doc, INK)
   doc.rect(margin, yIn, innerW, headerH, "F")
   setTextHex(doc, WHITE)
@@ -341,10 +354,15 @@ function drawSubtestChart(
       doc.rect(bx, baseY - h, barW, h, "FD")
     }
 
+    // Angka persentase: selalu di atas batang, tapi tidak boleh naik melewati
+    // batas headroom (kalau tidak, batang 100% membuat angkanya tertutup
+    // bilah judul).
+    const labelTopLimit = yIn + headerH + 11
+    const labelY = Math.max(baseY - Math.max(h, 6) - 5, labelTopLimit)
     setTextHex(doc, INK)
     doc.setFont("helvetica", "bold")
     doc.setFontSize(8.2)
-    doc.text(`${g.pct}%`, cx, baseY - Math.max(h, 6) - 5, { align: "center" })
+    doc.text(`${g.pct}%`, cx, labelY, { align: "center" })
 
     doc.setFontSize(6.6)
     doc.text(g.label, cx, baseY + 11, { align: "center" })
@@ -562,7 +580,8 @@ export function buildCfitReportPDF(
     pageW,
   )
 
-  // Rincian per tes — Bentuk A + B LANGSUNG DIGABUNG (4 baris).
+  // Rincian per tes — Bentuk A + B LANGSUNG DIGABUNG (4 baris), memakai nama
+  // subtes lengkap (Subtes 1: Series, dst.).
   y += 11
   setTextHex(doc, INK)
   doc.setFont("helvetica", "bold")
@@ -597,7 +616,7 @@ export function buildCfitReportPDF(
     },
     head: [["Tes", "Benar", "Dijawab", "Jumlah Soal", "% Benar"]],
     body: groupPerTest(perSubtest).map((g) => [
-      g.label,
+      g.name,
       String(g.correct),
       String(g.answered),
       String(g.total),
@@ -607,22 +626,28 @@ export function buildCfitReportPDF(
 
   y = nextY(doc, y + 60) + 11
 
-  // Catatan penskoran
+  // Catatan penskoran — dipaksa MUAT DALAM SATU BARIS: ukuran huruf dikecilkan
+  // bertahap sampai teksnya cukup, bukan dipotong jadi beberapa baris.
   const noteText = payload.belowNorm
     ? `Skor IQ diperoleh dengan mengonversi Raw Score total (A + B) = ${result.rawScoreTotal} memakai tabel norma CFIT Skala 3 kelompok ${normGroupLabel}. Raw Score berada di bawah rentang tabel norma (baris terendah 20), sehingga skor ditampilkan sebagai batas terendah norma.`
     : `Skor IQ diperoleh dengan mengonversi Raw Score total (A + B) = ${result.rawScoreTotal} memakai tabel norma CFIT Skala 3 kelompok ${normGroupLabel}.`
-  const noteLines = doc.splitTextToSize(noteText, innerW - 16) as string[]
-  const noteH = 11 + noteLines.length * 8.4
+  const noteMaxW = innerW - 16
+  doc.setFont("helvetica", "normal")
+  let noteFontSize = 6.8
+  doc.setFontSize(noteFontSize)
+  while (noteFontSize > 4.2 && doc.getTextWidth(noteText) > noteMaxW) {
+    noteFontSize -= 0.1
+    doc.setFontSize(noteFontSize)
+  }
+  const noteH = 18
   setFillHex(doc, HIGHLIGHT)
   setDrawHex(doc, ACCENT_DEEP)
   doc.setLineWidth(0.6)
   doc.rect(margin, y, innerW, noteH, "FD")
   setTextHex(doc, INK)
   doc.setFont("helvetica", "normal")
-  doc.setFontSize(6.8)
-  noteLines.forEach((line, i) => {
-    doc.text(line, margin + 8, y + 10 + i * 8.4)
-  })
+  doc.setFontSize(noteFontSize)
+  doc.text(noteText, margin + 8, y + 11.5)
   y += noteH + 12
 
   // Grafik pengganti tabel skala klasifikasi
