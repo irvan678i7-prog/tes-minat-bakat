@@ -1,7 +1,8 @@
-// ─────────────────────────────────────────────────
+// ─────────────────────────────────
 // Laporan individual Tes IQ — CFIT Skala 3 (Bentuk A + B), satu halaman A4.
 // TERPISAH dari laporan minat-bakat (src/lib/pdf.ts).
-// ─────────────────────────────────────────────────
+// Palet dokumen: DOMINAN HIJAU (permintaan pembimbing).
+// ─────────────────────────────────
 
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
@@ -13,6 +14,7 @@ import {
   qrPayload,
   verificationFooterText,
 } from "../report-verification"
+import { drawReportLogo } from "../report-logo"
 import { CFIT_TEST_GROUPS } from "./subtest-label"
 import type { CfitSubtestScore } from "./scoring"
 
@@ -39,16 +41,16 @@ export type CfitPdfResult = {
   generatedAt?: Date | null
 }
 
-// ─── Palet ───
-const INK = "#0F172A"
-const SOFT_INK = "#475569"
-const HAIRLINE = "#CBD5E1"
-const STRIPE = "#F8FAFC"
-const PANEL = "#F1F5F9"
+// ─── Palet (dominan hijau) ───
+const INK = "#14532D"
+const SOFT_INK = "#4B6E5A"
+const HAIRLINE = "#BBDFC8"
+const STRIPE = "#F4FBF6"
+const PANEL = "#E8F6ED"
 const WHITE = "#FFFFFF"
-const ACCENT = "#22D3EE"
-const ACCENT_DEEP = "#0E7490"
-const HIGHLIGHT = "#CFFAFE"
+const ACCENT = "#22C55E"
+const ACCENT_DEEP = "#15803D"
+const HIGHLIGHT = "#DCFCE7"
 
 // ─── Identitas penanda tangan ───
 // Default sesuai penanda tangan resmi; masih bisa ditimpa lewat environment
@@ -159,10 +161,13 @@ function drawBrutBox(
   doc.rect(x, y, w, h, "FD")
 }
 
-// ─── Kop resmi ───
+// ─── Kop resmi (dengan logo Pascasarjana UM Metro) ───
 function drawKop(doc: jsPDF, margin: number, pageW: number): number {
   setFillHex(doc, INK)
   doc.rect(0, 0, pageW, 5, "F")
+
+  // Logo di kiri kop. Bila berkas logo belum dipasang, kop tetap tercetak.
+  drawReportLogo(doc, margin + 2, 13, 48)
 
   setTextHex(doc, INK)
   doc.setFont("helvetica", "bold")
@@ -226,8 +231,10 @@ function drawScoreCard(
   doc.text("SKOR IQ (CFIT)", scoreCx, yIn + 20, { align: "center" })
   setTextHex(doc, WHITE)
   doc.setFontSize(30)
+  // Catatan: tanda "kurang dari sama dengan" ditulis ASCII karena font bawaan
+  // jsPDF (WinAnsi) tidak punya glyph untuk simbol matematis.
   doc.text(
-    `${info.belowNorm ? "≤" : ""}${result.iq}`,
+    `${info.belowNorm ? "<=" : ""}${result.iq}`,
     scoreCx,
     yIn + 48,
     { align: "center" },
@@ -272,7 +279,7 @@ function drawScoreCard(
 
 // ─── Grafik batang bergaya UI: % benar per tes (A + B digabung) ───
 // Catatan tata letak: area plot diberi HEADROOM di bawah bilah judul supaya
-// angka persentase di atas batang 100% tidak tertutup bilah judul hitam.
+// angka persentase di atas batang 100% tidak tertutup bilah judul.
 function drawSubtestChart(
   doc: jsPDF,
   perSubtest: CfitSubtestScore[],
@@ -289,7 +296,7 @@ function drawSubtestChart(
 
   drawBrutBox(doc, margin, yIn, innerW, panelH, WHITE)
 
-  // Bilah judul hitam
+  // Bilah judul
   setFillHex(doc, INK)
   doc.rect(margin, yIn, innerW, headerH, "F")
   setTextHex(doc, WHITE)
@@ -347,7 +354,7 @@ function drawSubtestChart(
 
     // Angka persentase: selalu di atas batang, tapi tidak boleh naik melewati
     // batas headroom (kalau tidak, batang 100% membuat angkanya tertutup
-    // bilah judul hitam).
+    // bilah judul).
     const labelTopLimit = yIn + headerH + 11
     const labelY = Math.max(baseY - Math.max(h, 6) - 5, labelTopLimit)
     setTextHex(doc, INK)

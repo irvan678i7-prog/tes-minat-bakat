@@ -1,6 +1,7 @@
 // Penamaan subtes CFIT yang DITAMPILKAN ke peserta dan di laporan PDF.
 // Nama teknis (Series, Classification, Matrices, Conditions) hanya dipakai di
-// panel admin / kode subtes; peserta dan laporan cukup melihat TES 1..TES 4.
+// panel admin / kode subtes; peserta cukup melihat TES 1..TES 4, sedangkan
+// tabel rincian pada laporan PDF memakai nama lengkap (Subtes 1: Series, dst.).
 
 /** Urutan baku subtes CFIT Skala 3 (sama untuk Bentuk A maupun B). */
 export const CFIT_SUBTEST_ORDER: Record<string, number> = {
@@ -28,8 +29,8 @@ export function cfitSubtestLabel(code: string, fallback?: string | null): string
 
 /**
  * Urutan kelompok untuk tabel & grafik laporan (A + B digabung).
- * - `label`: versi pendek untuk sumbu grafik ("TES 1").
- * - `name`: versi lengkap dengan nama subtes untuk tabel rincian laporan.
+ * - `label` : keterangan ringkas pada sumbu grafik (TES 1..TES 4)
+ * - `name`  : nama lengkap pada tabel rincian laporan PDF
  */
 export const CFIT_TEST_GROUPS: Array<{
   kind: string
