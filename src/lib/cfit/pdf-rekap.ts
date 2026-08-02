@@ -1,6 +1,7 @@
-// ────────────────────────────────────────────────────────────────────
-// Rekap hasil Tes IQ — CFIT Skala 3. A4 landscape, MULTI-HALAMAN.
+// ─────────────────────────────────────────────────────────────
+// Rekap hasil Tes IQ — CFIT Skala 3. A4 POTRET, MULTI-HALAMAN.
 // TERPISAH sepenuhnya dari rekap minat-bakat (src/lib/pdf-rekap.ts).
+// Palet dokumen: DOMINAN HIJAU (permintaan pembimbing).
 //
 // Susunan dokumen:
 //   Hal. 1  Ringkasan eksekutif  — KPI, grafik sebaran klasifikasi, narasi
@@ -8,10 +9,11 @@
 //   Hal. 3  Analisis kelompok    — distribusi, per kelas, per jenis kelamin, usia
 //   Hal. 4  Sorotan & penutup    — capaian tertinggi, perlu perhatian, metodologi,
 //                                  tanda tangan
-// ────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
 
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { drawReportLogo } from "../report-logo";
 
 export type CfitRekapRow = {
 	id: string;
@@ -29,18 +31,18 @@ export type CfitRekapRow = {
 	classification: string | null;
 };
 
-// ─── Palet ───
-const INK = "#0F172A";
-const SOFT_INK = "#475569";
-const HAIRLINE = "#CBD5E1";
-const STRIPE = "#F8FAFC";
-const PANEL = "#F1F5F9";
+// ─── Palet (dominan hijau) ───
+const INK = "#14532D";
+const SOFT_INK = "#4B6E5A";
+const HAIRLINE = "#BBDFC8";
+const STRIPE = "#F4FBF6";
+const PANEL = "#E8F6ED";
 const WHITE = "#FFFFFF";
-const CYAN = "#22D3EE";
-const CYAN_SOFT = "#CFFAFE";
-const CYAN_DEEP = "#0E7490";
-const LIME = "#A3E635";
-const AMBER = "#FCD34D";
+const GREEN = "#22C55E";
+const GREEN_SOFT = "#DCFCE7";
+const GREEN_DEEP = "#15803D";
+const MINT = "#86EFAC";
+const AMBER = "#FDE68A";
 
 // ─── Identitas penanda tangan (sama dengan laporan individu) ───
 const KOP_KOTA = (process.env.REPORT_KOTA ?? "Metro").trim();
@@ -117,17 +119,21 @@ type Band = {
 	min: number;
 	max: number;
 	color: string;
+	/** true bila warna latarnya gelap → teks di atasnya harus putih. */
+	onDark: boolean;
 };
 
+// Gradasi hijau untuk kategori atas → kuning/oranye/merah lembut untuk kategori
+// bawah, tetap dengan nuansa dokumen yang dominan hijau.
 const CFIT_BANDS: Band[] = [
-	{ range: "170+", short: "JENIUS", label: "Jenius (Genius)", min: 170, max: 9999, color: "#7C3AED" },
-	{ range: "140-169", short: "SGT SUP", label: "Sangat Superior (Very Superior)", min: 140, max: 169, color: "#2563EB" },
-	{ range: "120-139", short: "SUPERIOR", label: "Superior", min: 120, max: 139, color: "#0EA5E9" },
-	{ range: "110-119", short: "DI ATAS", label: "Di Atas Rata-rata (High Average)", min: 110, max: 119, color: "#22D3EE" },
-	{ range: "90-109", short: "RATA2", label: "Rata-rata (Average)", min: 90, max: 109, color: "#A3E635" },
-	{ range: "80-89", short: "DI BAWAH", label: "Di Bawah Rata-rata (Low Average)", min: 80, max: 89, color: "#FCD34D" },
-	{ range: "70-79", short: "BORDER", label: "Borderline", min: 70, max: 79, color: "#FB923C" },
-	{ range: "< 70", short: "TERHAMBAT", label: "Terhambat (Mentally Defective)", min: -9999, max: 69, color: "#F87171" },
+	{ range: "170+", short: "JENIUS", label: "Jenius (Genius)", min: 170, max: 9999, color: "#14532D", onDark: true },
+	{ range: "140-169", short: "SGT SUP", label: "Sangat Superior (Very Superior)", min: 140, max: 169, color: "#166534", onDark: true },
+	{ range: "120-139", short: "SUPERIOR", label: "Superior", min: 120, max: 139, color: "#15803D", onDark: true },
+	{ range: "110-119", short: "DI ATAS", label: "Di Atas Rata-rata (High Average)", min: 110, max: 119, color: "#22C55E", onDark: false },
+	{ range: "90-109", short: "RATA2", label: "Rata-rata (Average)", min: 90, max: 109, color: "#86EFAC", onDark: false },
+	{ range: "80-89", short: "DI BAWAH", label: "Di Bawah Rata-rata (Low Average)", min: 80, max: 89, color: "#FDE68A", onDark: false },
+	{ range: "70-79", short: "BORDER", label: "Borderline", min: 70, max: 79, color: "#FDBA74", onDark: false },
+	{ range: "< 70", short: "TERHAMBAT", label: "Terhambat (Mentally Defective)", min: -9999, max: 69, color: "#FCA5A5", onDark: false },
 ];
 
 function bandFor(iq: number): Band {
@@ -197,6 +203,26 @@ function fittedCenterText(
 	doc.text(clean, cx, y, { align: "center" });
 }
 
+/** Tulis teks rata kiri, mengecil otomatis bila melebihi lebar. */
+function fittedLeftText(
+	doc: jsPDF,
+	s: string,
+	x: number,
+	y: number,
+	maxW: number,
+	startSize: number,
+	minSize: number,
+) {
+	const clean = safeText(s);
+	let size = startSize;
+	doc.setFontSize(size);
+	while (size > minSize && doc.getTextWidth(clean) > maxW) {
+		size -= 0.2;
+		doc.setFontSize(size);
+	}
+	doc.text(clean, x, y);
+}
+
 // ─── Helper teks & angka ───
 function pctText(n: number, d: number): string {
 	if (!d) return "0%";
@@ -207,8 +233,8 @@ function fmtDate(d: Date | null): string {
 	if (!d) return "-";
 	return new Date(d).toLocaleString("id-ID", {
 		day: "2-digit",
-		month: "short",
-		year: "numeric",
+		month: "2-digit",
+		year: "2-digit",
 		hour: "2-digit",
 		minute: "2-digit",
 		timeZone: "Asia/Jakarta",
@@ -226,7 +252,7 @@ function nextY(doc: jsPDF, fallback: number): number {
 
 function ensureSpace(doc: jsPDF, y: number, needed: number, top: number): number {
 	const pageH = doc.internal.pageSize.getHeight();
-	if (y + needed > pageH - 40) {
+	if (y + needed > pageH - 46) {
 		doc.addPage();
 		return top;
 	}
@@ -260,19 +286,28 @@ function computeStats(iqs: number[]): Stats {
 	};
 }
 
-// ─── Kop resmi ───
+// ─── Kop resmi (dengan logo Pascasarjana UM Metro) ───
 function drawKop(doc: jsPDF, margin: number, pageW: number): number {
 	fillHex(doc, INK);
 	doc.rect(0, 0, pageW, 5, "F");
 
+	// Logo di kiri kop. Bila berkas logo belum dipasang, kop tetap tercetak.
+	drawReportLogo(doc, margin + 2, 13, 46);
+
 	textHex(doc, INK);
 	doc.setFont("helvetica", "bold");
-	doc.setFontSize(13);
-	txt(doc, "UNIVERSITAS MUHAMMADIYAH METRO", pageW / 2, 28, { align: "center" });
-	doc.setFontSize(10.5);
-	txt(doc, "PROGRAM PASCASARJANA", pageW / 2, 41, { align: "center" });
-	doc.setFontSize(9.2);
-	txt(doc, "PROGRAM STUDI MAGISTER BIMBINGAN DAN KONSELING", pageW / 2, 53, { align: "center" });
+	fittedCenterText(doc, "UNIVERSITAS MUHAMMADIYAH METRO", pageW / 2, 28, pageW - margin * 2 - 190, 13, 9);
+	doc.setFont("helvetica", "bold");
+	fittedCenterText(doc, "PROGRAM PASCASARJANA", pageW / 2, 41, pageW - margin * 2 - 190, 10.5, 8);
+	fittedCenterText(
+		doc,
+		"PROGRAM STUDI MAGISTER BIMBINGAN DAN KONSELING",
+		pageW / 2,
+		53,
+		pageW - margin * 2 - 170,
+		9.2,
+		7,
+	);
 
 	drawHex(doc, INK);
 	doc.setLineWidth(1.6);
@@ -283,19 +318,19 @@ function drawKop(doc: jsPDF, margin: number, pageW: number): number {
 }
 
 function drawRahasiaBadge(doc: jsPDF, pageW: number, margin: number) {
-	const w = 86;
-	const h = 20;
+	const w = 72;
+	const h = 19;
 	const x = pageW - margin - w;
 	fillHex(doc, INK);
 	doc.rect(x, 12, w, h, "F");
 	textHex(doc, WHITE);
 	doc.setFont("helvetica", "bold");
-	doc.setFontSize(10);
-	txt(doc, "RAHASIA", x + w / 2, 26, { align: "center" });
+	doc.setFontSize(9.4);
+	txt(doc, "RAHASIA", x + w / 2, 25, { align: "center" });
 	textHex(doc, INK);
 }
 
-/** Judul bagian: bilah hitam dengan teks putih + keterangan kanan. */
+/** Judul bagian: bilah hijau tua dengan teks putih + keterangan kanan. */
 function sectionTitle(
 	doc: jsPDF,
 	title: string,
@@ -309,20 +344,20 @@ function sectionTitle(
 	doc.rect(margin, y, innerW, 19, "F");
 	textHex(doc, WHITE);
 	doc.setFont("helvetica", "bold");
-	doc.setFontSize(10.5);
-	txt(doc, title, margin + 8, y + 13.5);
+	fittedLeftText(doc, title, margin + 8, y + 13.5, innerW * 0.55, 10, 7.4);
 	if (hint) {
-		textHex(doc, CYAN);
-		doc.setFontSize(7.4);
+		textHex(doc, MINT);
+		doc.setFont("helvetica", "bold");
+		doc.setFontSize(6.6);
 		txt(doc, hint.toUpperCase(), pageW - margin - 8, y + 13, { align: "right" });
 	}
 	textHex(doc, INK);
 	return y + 19 + 10;
 }
 
-// ─────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────
 // HALAMAN 1 — RINGKASAN EKSEKUTIF
-// ─────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────
 
 function drawKpiCard(
 	doc: jsPDF,
@@ -336,14 +371,14 @@ function drawKpiCard(
 	fill: string,
 ) {
 	brutBox(doc, x, y, w, h, fill, 3.5);
-	textHex(doc, CYAN_DEEP);
+	textHex(doc, GREEN_DEEP);
 	doc.setFont("helvetica", "bold");
-	fittedCenterText(doc, label.toUpperCase(), x + w / 2, y + 15, w - 10, 6.8, 4.8);
+	fittedCenterText(doc, label.toUpperCase(), x + w / 2, y + 15, w - 14, 7.6, 5.2);
 	textHex(doc, INK);
-	fittedCenterText(doc, value, x + w / 2, y + 42, w - 12, 23, 12);
+	fittedCenterText(doc, value, x + w / 2, y + 41, w - 16, 23, 12);
 	textHex(doc, SOFT_INK);
 	doc.setFont("helvetica", "normal");
-	fittedCenterText(doc, sub, x + w / 2, y + 55, w - 8, 6.4, 4.6);
+	fittedCenterText(doc, sub, x + w / 2, y + 53, w - 12, 6.8, 4.8);
 	textHex(doc, INK);
 }
 
@@ -368,17 +403,17 @@ function drawBandChart(
 	doc.rect(margin, yIn, innerW, headerH, "F");
 	textHex(doc, WHITE);
 	doc.setFont("helvetica", "bold");
-	doc.setFontSize(9);
+	doc.setFontSize(8.6);
 	txt(doc, "SEBARAN KLASIFIKASI IQ KELOMPOK", margin + 8, yIn + 12.5);
-	textHex(doc, CYAN);
-	doc.setFontSize(7);
+	textHex(doc, MINT);
+	doc.setFontSize(6.6);
 	txt(doc, "JUMLAH PESERTA PER KATEGORI", pageW - margin - 8, yIn + 12, { align: "right" });
 
 	const counts = CFIT_BANDS.map((b) => iqs.filter((iq) => iq >= b.min && iq <= b.max).length);
 	const maxCount = Math.max(1, ...counts);
 
-	const plotX = margin + 34;
-	const plotW = innerW - 34 - 16;
+	const plotX = margin + 30;
+	const plotW = innerW - 30 - 14;
 
 	// Garis skala
 	for (const p of [0, 0.5, 1]) {
@@ -389,11 +424,11 @@ function drawBandChart(
 		textHex(doc, SOFT_INK);
 		doc.setFont("helvetica", "bold");
 		doc.setFontSize(6);
-		txt(doc, String(Math.round(maxCount * p)), plotX - 6, gy + 2, { align: "right" });
+		txt(doc, String(Math.round(maxCount * p)), plotX - 5, gy + 2, { align: "right" });
 	}
 
 	const slotW = plotW / CFIT_BANDS.length;
-	const barW = Math.min(52, slotW * 0.52);
+	const barW = Math.min(40, slotW * 0.56);
 	const labelTopLimit = yIn + headerH + 12;
 
 	CFIT_BANDS.forEach((b, i) => {
@@ -420,14 +455,14 @@ function drawBandChart(
 		const labelY = Math.max(baseY - Math.max(h, 6) - 5, labelTopLimit);
 		textHex(doc, INK);
 		doc.setFont("helvetica", "bold");
-		doc.setFontSize(8.4);
+		doc.setFontSize(8);
 		txt(doc, `${c}`, cx, labelY, { align: "center" });
 
-		fittedCenterText(doc, b.short, cx, baseY + 11, slotW - 4, 6.2, 4.6);
+		fittedCenterText(doc, b.short, cx, baseY + 11, slotW - 2, 6, 4.4);
 		textHex(doc, SOFT_INK);
 		doc.setFont("helvetica", "normal");
-		fittedCenterText(doc, b.range, cx, baseY + 20, slotW - 4, 5.8, 4.4);
-		fittedCenterText(doc, pctText(c, iqs.length), cx, baseY + 29, slotW - 4, 5.8, 4.4);
+		fittedCenterText(doc, b.range, cx, baseY + 20, slotW - 2, 5.6, 4.2);
+		fittedCenterText(doc, pctText(c, iqs.length), cx, baseY + 29, slotW - 2, 5.6, 4.2);
 	});
 
 	textHex(doc, INK);
@@ -471,31 +506,31 @@ function drawNarrative(
 ): number {
 	const innerW = pageW - margin * 2;
 	doc.setFont("helvetica", "normal");
-	doc.setFontSize(8);
+	doc.setFontSize(7.8);
 	const wrapped: string[] = [];
 	lines.forEach((l, i) => {
 		wrapped.push(...wrapText(doc, l, innerW - 24));
 		if (i < lines.length - 1) wrapped.push("");
 	});
-	const boxH = 24 + wrapped.length * 10.2;
+	const boxH = 24 + wrapped.length * 9.8;
 
-	brutBox(doc, margin, yIn, innerW, boxH, CYAN_SOFT, 3.5);
-	textHex(doc, CYAN_DEEP);
+	brutBox(doc, margin, yIn, innerW, boxH, GREEN_SOFT, 3.5);
+	textHex(doc, GREEN_DEEP);
 	doc.setFont("helvetica", "bold");
-	doc.setFontSize(7.6);
+	doc.setFontSize(7.4);
 	txt(doc, "BACAAN SINGKAT HASIL KELOMPOK", margin + 12, yIn + 15);
 	textHex(doc, INK);
 	doc.setFont("helvetica", "normal");
-	doc.setFontSize(8);
+	doc.setFontSize(7.8);
 	wrapped.forEach((line, i) => {
-		txt(doc, line, margin + 12, yIn + 29 + i * 10.2);
+		txt(doc, line, margin + 12, yIn + 28 + i * 9.8);
 	});
 	return yIn + boxH;
 }
 
-// ─────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────
 // HALAMAN 2 — DAFTAR PESERTA
-// ─────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────
 
 type StyledCell = {
 	content: string;
@@ -520,8 +555,8 @@ function drawParticipantTable(
 	ranked.forEach((r, i) => rankOf.set(r.id, i + 1));
 
 	const head = [[
-		"No", "Nama Peserta", "JK", "Usia", "Kelas", "Sekolah", "Bentuk",
-		"RS A", "RS B", "RS Total", "IQ", "Klasifikasi", "Pering-\nkat", "Waktu Selesai",
+		"No", "Nama Peserta", "JK", "Usia", "Kelas", "Sekolah", "Ben-\ntuk",
+		"RS\nA", "RS\nB", "RS\nTotal", "IQ", "Klasifikasi", "Pe-\nring-\nkat", "Selesai",
 	]];
 
 	const body: Array<Array<string | StyledCell>> = rows.map((r, i) => {
@@ -531,7 +566,7 @@ function drawParticipantTable(
 						content: String(r.iq),
 						styles: {
 							fillColor: hexToRGB(bandFor(r.iq).color),
-							textColor: hexToRGB(INK),
+							textColor: hexToRGB(bandFor(r.iq).onDark ? WHITE : INK),
 							fontStyle: "bold",
 						},
 					}
@@ -562,45 +597,49 @@ function drawParticipantTable(
 		theme: "grid",
 		styles: {
 			font: "helvetica",
-			fontSize: 7.2,
-			lineWidth: 0.5,
+			fontSize: 6.2,
+			lineWidth: 0.4,
 			lineColor: hexToRGB(HAIRLINE),
 			textColor: hexToRGB(INK),
-			cellPadding: 3,
+			cellPadding: 2.2,
 			overflow: "linebreak",
+			valign: "middle",
 		},
 		headStyles: {
 			fillColor: hexToRGB(INK),
 			textColor: hexToRGB(WHITE),
 			fontStyle: "bold",
-			fontSize: 7,
-			lineWidth: 0.5,
+			fontSize: 6,
+			lineWidth: 0.4,
 			lineColor: hexToRGB(INK),
+			halign: "center",
+			valign: "middle",
 		},
 		alternateRowStyles: { fillColor: hexToRGB(STRIPE) },
 		columnStyles: {
-			0: { cellWidth: 22, halign: "center" },
+			0: { cellWidth: 17, halign: "center" },
 			1: { fontStyle: "bold" },
-			2: { cellWidth: 22, halign: "center" },
-			3: { cellWidth: 26, halign: "center" },
-			4: { cellWidth: 52, halign: "center" },
-			6: { cellWidth: 38, halign: "center" },
-			7: { cellWidth: 30, halign: "center" },
-			8: { cellWidth: 30, halign: "center" },
-			9: { cellWidth: 40, halign: "center" },
-			10: { cellWidth: 30, halign: "center", fontStyle: "bold" },
-			11: { cellWidth: 104 },
-			12: { cellWidth: 34, halign: "center" },
-			13: { cellWidth: 84, halign: "center" },
+			2: { cellWidth: 16, halign: "center" },
+			3: { cellWidth: 20, halign: "center" },
+			4: { cellWidth: 34, halign: "center" },
+			5: { cellWidth: 62 },
+			6: { cellWidth: 28, halign: "center" },
+			7: { cellWidth: 21, halign: "center" },
+			8: { cellWidth: 21, halign: "center" },
+			9: { cellWidth: 27, halign: "center" },
+			10: { cellWidth: 23, halign: "center", fontStyle: "bold" },
+			11: { cellWidth: 66 },
+			12: { cellWidth: 22, halign: "center" },
+			13: { cellWidth: 50, halign: "center" },
 		},
-		margin: { left: margin, right: margin, top: 46 },
+		margin: { left: margin, right: margin, top: 40 },
 	});
 	return nextY(doc, yIn) + 14;
 }
 
-// ─────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────
 // HALAMAN 3 — ANALISIS KELOMPOK
-// ─────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────
 
 /** Tabel distribusi + bilah proporsi visual pada kolom terakhir. */
 function drawDistributionTable(
@@ -614,13 +653,17 @@ function drawDistributionTable(
 		return [
 			{
 				content: b.range,
-				styles: { fillColor: hexToRGB(b.color), fontStyle: "bold" as const },
+				styles: {
+					fillColor: hexToRGB(b.color),
+					textColor: hexToRGB(b.onDark ? WHITE : INK),
+					fontStyle: "bold" as const,
+				},
 			},
 			cellText(b.label),
 			String(c),
 			pctText(c, iqs.length),
 			// Bilah proporsi memakai karakter ASCII agar pasti punya glyph.
-			"|".repeat(Math.round((c / Math.max(1, iqs.length)) * 40)),
+			"|".repeat(Math.round((c / Math.max(1, iqs.length)) * 30)),
 		];
 	});
 
@@ -631,24 +674,25 @@ function drawDistributionTable(
 		theme: "grid",
 		styles: {
 			font: "helvetica",
-			fontSize: 8.4,
+			fontSize: 7.8,
 			lineWidth: 0.5,
 			lineColor: hexToRGB(HAIRLINE),
 			textColor: hexToRGB(INK),
-			cellPadding: 3.4,
+			cellPadding: 3,
+			overflow: "linebreak",
 		},
 		headStyles: {
 			fillColor: hexToRGB(INK),
 			textColor: hexToRGB(WHITE),
 			fontStyle: "bold",
-			fontSize: 8,
+			fontSize: 7.6,
 		},
 		columnStyles: {
-			0: { cellWidth: 78, halign: "center" },
-			1: { cellWidth: 190, fontStyle: "bold" },
-			2: { cellWidth: 54, halign: "center" },
-			3: { cellWidth: 54, halign: "center" },
-			4: { textColor: hexToRGB(CYAN_DEEP), fontStyle: "bold" },
+			0: { cellWidth: 64, halign: "center" },
+			1: { cellWidth: 168, fontStyle: "bold" },
+			2: { cellWidth: 44, halign: "center" },
+			3: { cellWidth: 38, halign: "center" },
+			4: { textColor: hexToRGB(GREEN_DEEP), fontStyle: "bold" },
 		},
 		margin: { left: margin, right: margin },
 	});
@@ -683,26 +727,28 @@ function drawGroupTable(
 
 	autoTable(doc, {
 		startY: yIn,
-		head: [[labelHead, "n", "Rata-rata IQ", "Tertinggi", "Terendah", "IQ 110+", "IQ < 90"]],
+		head: [[labelHead, "n", "Rata-rata\nIQ", "Terting-\ngi", "Teren-\ndah", "IQ 110+", "IQ < 90"]],
 		body,
 		theme: "grid",
 		styles: {
 			font: "helvetica",
-			fontSize: 8.2,
+			fontSize: 7.6,
 			lineWidth: 0.5,
 			lineColor: hexToRGB(HAIRLINE),
 			textColor: hexToRGB(INK),
-			cellPadding: 3.2,
+			cellPadding: 2.8,
 			halign: "center",
+			overflow: "linebreak",
 		},
 		headStyles: {
-			fillColor: hexToRGB(CYAN_DEEP),
+			fillColor: hexToRGB(GREEN_DEEP),
 			textColor: hexToRGB(WHITE),
 			fontStyle: "bold",
-			fontSize: 8,
+			fontSize: 7.4,
+			valign: "middle",
 		},
 		alternateRowStyles: { fillColor: hexToRGB(STRIPE) },
-		columnStyles: { 0: { halign: "left", fontStyle: "bold", cellWidth: 200 } },
+		columnStyles: { 0: { halign: "left", fontStyle: "bold", cellWidth: 150 } },
 		margin: { left: margin, right: margin },
 	});
 	return nextY(doc, yIn) + 14;
@@ -732,9 +778,9 @@ function ageGroupOf(age: number | null): string {
 	return "17 tahun ke atas";
 }
 
-// ─────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────
 // HALAMAN 4 — SOROTAN, METODOLOGI, TANDA TANGAN
-// ─────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────
 
 function drawSpotlightTable(
 	doc: jsPDF,
@@ -748,16 +794,16 @@ function drawSpotlightTable(
 ): number {
 	if (subjects.length === 0) {
 		doc.setFont("helvetica", "normal");
-		doc.setFontSize(8);
+		doc.setFontSize(7.6);
 		const lines = wrapText(doc, emptyText, width - 20);
-		const h = Math.max(30, 14 + lines.length * 11);
+		const h = Math.max(30, 14 + lines.length * 10.4);
 		fillHex(doc, PANEL);
 		drawHex(doc, HAIRLINE);
 		doc.setLineWidth(0.6);
 		doc.rect(margin, yIn, width, h, "FD");
 		textHex(doc, SOFT_INK);
 		lines.forEach((line, i) => {
-			txt(doc, line, margin + 10, yIn + 18 + i * 11);
+			txt(doc, line, margin + 10, yIn + 17 + i * 10.4);
 		});
 		textHex(doc, INK);
 		return yIn + h + 12;
@@ -775,24 +821,25 @@ function drawSpotlightTable(
 		theme: "grid",
 		styles: {
 			font: "helvetica",
-			fontSize: 8,
+			fontSize: 7,
 			lineWidth: 0.5,
 			lineColor: hexToRGB(HAIRLINE),
 			textColor: hexToRGB(INK),
-			cellPadding: 3,
+			cellPadding: 2.6,
+			overflow: "linebreak",
 		},
 		headStyles: {
 			fillColor: hexToRGB(headColor),
 			textColor: hexToRGB(INK),
 			fontStyle: "bold",
-			fontSize: 8,
+			fontSize: 7,
 		},
 		alternateRowStyles: { fillColor: hexToRGB(STRIPE) },
 		columnStyles: {
 			0: { fontStyle: "bold" },
-			1: { cellWidth: 56, halign: "center" },
-			2: { cellWidth: 36, halign: "center", fontStyle: "bold" },
-			3: { cellWidth: 130 },
+			1: { cellWidth: 34, halign: "center" },
+			2: { cellWidth: 22, halign: "center", fontStyle: "bold" },
+			3: { cellWidth: 78 },
 		},
 		tableWidth: width,
 		margin: { left: margin, right: 0 },
@@ -817,12 +864,12 @@ function drawMethodology(
 	];
 
 	doc.setFont("helvetica", "normal");
-	doc.setFontSize(7.8);
+	doc.setFontSize(7.4);
 	const wrapped: string[] = [];
 	for (const n of notes) {
 		wrapped.push(...wrapText(doc, `-  ${n}`, innerW - 26));
 	}
-	const boxH = 18 + wrapped.length * 9.8;
+	const boxH = 18 + wrapped.length * 9.4;
 
 	fillHex(doc, PANEL);
 	drawHex(doc, INK);
@@ -830,9 +877,9 @@ function drawMethodology(
 	doc.rect(margin, yIn, innerW, boxH, "FD");
 	textHex(doc, INK);
 	doc.setFont("helvetica", "normal");
-	doc.setFontSize(7.8);
+	doc.setFontSize(7.4);
 	wrapped.forEach((line, i) => {
-		txt(doc, line, margin + 12, yIn + 16 + i * 9.8);
+		txt(doc, line, margin + 12, yIn + 16 + i * 9.4);
 	});
 	return yIn + boxH + 14;
 }
@@ -845,7 +892,7 @@ function drawSignatures(
 	tanggal: string,
 ): number {
 	const innerW = pageW - margin * 2;
-	const gap = 40;
+	const gap = 32;
 	const colW = (innerW - gap) / 2;
 	const cols = [
 		{
@@ -870,24 +917,22 @@ function drawSignatures(
 	for (const c of cols) {
 		textHex(doc, INK);
 		doc.setFont("helvetica", "normal");
-		doc.setFontSize(8.4);
 		c.jabatan.forEach((line, i) => {
-			txt(doc, line, c.cx, jabatanY + i * 11, { align: "center" });
+			fittedCenterText(doc, line, c.cx, jabatanY + i * 11, colW - 8, 8.2, 6.4);
 		});
 
 		const nama = c.nama || "...................................................";
 		doc.setFont("helvetica", "bold");
-		doc.setFontSize(9);
-		txt(doc, nama, c.cx, nameY, { align: "center" });
+		fittedCenterText(doc, nama, c.cx, nameY, colW - 8, 8.8, 6.6);
 
-		const lineW = Math.min(colW - 10, Math.max(170, doc.getTextWidth(safeText(nama)) + 26));
+		const lineW = Math.min(colW - 8, Math.max(150, doc.getTextWidth(safeText(nama)) + 26));
 		drawHex(doc, INK);
 		doc.setLineWidth(0.6);
 		doc.line(c.cx - lineW / 2, nameY + 3.5, c.cx + lineW / 2, nameY + 3.5);
 
 		textHex(doc, SOFT_INK);
 		doc.setFont("helvetica", "normal");
-		doc.setFontSize(7.8);
+		doc.setFontSize(7.6);
 		txt(
 			doc,
 			c.idValue ? `${c.idLabel}. ${c.idValue}` : `${c.idLabel}.`,
@@ -901,9 +946,9 @@ function drawSignatures(
 	return nameY + 24;
 }
 
-// ─────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────
 // DOKUMEN
-// ─────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────
 
 export function buildCfitRekapPDF(
 	meta: { school: string; grade: string; generatedAt: Date },
@@ -911,7 +956,7 @@ export function buildCfitRekapPDF(
 	opts?: { showPageNumber?: boolean },
 ): Buffer {
 	const showPageNumber = opts?.showPageNumber !== false;
-	const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "landscape" });
+	const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "portrait" });
 	const pageW = doc.internal.pageSize.getWidth();
 	const pageH = doc.internal.pageSize.getHeight();
 	const margin = 36;
@@ -933,53 +978,49 @@ export function buildCfitRekapPDF(
 	drawRahasiaBadge(doc, pageW, margin);
 
 	// Judul dokumen
-	brutBox(doc, margin, 76, innerW, 52, CYAN, 4);
+	brutBox(doc, margin, 76, innerW, 46, GREEN, 4);
 	textHex(doc, INK);
 	doc.setFont("helvetica", "bold");
-	doc.setFontSize(17);
-	txt(doc, "REKAP HASIL TES INTELEGENSI KELOMPOK", margin + 14, 100);
+	fittedLeftText(doc, "REKAP HASIL TES INTELEGENSI KELOMPOK", margin + 14, 102, innerW - 28, 15.5, 10);
 	doc.setFont("helvetica", "normal");
-	doc.setFontSize(9);
-	txt(
+	fittedLeftText(
 		doc,
 		"Culture Fair Intelligence Test (CFIT) Skala 3 - Bentuk A + B",
 		margin + 14,
-		117,
-	);
-	doc.setFont("helvetica", "bold");
-	doc.setFontSize(12);
-	txt(
-		doc,
-		(meta.school || "SEMUA SEKOLAH").toUpperCase(),
-		pageW - margin - 14,
-		100,
-		{ align: "right" },
-	);
-	doc.setFont("helvetica", "normal");
-	doc.setFontSize(9);
-	txt(
-		doc,
-		`Kelas: ${meta.grade || "Semua Kelas"}`,
-		pageW - margin - 14,
-		117,
-		{ align: "right" },
+		115,
+		innerW - 28,
+		8.6,
+		6.4,
 	);
 
-	// Strip meta
+	// Strip identitas & meta cetak
 	fillHex(doc, INK);
-	doc.rect(margin, 136, innerW, 20, "F");
+	doc.rect(margin, 130, innerW, 32, "F");
 	textHex(doc, WHITE);
 	doc.setFont("helvetica", "bold");
-	doc.setFontSize(8.4);
-	txt(
+	fittedLeftText(
+		doc,
+		`${(meta.school || "SEMUA SEKOLAH").toUpperCase()}   \u2022   KELAS: ${(meta.grade || "SEMUA KELAS").toUpperCase()}`,
+		margin + 10,
+		144,
+		innerW - 20,
+		9,
+		6.4,
+	);
+	textHex(doc, MINT);
+	doc.setFont("helvetica", "bold");
+	fittedLeftText(
 		doc,
 		`TOTAL PESERTA SELESAI: ${rows.length}   \u2022   SKOR TEROLAH: ${iqs.length}   \u2022   DICETAK: ${printedAt} WIB`,
 		margin + 10,
-		149,
+		156,
+		innerW - 20,
+		7.4,
+		5.4,
 	);
 	textHex(doc, INK);
 
-	let y = 170;
+	let y = 176;
 
 	if (hasScores) {
 		const s = computeStats(iqs);
@@ -988,23 +1029,25 @@ export function buildCfitRekapPDF(
 			.sort((a, b) => b.c - a.c)[0];
 		const above = iqs.filter((v) => v >= 110).length;
 
-		// KPI cards
-		const cardGap = 10;
-		const cardW = (innerW - cardGap * 5) / 6;
-		const cardH = 64;
+		// Kartu KPI — potret: 3 kolom x 2 baris
+		const cardGap = 12;
+		const cardW = (innerW - cardGap * 2) / 3;
+		const cardH = 60;
 		const kpis: Array<{ label: string; value: string; sub: string; fill: string }> = [
 			{ label: "Peserta", value: String(s.n), sub: "skor terolah", fill: WHITE },
-			{ label: "Rata-rata IQ", value: String(s.avg), sub: bandFor(s.avg).label.split(" (")[0], fill: CYAN_SOFT },
+			{ label: "Rata-rata IQ", value: String(s.avg), sub: bandFor(s.avg).label.split(" (")[0], fill: GREEN_SOFT },
 			{ label: "Median IQ", value: String(s.median), sub: "nilai tengah", fill: WHITE },
 			{ label: "IQ Tertinggi", value: String(s.max), sub: bandFor(s.max).label.split(" (")[0], fill: WHITE },
 			{ label: "IQ Terendah", value: String(s.min), sub: bandFor(s.min).label.split(" (")[0], fill: WHITE },
-			{ label: "Proporsi IQ 110+", value: pctText(above, s.n), sub: `${above} peserta`, fill: CYAN_SOFT },
+			{ label: "Proporsi IQ 110+", value: pctText(above, s.n), sub: `${above} peserta`, fill: GREEN_SOFT },
 		];
 		kpis.forEach((k, i) => {
+			const col = i % 3;
+			const row = Math.floor(i / 3);
 			drawKpiCard(
 				doc,
-				margin + i * (cardW + cardGap),
-				y,
+				margin + col * (cardW + cardGap),
+				y + row * (cardH + 12),
 				cardW,
 				cardH,
 				k.label,
@@ -1013,17 +1056,19 @@ export function buildCfitRekapPDF(
 				k.fill,
 			);
 		});
-		y += cardH + 16;
+		y += cardH * 2 + 12 + 18;
 
 		// Keterangan simpangan baku & kategori terbanyak
 		textHex(doc, SOFT_INK);
 		doc.setFont("helvetica", "bold");
-		doc.setFontSize(8);
-		txt(
+		fittedLeftText(
 			doc,
 			`Simpangan baku: ${s.sd}   \u2022   Rentang skor: ${s.min}-${s.max}   \u2022   Kategori terbanyak: ${topBand.b.label} (${topBand.c} peserta, ${pctText(topBand.c, s.n)})`,
 			margin,
 			y,
+			innerW,
+			7.6,
+			5.6,
 		);
 		textHex(doc, INK);
 		y += 12;
@@ -1037,16 +1082,16 @@ export function buildCfitRekapPDF(
 		doc.rect(margin, y, innerW, 60, "FD");
 		textHex(doc, INK);
 		doc.setFont("helvetica", "bold");
-		doc.setFontSize(11);
-		txt(doc, "Belum ada skor IQ yang dapat diolah pada filter ini.", margin + 14, y + 26);
+		fittedLeftText(doc, "Belum ada skor IQ yang dapat diolah pada filter ini.", margin + 14, y + 26, innerW - 28, 11, 8);
 		doc.setFont("helvetica", "normal");
-		doc.setFontSize(8.6);
-		txt(
+		doc.setFontSize(8);
+		wrapText(
 			doc,
 			"Peserta terdata sudah menyelesaikan tes, namun hasil penskoran belum tersedia. Periksa kembali data hasil pada panel admin.",
-			margin + 14,
-			y + 44,
-		);
+			innerW - 28,
+		).forEach((line, i) => {
+			txt(doc, line, margin + 14, y + 42 + i * 10);
+		});
 	}
 
 	// ═══ HALAMAN 2 — DAFTAR PESERTA ═══
@@ -1054,31 +1099,33 @@ export function buildCfitRekapPDF(
 	y = sectionTitle(
 		doc,
 		"DAFTAR PESERTA & HASIL INDIVIDUAL",
-		`${rows.length} peserta \u2022 diurutkan menurut nama`,
+		`${rows.length} peserta \u2022 urut nama`,
 		margin,
 		36,
 		pageW,
 	);
 	y = drawParticipantTable(doc, rows, margin, y);
 
-	// Legenda warna klasifikasi
-	y = ensureSpace(doc, y, 46, 46);
+	// Legenda warna klasifikasi (dua baris agar muat pada halaman potret)
+	y = ensureSpace(doc, y, 44, 40);
 	textHex(doc, SOFT_INK);
 	doc.setFont("helvetica", "bold");
-	doc.setFontSize(7.4);
+	doc.setFontSize(7);
 	txt(doc, "KETERANGAN WARNA KOLOM IQ:", margin, y + 8);
-	let lx = margin + 128;
-	CFIT_BANDS.forEach((b) => {
+	const legendPerRow = 4;
+	const legendColW = innerW / legendPerRow;
+	CFIT_BANDS.forEach((b, i) => {
+		const col = i % legendPerRow;
+		const row = Math.floor(i / legendPerRow);
+		const lx = margin + col * legendColW;
+		const ly = y + 14 + row * 13;
 		fillHex(doc, b.color);
 		drawHex(doc, INK);
 		doc.setLineWidth(0.6);
-		doc.rect(lx, y, 10, 10, "FD");
+		doc.rect(lx, ly, 10, 10, "FD");
 		textHex(doc, INK);
 		doc.setFont("helvetica", "bold");
-		doc.setFontSize(6.6);
-		const legend = `${b.short} (${b.range})`;
-		txt(doc, legend, lx + 13, y + 8);
-		lx += 13 + doc.getTextWidth(safeText(legend)) + 14;
+		fittedLeftText(doc, `${b.short} (${b.range})`, lx + 13, ly + 8, legendColW - 18, 6.4, 4.8);
 	});
 	textHex(doc, INK);
 
@@ -1097,14 +1144,14 @@ export function buildCfitRekapPDF(
 
 		const grades = groupBy(rows, (r) => r.grade || "Tanpa Kelas");
 		if (grades.length > 1) {
-			y = ensureSpace(doc, y, 120, 36);
+			y = ensureSpace(doc, y, 120, 40);
 			y = sectionTitle(doc, "REKAP PER KELAS", "perbandingan antar rombongan belajar", margin, y, pageW);
 			y = drawGroupTable(doc, "Kelas", grades, margin, y);
 		}
 
 		const schools = groupBy(rows, (r) => r.school || "Tanpa Sekolah");
 		if (schools.length > 1) {
-			y = ensureSpace(doc, y, 120, 36);
+			y = ensureSpace(doc, y, 120, 40);
 			y = sectionTitle(doc, "REKAP PER SEKOLAH", "perbandingan antar satuan pendidikan", margin, y, pageW);
 			y = drawGroupTable(doc, "Sekolah", schools, margin, y);
 		}
@@ -1112,12 +1159,12 @@ export function buildCfitRekapPDF(
 		const genders = groupBy(rows, (r) =>
 			r.gender === "L" ? "Laki-laki" : r.gender === "P" ? "Perempuan" : "Tidak diisi",
 		);
-		y = ensureSpace(doc, y, 120, 36);
-		y = sectionTitle(doc, "REKAP PER JENIS KELAMIN", "sebagai data pendukung, bukan pembanding kemampuan", margin, y, pageW);
+		y = ensureSpace(doc, y, 120, 40);
+		y = sectionTitle(doc, "REKAP PER JENIS KELAMIN", "data pendukung, bukan pembanding kemampuan", margin, y, pageW);
 		y = drawGroupTable(doc, "Jenis Kelamin", genders, margin, y);
 
 		const ages = groupBy(rows, (r) => ageGroupOf(r.age));
-		y = ensureSpace(doc, y, 120, 36);
+		y = ensureSpace(doc, y, 120, 40);
 		y = sectionTitle(doc, "REKAP PER KELOMPOK USIA", "mengikuti kolom norma CFIT yang dipakai", margin, y, pageW);
 		y = drawGroupTable(doc, "Kelompok Usia", ages, margin, y);
 	}
@@ -1130,7 +1177,7 @@ export function buildCfitRekapPDF(
 		y = sectionTitle(
 			doc,
 			"SOROTAN PESERTA",
-			"capaian tertinggi & peserta yang perlu perhatian layanan",
+			"capaian tertinggi & perlu perhatian layanan",
 			margin,
 			y,
 			pageW,
@@ -1143,13 +1190,13 @@ export function buildCfitRekapPDF(
 			.sort((a, b) => (a.iq as number) - (b.iq as number))
 			.slice(0, 8);
 
-		const colGap = 24;
+		const colGap = 18;
 		const colW = (innerW - colGap) / 2;
 		const leftEnd = drawSpotlightTable(
 			doc,
 			"Capaian Tertinggi",
 			top,
-			LIME,
+			MINT,
 			margin,
 			y,
 			colW,
@@ -1169,22 +1216,23 @@ export function buildCfitRekapPDF(
 
 		textHex(doc, SOFT_INK);
 		doc.setFont("helvetica", "normal");
-		doc.setFontSize(7.4);
-		txt(
+		doc.setFontSize(7.2);
+		wrapText(
 			doc,
 			"Daftar sorotan ini hanya alat bantu prioritas layanan. Setiap peserta tetap berhak atas pendampingan yang sama tanpa pelabelan.",
-			margin,
-			y + 8,
-		);
+			innerW,
+		).forEach((line, i) => {
+			txt(doc, line, margin, y + 8 + i * 9.4);
+		});
 		textHex(doc, INK);
-		y += 22;
+		y += 26;
 	}
 
-	y = ensureSpace(doc, y, 150, 36);
+	y = ensureSpace(doc, y, 150, 40);
 	y = sectionTitle(doc, "CATATAN METODOLOGI & PENAFSIRAN", "wajib dibaca sebelum menggunakan hasil", margin, y, pageW);
 	y = drawMethodology(doc, margin, y, pageW);
 
-	y = ensureSpace(doc, y, 120, 36);
+	y = ensureSpace(doc, y, 120, 40);
 	drawSignatures(doc, margin, y + 6, pageW, fmtDateLong(meta.generatedAt));
 
 	// ═══ FOOTER SEMUA HALAMAN ═══
@@ -1192,18 +1240,21 @@ export function buildCfitRekapPDF(
 	for (let i = 1; i <= totalPages; i++) {
 		doc.setPage(i);
 		fillHex(doc, INK);
-		doc.rect(0, pageH - 22, pageW, 22, "F");
+		doc.rect(0, pageH - 20, pageW, 20, "F");
 		textHex(doc, WHITE);
 		doc.setFont("helvetica", "bold");
-		doc.setFontSize(7.6);
-		txt(
+		fittedLeftText(
 			doc,
-			"REKAP HASIL TES IQ - CFIT SKALA 3  \u2022  PROGRAM STUDI MAGISTER BIMBINGAN DAN KONSELING, PASCASARJANA UM METRO  \u2022  DOKUMEN RAHASIA",
+			"REKAP HASIL TES IQ - CFIT SKALA 3  \u2022  PASCASARJANA UM METRO  \u2022  DOKUMEN RAHASIA",
 			margin,
-			pageH - 8,
+			pageH - 7,
+			innerW - 110,
+			7,
+			5,
 		);
 		if (showPageNumber) {
-			txt(doc, `Halaman ${i} dari ${totalPages}`, pageW - margin, pageH - 8, { align: "right" });
+			doc.setFontSize(7);
+			txt(doc, `Halaman ${i} dari ${totalPages}`, pageW - margin, pageH - 7, { align: "right" });
 		}
 	}
 	textHex(doc, INK);
