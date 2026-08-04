@@ -1,8 +1,8 @@
-// ───────────────────────────────
+// ──────────────────────────────
 // Laporan individual Tes IQ — CFIT Skala 3 (Bentuk A + B), satu halaman A4.
 // TERPISAH dari laporan minat-bakat (src/lib/pdf.ts).
-// Palet dokumen: DOMINAN HIJAU (permintaan pembimbing).
-// ───────────────────────────────
+// Palet dokumen: SIAN + SLATE (mengikuti versi tampilan sebelumnya).
+// ──────────────────────────────
 
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
@@ -41,16 +41,16 @@ export type CfitPdfResult = {
   generatedAt?: Date | null
 }
 
-// ─── Palet (dominan hijau) ───
-const INK = "#14532D"
-const SOFT_INK = "#4B6E5A"
-const HAIRLINE = "#BBDFC8"
-const STRIPE = "#F4FBF6"
-const PANEL = "#E8F6ED"
+// ─── Palet (versi lama: sian + slate) ───
+const INK = "#0F172A"
+const SOFT_INK = "#475569"
+const HAIRLINE = "#CBD5E1"
+const STRIPE = "#F8FAFC"
+const PANEL = "#F1F5F9"
 const WHITE = "#FFFFFF"
-const ACCENT = "#22C55E"
-const ACCENT_DEEP = "#15803D"
-const HIGHLIGHT = "#DCFCE7"
+const ACCENT = "#22D3EE"
+const ACCENT_DEEP = "#0E7490"
+const HIGHLIGHT = "#CFFAFE"
 
 // ─── Identitas penanda tangan ───
 // Default sesuai penanda tangan resmi; masih bisa ditimpa lewat environment
@@ -162,35 +162,37 @@ function drawBrutBox(
 }
 
 // ─── Kop resmi (dengan logo Pascasarjana UM Metro) ───
+// Catatan tata letak: seluruh isi kop DITURUNKAN dari tepi atas kertas supaya
+// tidak terlihat mepet, dan ukuran logo diperbesar.
 function drawKop(doc: jsPDF, margin: number, pageW: number): number {
   setFillHex(doc, INK)
   doc.rect(0, 0, pageW, 5, "F")
 
   // Logo diletakkan agak ke kanan supaya berdekatan dengan teks kop, dengan
-  // latar putih agar tidak terlihat berlatar gelap. Bila berkas logo belum
-  // dipasang, kop tetap tercetak normal tanpa logo.
-  drawReportLogo(doc, margin + 76, 13, 48)
+  // latar putih. Bila berkas logo belum dipasang, kop tetap tercetak normal
+  // tanpa logo.
+  drawReportLogo(doc, margin + 68, 16, 60)
 
   setTextHex(doc, INK)
   doc.setFont("helvetica", "bold")
   doc.setFontSize(12.5)
-  doc.text("UNIVERSITAS MUHAMMADIYAH METRO", pageW / 2, 30, { align: "center" })
+  doc.text("UNIVERSITAS MUHAMMADIYAH METRO", pageW / 2, 36, { align: "center" })
   doc.setFontSize(10.5)
-  doc.text("PROGRAM PASCASARJANA", pageW / 2, 43, { align: "center" })
+  doc.text("PROGRAM PASCASARJANA", pageW / 2, 50, { align: "center" })
   doc.setFontSize(9.2)
   doc.text(
     "PROGRAM STUDI MAGISTER BIMBINGAN DAN KONSELING",
     pageW / 2,
-    55,
+    62,
     { align: "center" },
   )
 
   setDrawHex(doc, INK)
   doc.setLineWidth(1.6)
-  doc.line(margin, 63, pageW - margin, 63)
+  doc.line(margin, 80, pageW - margin, 80)
   doc.setLineWidth(0.5)
-  doc.line(margin, 66, pageW - margin, 66)
-  return 66
+  doc.line(margin, 83, pageW - margin, 83)
+  return 83
 }
 
 /** Penanda kerahasiaan di kanan atas (menggantikan blok kode laporan). */
@@ -198,7 +200,7 @@ function drawRahasiaBadge(doc: jsPDF, pageW: number, margin: number) {
   const w = 92
   const h = 22
   const x = pageW - margin - w
-  const y = 14
+  const y = 18
   setFillHex(doc, INK)
   doc.rect(x, y, w, h, "F")
   setTextHex(doc, WHITE)
@@ -271,7 +273,7 @@ function drawScoreCard(
   doc.setFont("helvetica", "normal")
   doc.setFontSize(8.4)
   doc.text(
-    `Bentuk A: ${result.rawScoreA ?? "-"}   •   Bentuk B: ${result.rawScoreB ?? "-"}   •   Total: ${result.rawScoreTotal}`,
+    `Bentuk A: ${result.rawScoreA ?? "-"}   \u2022   Bentuk B: ${result.rawScoreB ?? "-"}   \u2022   Total: ${result.rawScoreTotal}`,
     infoX,
     yIn + 64,
   )
@@ -308,7 +310,7 @@ function drawSubtestChart(
   setTextHex(doc, ACCENT)
   doc.setFontSize(6.8)
   doc.text(
-    "% JAWABAN BENAR • BENTUK A + B DIGABUNG",
+    "% JAWABAN BENAR \u2022 BENTUK A + B DIGABUNG",
     pageW - margin - 8,
     yIn + 12,
     { align: "right" },
@@ -508,14 +510,14 @@ export function buildCfitReportPDF(
   setTextHex(doc, INK)
   doc.setFont("helvetica", "bold")
   doc.setFontSize(14)
-  doc.text("LAPORAN HASIL TES INTELEGENSI", pageW / 2, 86, { align: "center" })
+  doc.text("LAPORAN HASIL TES INTELEGENSI", pageW / 2, 103, { align: "center" })
   setTextHex(doc, SOFT_INK)
   doc.setFont("helvetica", "normal")
   doc.setFontSize(8.4)
   doc.text(
-    `Culture Fair Intelligence Test (CFIT) Skala 3 — ${FORM_LABEL[sub.form] ?? "Bentuk A + B"}`,
+    `Culture Fair Intelligence Test (CFIT) Skala 3 \u2014 ${FORM_LABEL[sub.form] ?? "Bentuk A + B"}`,
     pageW / 2,
-    98,
+    115,
     { align: "center" },
   )
 
@@ -523,7 +525,7 @@ export function buildCfitReportPDF(
   setTextHex(doc, INK)
   doc.setFont("helvetica", "bold")
   doc.setFontSize(9)
-  doc.text("IDENTITAS PESERTA", margin, 116)
+  doc.text("IDENTITAS PESERTA", margin, 133)
 
   const identityBody: Array<
     Array<string | { content: string; colSpan: number }>
@@ -541,7 +543,7 @@ export function buildCfitReportPDF(
   ]
 
   autoTable(doc, {
-    startY: 121,
+    startY: 138,
     margin: { left: margin, right: margin },
     theme: "grid",
     styles: {
@@ -562,7 +564,7 @@ export function buildCfitReportPDF(
   })
 
   // Kartu hasil IQ
-  let y = nextY(doc, 190) + 14
+  let y = nextY(doc, 207) + 14
   doc.setFont("helvetica", "bold")
   doc.setFontSize(9)
   setTextHex(doc, INK)
@@ -670,14 +672,14 @@ export function buildCfitReportPDF(
   setTextHex(doc, INK)
   doc.setFont("helvetica", "bold")
   doc.setFontSize(7)
-  doc.text(`${LEMBAGA_PRODI} — ${LEMBAGA_UNIT}`, margin, pageH - 21)
+  doc.text(`${LEMBAGA_PRODI} \u2014 ${LEMBAGA_UNIT}`, margin, pageH - 21)
   setTextHex(doc, SOFT_INK)
   doc.setFont("helvetica", "normal")
   doc.setFontSize(6.6)
   doc.text(verificationFooterText(reportCode), margin, pageH - 13)
   doc.setFontSize(6.4)
   doc.text(
-    "Laporan Tes IQ (CFIT Skala 3) • Rahasia & hanya untuk keperluan layanan bimbingan dan konseling.",
+    "Laporan Tes IQ (CFIT Skala 3) \u2022 Rahasia & hanya untuk keperluan layanan bimbingan dan konseling.",
     margin,
     pageH - 6,
   )
