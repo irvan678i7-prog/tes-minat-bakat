@@ -40,6 +40,15 @@ function fmt(sec: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+// Keterangan durasi jeda dibaca dari nilai milik SERVER (bukan ditulis manual),
+// supaya tulisan di layar tidak pernah berbeda dengan hitungan sebenarnya.
+// 60 → "1 menit", 90 → "1,5 menit".
+function durasiLabel(sec: number): string {
+  const menit = sec / 60;
+  const teks = Number.isInteger(menit) ? String(menit) : menit.toFixed(1).replace(".", ",");
+  return `${teks} menit`;
+}
+
 export default function CfitDashboardPage() {
   const router = useRouter();
   const [form, setForm] = useState("");
@@ -139,8 +148,8 @@ export default function CfitDashboardPage() {
     router.replace("/cfit/done");
   }, [router]);
 
-  // TIDAK ADA penyelesaian manual. Tes diselesaikan OTOMATIS begitu semua
-  // subtes terkunci (habis waktunya), sehingga satu kelas selesai bersamaan.
+  // Tes diselesaikan OTOMATIS begitu semua subtes terkunci (habis waktunya atau
+  // ditutup lewat tombol SELESAI pada tes terakhir).
   useEffect(() => {
     if (loading || !allLocked || finishedRef.current) return;
     finishedRef.current = true;
@@ -163,8 +172,8 @@ export default function CfitDashboardPage() {
           <div className="brut-card space-y-4 text-center" style={{ background: "#a3e635" }}>
             <p className="text-xs font-black uppercase tracking-widest">
               {breakInfo.formChanged
-                ? "Jeda pergantian bentuk tes — 3 menit"
-                : "Jeda antar tes — 2 menit"}
+                ? `Jeda pergantian bentuk tes — ${durasiLabel(breakInfo.breakSec)}`
+                : `Jeda antar tes — ${durasiLabel(breakInfo.breakSec)}`}
             </p>
             <h1 className="text-3xl font-black uppercase leading-none">Istirahat Sebentar</h1>
             <div className="brut-sm mx-auto inline-block px-6 py-3 font-mono text-5xl font-black" style={{ background: "#fff" }}>
@@ -206,10 +215,10 @@ export default function CfitDashboardPage() {
           <p className="font-black uppercase mb-1">Jangan mulai sebelum ada pengarahan dari tester.</p>
           <p className="font-bold">
             Kerjakan setiap tes secara BERURUTAN. Setiap tes dimulai dari CONTOH SOAL yang tidak ada batas
-            waktunya, lalu soal asli dikerjakan dengan waktu berjalan. TIDAK ADA tombol selesai — tes
-            berakhir otomatis saat waktu habis, lalu ada JEDA 2 MENIT dan tes berikutnya terbuka sendiri.
-            Saat Bentuk A selesai, jedanya 3 MENIT sebelum lanjut ke Bentuk B. Seluruh tes juga ditutup
-            otomatis setelah tes terakhir habis waktunya.
+            waktunya, lalu soal asli dikerjakan dengan waktu berjalan. Tes berakhir otomatis saat waktu
+            habis, lalu ada JEDA 1 MENIT dan tes berikutnya terbuka sendiri. Saat Bentuk A selesai, jedanya
+            1,5 MENIT sebelum lanjut ke Bentuk B. Khusus TES TERAKHIR (Tes 4 Bentuk B) tersedia tombol
+            SELESAI untuk menutup seluruh rangkaian tes.
           </p>
         </div>
 
