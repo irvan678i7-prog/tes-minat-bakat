@@ -34,14 +34,17 @@ type Hasil = {
 	nama?: string;
 };
 
-// Nama disamarkan sebagian demi privasi peserta: "Ahmad Fauzi" -> "Ahmad F****".
+// Nama disamarkan demi privasi peserta: SEMUA kata hanya ditampilkan huruf
+// pertamanya, sisanya diganti tanda bintang sebanyak jumlah huruf yang ditutup.
+// Contoh: "Muhammad irvan" -> "M******* I****".
 function samarkanNama(nama: string | null | undefined): string {
 	const v = String(nama ?? "").trim();
 	if (!v) return "\u2014";
-	const kata = v.split(/\s+/);
-	return kata
-		.map((w, i) =>
-			i === 0 ? w : `${w.slice(0, 1)}${"*".repeat(Math.max(1, w.length - 1))}`,
+	return v
+		.split(/\s+/)
+		.map(
+			(w) =>
+				`${w.slice(0, 1).toUpperCase()}${"*".repeat(Math.max(1, w.length - 1))}`,
 		)
 		.join(" ");
 }
@@ -225,14 +228,17 @@ export default async function VerifikasiPage({
 										<dt className="sm:w-40 shrink-0 text-[11px] font-black uppercase tracking-[0.14em] opacity-50">
 											Nama Peserta
 										</dt>
-										<dd className="font-bold">{hasil.nama}</dd>
+										<dd className="font-bold font-mono tracking-[0.06em]">
+											{hasil.nama}
+										</dd>
 									</div>
 								</dl>
 							) : null}
 
 							<p className="text-xs font-medium leading-relaxed opacity-55">
-								Nama peserta sengaja disamarkan sebagian demi menjaga kerahasiaan
-								data. Halaman ini tidak menampilkan skor hasil tes.
+								Demi menjaga kerahasiaan data peserta, nama hanya ditampilkan
+								huruf pertama tiap katanya. Halaman ini tidak menampilkan skor
+								hasil tes.
 							</p>
 						</div>
 					</section>
