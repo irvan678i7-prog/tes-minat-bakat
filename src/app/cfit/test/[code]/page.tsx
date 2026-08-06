@@ -29,12 +29,17 @@ type SubtestMeta = {
 // "example" = tahap contoh soal (TANPA TIMER), "test" = soal asli (timer jalan).
 type Phase = "example" | "test";
 
-// Alasan subtes ditutup otomatis.
-type FinishReason = "time" | "cheat";
+// Alasan subtes ditutup: waktu habis, pelanggaran anti-curang, atau peserta
+// menekan tombol SELESAI pada tes terakhir.
+type FinishReason = "time" | "cheat" | "manual";
 
 // Jumlah soal yang ditampilkan dalam SATU halaman — supaya peserta tidak
 // bolak-balik terlalu banyak halaman.
 const PER_PAGE = 3;
+
+// Tes paling akhir dari seluruh rangkaian: Tes 4 (Conditions) Bentuk B. Hanya
+// di tes ini peserta diberi tombol SELESAI untuk menutup keseluruhan tes.
+const FINAL_SUBTEST_CODE = "3B_CONDITIONS";
 
 function fmt(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -70,15 +75,19 @@ export default function CfitSubtestRunnerPage() {
   // Alert sebelum soal asli dibuka: tunggu arahan tester.
   const [briefing, setBriefing] = useState(false);
   const [starting, setStarting] = useState(false);
+  // Konfirmasi tombol SELESAI (hanya pada tes terakhir).
+  const [confirmFinish, setConfirmFinish] = useState(false);
+  const [submittingFinish, setSubmittingFinish] = useState(false);
   const deadlineRef = useRef<number | null>(null);
   const finishedRef = useRef(false);
   // Banner peringatan yang bisa ditutup — muncul lagi setiap ada pelanggaran baru.
   const [ackedAt, setAckedAt] = useState(0);
 
-  // Subtes berakhir karena waktu habis (tidak ada penyelesaian manual), supaya
-  // seluruh peserta satu kelas selesai bersamaan — ATAU karena peserta sudah
-  // menembus batas pelanggaran anti-curang. Setelah terkunci, peserta kembali
-  // ke layar jeda dan subtes berikutnya terbuka otomatis.
+  // Subtes berakhir karena waktu habis (supaya seluruh peserta satu kelas
+  // selesai bersamaan), karena peserta menembus batas pelanggaran anti-curang,
+  // atau karena peserta menekan tombol SELESAI di tes terakhir. Setelah
+  // terkunci, peserta kembali ke layar jeda dan subtes berikutnya terbuka
+  // otomatis.
   const finishSubtest = useCallback(
     async (reason: FinishReason = "time") => {
       if (finishedRef.current) return;
@@ -90,11 +99,15 @@ export default function CfitSubtestRunnerPage() {
         // keepalive: permintaan tetap dikirim walau halaman langsung berpindah.
         keepalive: true,
       }).catch(() => null);
-      toast.error(
-        reason === "cheat"
-          ? "Batas pelanggaran terlampaui! Tes ini dikunci dan hasilmu ditandai."
-          : "Waktu habis! Tes ini dikunci.",
-      );
+      if (reason === "manual") {
+        toast.success("Tes selesai. Jawabanmu sudah tersimpan.");
+      } else {
+        toast.error(
+          reason === "cheat"
+            ? "Batas pelanggaran terlampaui! Tes ini dikunci dan hasilmu ditandai."
+            : "Waktu habis! Tes ini dikunci.",
+        );
+      }
       router.replace("/cfit/test");
     },
     [router, subtestCode],
@@ -274,6 +287,10 @@ export default function CfitSubtestRunnerPage() {
   const showViolationBanner = anti.count > 0 && anti.lastAt > ackedAt;
   const isLastPage = safePage >= totalPages - 1;
   const answeredCount = questions.filter((q) => (answers[q.id] ?? []).length > 0).length;
+  // Tombol SELESAI hanya muncul di tes paling akhir (Tes 4 Bentuk B) dan hanya
+  // pada tahap soal asli, bukan tahap contoh.
+  const isFinalSubtest = subtest.code === FINAL_SUBTEST_CODE;
+  const showFinishButton = isFinalSubtest && !isExamplePhase;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -450,6 +467,15 @@ export default function CfitSubtestRunnerPage() {
             <button className="brut-btn brut-btn-lime" onClick={() => setBriefing(true)} disabled={starting}>
               SELESAI CONTOH →
             </button>
+          ) : showFinishButton ? (
+            <button
+              className="brut-btn brut-btn-lime"
+              onClick={() => setConfirmFinish(true)}
+              disabled={submittingFinish}
+              title="Menutup seluruh rangkaian tes IQ"
+            >
+              SELESAI & KIRIM JAWABAN
+            </button>
           ) : (
             <button className="brut-btn brut-btn-white" disabled title="Tes berakhir otomatis saat waktu habis">
               TES BERAKHIR SAAT WAKTU HABIS
@@ -458,10 +484,29 @@ export default function CfitSubtestRunnerPage() {
         </div>
 
         {!isExamplePhase ? (
-          <div className="brut-card text-sm font-semibold" style={{ background: "#fef9c3" }}>
-            Tidak ada tombol selesai. Tes berakhir OTOMATIS saat waktu habis, supaya seluruh peserta satu
-            kelas selesai bersamaan. Periksa kembali jawabanmu selagi waktu tersisa.
-          </div>
+          showFinishButton ? (
+            <div className="brut-card space-y-3" style={{ background: "#fef9c3" }}>
+              <p className="text-sm font-semibold">
+                Ini TES TERAKHIR. Periksa kembali jawabanmu, lalu tekan SELESAI untuk menutup seluruh
+                rangkaian tes IQ. Kalau waktunya habis lebih dulu, tes tetap ditutup otomatis.
+              </p>
+              {!isLastPage ? (
+                <button
+                  type="button"
+                  className="brut-btn brut-btn-lime"
+                  onClick={() => setConfirmFinish(true)}
+                  disabled={submittingFinish}
+                >
+                  SELESAI & KIRIM JAWABAN
+                </button>
+              ) : null}
+            </div>
+          ) : (
+            <div className="brut-card text-sm font-semibold" style={{ background: "#fef9c3" }}>
+              Tidak ada tombol selesai. Tes berakhir OTOMATIS saat waktu habis, supaya seluruh peserta satu
+              kelas selesai bersamaan. Periksa kembali jawabanmu selagi waktu tersisa.
+            </div>
+          )
         ) : null}
 
         <div className="brut-card" style={{ background: "#fff" }}>
@@ -523,6 +568,47 @@ export default function CfitSubtestRunnerPage() {
                 disabled={starting}
               >
                 {starting ? "MEMBUKA..." : "MULAI TES SEKARANG"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {confirmFinish ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-5"
+          style={{ background: "rgba(0,0,0,0.75)" }}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="brut-card w-full max-w-lg space-y-4" style={{ background: "#a3e635" }}>
+            <h2 className="text-2xl font-black uppercase leading-tight">Selesaikan seluruh tes?</h2>
+            <p className="font-bold">
+              Kamu berada di TES TERAKHIR (Tes 4 Bentuk B). Setelah tombol ini ditekan, seluruh rangkaian
+              tes IQ ditutup dan jawaban tidak bisa diubah lagi.
+            </p>
+            <p className="text-sm font-semibold">
+              Sudah terjawab {answeredCount} dari {questions.length} soal pada tes ini.
+            </p>
+            <div className="flex flex-col md:flex-row gap-3">
+              <button
+                type="button"
+                className="brut-btn brut-btn-white flex-1"
+                onClick={() => setConfirmFinish(false)}
+                disabled={submittingFinish}
+              >
+                PERIKSA LAGI
+              </button>
+              <button
+                type="button"
+                className="brut-btn brut-btn-black flex-1"
+                onClick={() => {
+                  setSubmittingFinish(true);
+                  void finishSubtest("manual");
+                }}
+                disabled={submittingFinish}
+              >
+                {submittingFinish ? "MENYELESAIKAN..." : "YA, SELESAIKAN"}
               </button>
             </div>
           </div>
