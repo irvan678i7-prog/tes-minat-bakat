@@ -3,19 +3,19 @@
 //
 // Setelah satu subtes terkunci (waktu habis atau ditutup manual), peserta
 // TIDAK langsung masuk subtes berikutnya: ada jeda otomatis.
-// - Antar subtes dalam bentuk yang sama : 2 menit
-// - Pergantian bentuk (3A → 3B)        : 3 menit
+// - Antar subtes dalam bentuk yang sama : 1 menit
+// - Pergantian bentuk (3A → 3B)        : 1,5 menit
 //
 // Jeda dihitung dari `finishedAt` subtes SEBELUMNYA yang tersimpan di
 // CfitSubtestProgress, jadi server tetap jadi sumber kebenaran dan sisa jeda
 // tidak bisa dipercepat dengan refresh halaman.
 // ───────────────────────────────────────────────────────────
 
-/** Jeda antar subtes dalam satu bentuk (detik). */
-export const CFIT_BREAK_SUBTEST_SEC = 120;
+/** Jeda antar subtes dalam satu bentuk (detik) — 1 menit. */
+export const CFIT_BREAK_SUBTEST_SEC = 60;
 
-/** Jeda saat berganti bentuk tes, mis. 3A selesai → lanjut 3B (detik). */
-export const CFIT_BREAK_FORM_SEC = 180;
+/** Jeda saat berganti bentuk tes, mis. 3A selesai → lanjut 3B (detik) — 1,5 menit. */
+export const CFIT_BREAK_FORM_SEC = 90;
 
 /** Pilih durasi jeda berdasarkan bentuk subtes sebelum & sesudahnya. */
 export function cfitBreakSecBetween(prevForm: string, nextForm: string): number {

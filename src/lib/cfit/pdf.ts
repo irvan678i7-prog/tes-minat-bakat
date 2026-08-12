@@ -1,8 +1,8 @@
 // ──────────────────────────────
 // Laporan individual Tes IQ — CFIT Skala 3 (Bentuk A + B), satu halaman A4.
 // TERPISAH dari laporan minat-bakat (src/lib/pdf.ts).
-// Palet dokumen: SIAN + SLATE (mengikuti versi tampilan sebelumnya).
-// ──────────────────────────────
+// Palet dokumen: SIAN/TEAL, mengikuti tema laporan versi sebelumnya.
+// ───────────────────────────────
 
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
@@ -41,7 +41,7 @@ export type CfitPdfResult = {
   generatedAt?: Date | null
 }
 
-// ─── Palet (versi lama: sian + slate) ───
+// ─── Palet (sian/teal — sama seperti tema laporan versi sebelumnya) ───
 const INK = "#0F172A"
 const SOFT_INK = "#475569"
 const HAIRLINE = "#CBD5E1"
@@ -652,11 +652,13 @@ export function buildCfitReportPDF(
   doc.text(noteText, margin + 8, y + 11.5)
   y += noteH + 12
 
-  // Grafik pengganti tabel skala klasifikasi
-  y = drawSubtestChart(doc, perSubtest, margin, y, pageW) + 10
+  // Grafik pengganti tabel skala klasifikasi. Jarak grafik → QR sengaja
+  // dilebarkan supaya blok QR tidak menempel pada panel grafik.
+  y = drawSubtestChart(doc, perSubtest, margin, y, pageW) + 20
 
-  // QR validasi (tengah), lalu dua blok tanda tangan
-  y = drawQrBlock(doc, reportCode, y, pageW) + 15
+  // QR validasi (tengah), lalu dua blok tanda tangan. Jarak QR → tanda tangan
+  // juga dilebarkan agar kedua blok tidak terlihat berdempetan.
+  y = drawQrBlock(doc, reportCode, y, pageW) + 28
   drawSignatures(
     doc,
     margin,
