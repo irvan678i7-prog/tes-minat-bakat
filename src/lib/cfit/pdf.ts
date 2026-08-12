@@ -1,7 +1,7 @@
 // ───────────────────────────────
 // Laporan individual Tes IQ — CFIT Skala 3 (Bentuk A + B), satu halaman A4.
 // TERPISAH dari laporan minat-bakat (src/lib/pdf.ts).
-// Palet dokumen: DOMINAN HIJAU (permintaan pembimbing).
+// Palet dokumen: SIAN/TEAL, mengikuti tema laporan versi sebelumnya.
 // ───────────────────────────────
 
 import jsPDF from "jspdf"
@@ -41,16 +41,16 @@ export type CfitPdfResult = {
   generatedAt?: Date | null
 }
 
-// ─── Palet (dominan hijau) ───
-const INK = "#14532D"
-const SOFT_INK = "#4B6E5A"
-const HAIRLINE = "#BBDFC8"
-const STRIPE = "#F4FBF6"
-const PANEL = "#E8F6ED"
+// ─── Palet (sian/teal — sama seperti tema laporan versi sebelumnya) ───
+const INK = "#0F172A"
+const SOFT_INK = "#475569"
+const HAIRLINE = "#CBD5E1"
+const STRIPE = "#F8FAFC"
+const PANEL = "#F1F5F9"
 const WHITE = "#FFFFFF"
-const ACCENT = "#22C55E"
-const ACCENT_DEEP = "#15803D"
-const HIGHLIGHT = "#DCFCE7"
+const ACCENT = "#22D3EE"
+const ACCENT_DEEP = "#0E7490"
+const HIGHLIGHT = "#CFFAFE"
 
 // ─── Identitas penanda tangan ───
 // Default sesuai penanda tangan resmi; masih bisa ditimpa lewat environment
@@ -650,11 +650,13 @@ export function buildCfitReportPDF(
   doc.text(noteText, margin + 8, y + 11.5)
   y += noteH + 12
 
-  // Grafik pengganti tabel skala klasifikasi
-  y = drawSubtestChart(doc, perSubtest, margin, y, pageW) + 10
+  // Grafik pengganti tabel skala klasifikasi. Jarak grafik → QR sengaja
+  // dilebarkan supaya blok QR tidak menempel pada panel grafik.
+  y = drawSubtestChart(doc, perSubtest, margin, y, pageW) + 20
 
-  // QR validasi (tengah), lalu dua blok tanda tangan
-  y = drawQrBlock(doc, reportCode, y, pageW) + 15
+  // QR validasi (tengah), lalu dua blok tanda tangan. Jarak QR → tanda tangan
+  // juga dilebarkan agar kedua blok tidak terlihat berdempetan.
+  y = drawQrBlock(doc, reportCode, y, pageW) + 28
   drawSignatures(
     doc,
     margin,
