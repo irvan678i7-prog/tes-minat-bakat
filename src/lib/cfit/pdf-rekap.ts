@@ -1,7 +1,9 @@
 // ─────────────────────────────────────────────────────────────
 // Rekap hasil Tes IQ — CFIT Skala 3. A4 POTRET, MULTI-HALAMAN.
 // TERPISAH sepenuhnya dari rekap minat-bakat (src/lib/pdf-rekap.ts).
-// Palet dokumen: DOMINAN HIJAU (permintaan pembimbing).
+// Palet dokumen: SIAN/TEAL, sama dengan laporan individu (tema versi
+// sebelumnya), dengan gaya visual mengikuti UI aplikasi: brutalism — bayangan
+// pekat, garis tebal, dan bilah judul beraksen.
 //
 // Susunan dokumen:
 //   Hal. 1  Ringkasan eksekutif  — KPI, grafik sebaran klasifikasi, narasi
@@ -31,17 +33,17 @@ export type CfitRekapRow = {
 	classification: string | null;
 };
 
-// ─── Palet (dominan hijau) ───
-const INK = "#14532D";
-const SOFT_INK = "#4B6E5A";
-const HAIRLINE = "#BBDFC8";
-const STRIPE = "#F4FBF6";
-const PANEL = "#E8F6ED";
+// ─── Palet (sian/teal — mengikuti tema laporan individu) ───
+const INK = "#0F172A";
+const SOFT_INK = "#475569";
+const HAIRLINE = "#CBD5E1";
+const STRIPE = "#F8FAFC";
+const PANEL = "#F1F5F9";
 const WHITE = "#FFFFFF";
-const GREEN = "#22C55E";
-const GREEN_SOFT = "#DCFCE7";
-const GREEN_DEEP = "#15803D";
-const MINT = "#86EFAC";
+const ACCENT = "#22D3EE";
+const ACCENT_SOFT = "#CFFAFE";
+const ACCENT_DEEP = "#0E7490";
+const AQUA = "#67E8F9";
 const AMBER = "#FDE68A";
 
 // ─── Identitas penanda tangan (sama dengan laporan individu) ───
@@ -123,14 +125,14 @@ type Band = {
 	onDark: boolean;
 };
 
-// Gradasi hijau untuk kategori atas → kuning/oranye/merah lembut untuk kategori
-// bawah, tetap dengan nuansa dokumen yang dominan hijau.
+// Gradasi sian untuk kategori atas → kuning/oranye/merah lembut untuk kategori
+// bawah, senada dengan tema dokumen.
 const CFIT_BANDS: Band[] = [
-	{ range: "170+", short: "JENIUS", label: "Jenius (Genius)", min: 170, max: 9999, color: "#14532D", onDark: true },
-	{ range: "140-169", short: "SGT SUP", label: "Sangat Superior (Very Superior)", min: 140, max: 169, color: "#166534", onDark: true },
-	{ range: "120-139", short: "SUPERIOR", label: "Superior", min: 120, max: 139, color: "#15803D", onDark: true },
-	{ range: "110-119", short: "DI ATAS", label: "Di Atas Rata-rata (High Average)", min: 110, max: 119, color: "#22C55E", onDark: false },
-	{ range: "90-109", short: "RATA2", label: "Rata-rata (Average)", min: 90, max: 109, color: "#86EFAC", onDark: false },
+	{ range: "170+", short: "JENIUS", label: "Jenius (Genius)", min: 170, max: 9999, color: "#0F172A", onDark: true },
+	{ range: "140-169", short: "SGT SUP", label: "Sangat Superior (Very Superior)", min: 140, max: 169, color: "#155E75", onDark: true },
+	{ range: "120-139", short: "SUPERIOR", label: "Superior", min: 120, max: 139, color: "#0E7490", onDark: true },
+	{ range: "110-119", short: "DI ATAS", label: "Di Atas Rata-rata (High Average)", min: 110, max: 119, color: "#22D3EE", onDark: false },
+	{ range: "90-109", short: "RATA2", label: "Rata-rata (Average)", min: 90, max: 109, color: "#A5F3FC", onDark: false },
 	{ range: "80-89", short: "DI BAWAH", label: "Di Bawah Rata-rata (Low Average)", min: 80, max: 89, color: "#FDE68A", onDark: false },
 	{ range: "70-79", short: "BORDER", label: "Borderline", min: 70, max: 79, color: "#FDBA74", onDark: false },
 	{ range: "< 70", short: "TERHAMBAT", label: "Terhambat (Mentally Defective)", min: -9999, max: 69, color: "#FCA5A5", onDark: false },
@@ -288,35 +290,44 @@ function computeStats(iqs: number[]): Stats {
 
 // ─── Kop resmi (dengan logo Pascasarjana UM Metro) ───
 function drawKop(doc: jsPDF, margin: number, pageW: number): number {
+	// Bilah atas dua warna: tinta pekat + potongan aksen (khas UI aplikasi).
 	fillHex(doc, INK);
 	doc.rect(0, 0, pageW, 5, "F");
+	fillHex(doc, ACCENT);
+	doc.rect(0, 0, 148, 5, "F");
 
-	// Logo diletakkan agak ke kanan supaya berdekatan dengan teks kop, dengan
-	// latar putih agar tidak terlihat berlatar gelap. Bila berkas logo belum
-	// dipasang, kop tetap tercetak normal tanpa logo.
-	drawReportLogo(doc, margin + 40, 13, 46);
+	// Logo diperbesar (58 pt) dan DIPAKSA BERLATAR PUTIH. PNG beralpha juga
+	// sudah diratakan ke putih di report-logo.ts sehingga tidak lagi tampil
+	// sebagai kotak hitam. Bila berkas logo belum dipasang, kop tetap tercetak
+	// normal tanpa logo.
+	drawReportLogo(doc, margin + 34, 16, 58, {
+		background: "#FFFFFF",
+		padding: 3,
+	});
 
 	textHex(doc, INK);
 	doc.setFont("helvetica", "bold");
-	fittedCenterText(doc, "UNIVERSITAS MUHAMMADIYAH METRO", pageW / 2, 28, pageW - margin * 2 - 190, 13, 9);
+	fittedCenterText(doc, "UNIVERSITAS MUHAMMADIYAH METRO", pageW / 2, 36, pageW - margin * 2 - 210, 13, 9);
 	doc.setFont("helvetica", "bold");
-	fittedCenterText(doc, "PROGRAM PASCASARJANA", pageW / 2, 41, pageW - margin * 2 - 190, 10.5, 8);
+	fittedCenterText(doc, "PROGRAM PASCASARJANA", pageW / 2, 49, pageW - margin * 2 - 210, 10.5, 8);
 	fittedCenterText(
 		doc,
 		"PROGRAM STUDI MAGISTER BIMBINGAN DAN KONSELING",
 		pageW / 2,
-		53,
-		pageW - margin * 2 - 170,
+		61,
+		pageW - margin * 2 - 210,
 		9.2,
 		7,
 	);
 
+	// Garis kop diturunkan agar tidak mepet logo yang kini lebih besar
+	// (logo berakhir di y = 74).
 	drawHex(doc, INK);
 	doc.setLineWidth(1.6);
-	doc.line(margin, 60, pageW - margin, 60);
+	doc.line(margin, 78, pageW - margin, 78);
 	doc.setLineWidth(0.5);
-	doc.line(margin, 63, pageW - margin, 63);
-	return 63;
+	doc.line(margin, 81, pageW - margin, 81);
+	return 81;
 }
 
 function drawRahasiaBadge(doc: jsPDF, pageW: number, margin: number) {
@@ -324,15 +335,17 @@ function drawRahasiaBadge(doc: jsPDF, pageW: number, margin: number) {
 	const h = 19;
 	const x = pageW - margin - w;
 	fillHex(doc, INK);
-	doc.rect(x, 12, w, h, "F");
+	doc.rect(x, 16, w, h, "F");
+	fillHex(doc, ACCENT);
+	doc.rect(x, 16, w, 2.6, "F");
 	textHex(doc, WHITE);
 	doc.setFont("helvetica", "bold");
 	doc.setFontSize(9.4);
-	txt(doc, "RAHASIA", x + w / 2, 25, { align: "center" });
+	txt(doc, "RAHASIA", x + w / 2, 30, { align: "center" });
 	textHex(doc, INK);
 }
 
-/** Judul bagian: bilah hijau tua dengan teks putih + keterangan kanan. */
+/** Judul bagian: bilah tinta pekat beraksen sian + keterangan kanan. */
 function sectionTitle(
 	doc: jsPDF,
 	title: string,
@@ -344,11 +357,13 @@ function sectionTitle(
 	const innerW = pageW - margin * 2;
 	fillHex(doc, INK);
 	doc.rect(margin, y, innerW, 19, "F");
+	fillHex(doc, ACCENT);
+	doc.rect(margin, y, 5, 19, "F");
 	textHex(doc, WHITE);
 	doc.setFont("helvetica", "bold");
-	fittedLeftText(doc, title, margin + 8, y + 13.5, innerW * 0.55, 10, 7.4);
+	fittedLeftText(doc, title, margin + 12, y + 13.5, innerW * 0.55, 10, 7.4);
 	if (hint) {
-		textHex(doc, MINT);
+		textHex(doc, AQUA);
 		doc.setFont("helvetica", "bold");
 		doc.setFontSize(6.6);
 		txt(doc, hint.toUpperCase(), pageW - margin - 8, y + 13, { align: "right" });
@@ -357,9 +372,9 @@ function sectionTitle(
 	return y + 19 + 10;
 }
 
-// ──────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────
 // HALAMAN 1 — RINGKASAN EKSEKUTIF
-// ──────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────
 
 function drawKpiCard(
 	doc: jsPDF,
@@ -373,9 +388,12 @@ function drawKpiCard(
 	fill: string,
 ) {
 	brutBox(doc, x, y, w, h, fill, 3.5);
-	textHex(doc, GREEN_DEEP);
+	// Bilah aksen tipis di kepala kartu (gaya kartu pada UI aplikasi).
+	fillHex(doc, ACCENT);
+	doc.rect(x, y, w, 3, "F");
+	textHex(doc, ACCENT_DEEP);
 	doc.setFont("helvetica", "bold");
-	fittedCenterText(doc, label.toUpperCase(), x + w / 2, y + 15, w - 14, 7.6, 5.2);
+	fittedCenterText(doc, label.toUpperCase(), x + w / 2, y + 16, w - 14, 7.6, 5.2);
 	textHex(doc, INK);
 	fittedCenterText(doc, value, x + w / 2, y + 41, w - 16, 23, 12);
 	textHex(doc, SOFT_INK);
@@ -403,11 +421,13 @@ function drawBandChart(
 
 	fillHex(doc, INK);
 	doc.rect(margin, yIn, innerW, headerH, "F");
+	fillHex(doc, ACCENT);
+	doc.rect(margin, yIn, 5, headerH, "F");
 	textHex(doc, WHITE);
 	doc.setFont("helvetica", "bold");
 	doc.setFontSize(8.6);
-	txt(doc, "SEBARAN KLASIFIKASI IQ KELOMPOK", margin + 8, yIn + 12.5);
-	textHex(doc, MINT);
+	txt(doc, "SEBARAN KLASIFIKASI IQ KELOMPOK", margin + 12, yIn + 12.5);
+	textHex(doc, AQUA);
 	doc.setFontSize(6.6);
 	txt(doc, "JUMLAH PESERTA PER KATEGORI", pageW - margin - 8, yIn + 12, { align: "right" });
 
@@ -511,28 +531,31 @@ function drawNarrative(
 	doc.setFontSize(7.8);
 	const wrapped: string[] = [];
 	lines.forEach((l, i) => {
-		wrapped.push(...wrapText(doc, l, innerW - 24));
+		wrapped.push(...wrapText(doc, l, innerW - 28));
 		if (i < lines.length - 1) wrapped.push("");
 	});
 	const boxH = 24 + wrapped.length * 9.8;
 
-	brutBox(doc, margin, yIn, innerW, boxH, GREEN_SOFT, 3.5);
-	textHex(doc, GREEN_DEEP);
+	brutBox(doc, margin, yIn, innerW, boxH, ACCENT_SOFT, 3.5);
+	// Bilah aksen di tepi kiri (gaya callout pada UI aplikasi).
+	fillHex(doc, ACCENT_DEEP);
+	doc.rect(margin, yIn, 4, boxH, "F");
+	textHex(doc, ACCENT_DEEP);
 	doc.setFont("helvetica", "bold");
 	doc.setFontSize(7.4);
-	txt(doc, "BACAAN SINGKAT HASIL KELOMPOK", margin + 12, yIn + 15);
+	txt(doc, "BACAAN SINGKAT HASIL KELOMPOK", margin + 14, yIn + 15);
 	textHex(doc, INK);
 	doc.setFont("helvetica", "normal");
 	doc.setFontSize(7.8);
 	wrapped.forEach((line, i) => {
-		txt(doc, line, margin + 12, yIn + 28 + i * 9.8);
+		txt(doc, line, margin + 14, yIn + 28 + i * 9.8);
 	});
 	return yIn + boxH;
 }
 
-// ──────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────
 // HALAMAN 2 — DAFTAR PESERTA
-// ──────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────
 
 type StyledCell = {
 	content: string;
@@ -639,9 +662,9 @@ function drawParticipantTable(
 	return nextY(doc, yIn) + 14;
 }
 
-// ──────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────
 // HALAMAN 3 — ANALISIS KELOMPOK
-// ──────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────
 
 /** Tabel distribusi + bilah proporsi visual pada kolom terakhir. */
 function drawDistributionTable(
@@ -694,7 +717,7 @@ function drawDistributionTable(
 			1: { cellWidth: 168, fontStyle: "bold" },
 			2: { cellWidth: 44, halign: "center" },
 			3: { cellWidth: 38, halign: "center" },
-			4: { textColor: hexToRGB(GREEN_DEEP), fontStyle: "bold" },
+			4: { textColor: hexToRGB(ACCENT_DEEP), fontStyle: "bold" },
 		},
 		margin: { left: margin, right: margin },
 	});
@@ -743,7 +766,7 @@ function drawGroupTable(
 			overflow: "linebreak",
 		},
 		headStyles: {
-			fillColor: hexToRGB(GREEN_DEEP),
+			fillColor: hexToRGB(ACCENT_DEEP),
 			textColor: hexToRGB(WHITE),
 			fontStyle: "bold",
 			fontSize: 7.4,
@@ -780,9 +803,9 @@ function ageGroupOf(age: number | null): string {
 	return "17 tahun ke atas";
 }
 
-// ──────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────
 // HALAMAN 4 — SOROTAN, METODOLOGI, TANDA TANGAN
-// ──────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────
 
 function drawSpotlightTable(
 	doc: jsPDF,
@@ -869,7 +892,7 @@ function drawMethodology(
 	doc.setFontSize(7.4);
 	const wrapped: string[] = [];
 	for (const n of notes) {
-		wrapped.push(...wrapText(doc, `-  ${n}`, innerW - 26));
+		wrapped.push(...wrapText(doc, `-  ${n}`, innerW - 30));
 	}
 	const boxH = 18 + wrapped.length * 9.4;
 
@@ -877,11 +900,14 @@ function drawMethodology(
 	drawHex(doc, INK);
 	doc.setLineWidth(1);
 	doc.rect(margin, yIn, innerW, boxH, "FD");
+	// Bilah aksen di tepi kiri (gaya callout pada UI aplikasi).
+	fillHex(doc, ACCENT);
+	doc.rect(margin, yIn, 4, boxH, "F");
 	textHex(doc, INK);
 	doc.setFont("helvetica", "normal");
 	doc.setFontSize(7.4);
 	wrapped.forEach((line, i) => {
-		txt(doc, line, margin + 12, yIn + 16 + i * 9.4);
+		txt(doc, line, margin + 14, yIn + 16 + i * 9.4);
 	});
 	return yIn + boxH + 14;
 }
@@ -948,9 +974,9 @@ function drawSignatures(
 	return nameY + 24;
 }
 
-// ──────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────
 // DOKUMEN
-// ──────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────
 
 export function buildCfitRekapPDF(
 	meta: { school: string; grade: string; generatedAt: Date },
@@ -980,16 +1006,16 @@ export function buildCfitRekapPDF(
 	drawRahasiaBadge(doc, pageW, margin);
 
 	// Judul dokumen
-	brutBox(doc, margin, 76, innerW, 46, GREEN, 4);
+	brutBox(doc, margin, 96, innerW, 46, ACCENT, 4);
 	textHex(doc, INK);
 	doc.setFont("helvetica", "bold");
-	fittedLeftText(doc, "REKAP HASIL TES INTELEGENSI KELOMPOK", margin + 14, 102, innerW - 28, 15.5, 10);
+	fittedLeftText(doc, "REKAP HASIL TES INTELEGENSI KELOMPOK", margin + 14, 122, innerW - 28, 15.5, 10);
 	doc.setFont("helvetica", "normal");
 	fittedLeftText(
 		doc,
 		"Culture Fair Intelligence Test (CFIT) Skala 3 - Bentuk A + B",
 		margin + 14,
-		115,
+		135,
 		innerW - 28,
 		8.6,
 		6.4,
@@ -997,32 +1023,34 @@ export function buildCfitRekapPDF(
 
 	// Strip identitas & meta cetak
 	fillHex(doc, INK);
-	doc.rect(margin, 130, innerW, 32, "F");
+	doc.rect(margin, 150, innerW, 32, "F");
+	fillHex(doc, ACCENT);
+	doc.rect(margin, 150, 5, 32, "F");
 	textHex(doc, WHITE);
 	doc.setFont("helvetica", "bold");
 	fittedLeftText(
 		doc,
 		`${(meta.school || "SEMUA SEKOLAH").toUpperCase()}   \u2022   KELAS: ${(meta.grade || "SEMUA KELAS").toUpperCase()}`,
-		margin + 10,
-		144,
-		innerW - 20,
+		margin + 14,
+		164,
+		innerW - 24,
 		9,
 		6.4,
 	);
-	textHex(doc, MINT);
+	textHex(doc, AQUA);
 	doc.setFont("helvetica", "bold");
 	fittedLeftText(
 		doc,
 		`TOTAL PESERTA SELESAI: ${rows.length}   \u2022   SKOR TEROLAH: ${iqs.length}   \u2022   DICETAK: ${printedAt} WIB`,
-		margin + 10,
-		156,
-		innerW - 20,
+		margin + 14,
+		176,
+		innerW - 24,
 		7.4,
 		5.4,
 	);
 	textHex(doc, INK);
 
-	let y = 176;
+	let y = 196;
 
 	if (hasScores) {
 		const s = computeStats(iqs);
@@ -1037,11 +1065,11 @@ export function buildCfitRekapPDF(
 		const cardH = 60;
 		const kpis: Array<{ label: string; value: string; sub: string; fill: string }> = [
 			{ label: "Peserta", value: String(s.n), sub: "skor terolah", fill: WHITE },
-			{ label: "Rata-rata IQ", value: String(s.avg), sub: bandFor(s.avg).label.split(" (")[0], fill: GREEN_SOFT },
+			{ label: "Rata-rata IQ", value: String(s.avg), sub: bandFor(s.avg).label.split(" (")[0], fill: ACCENT_SOFT },
 			{ label: "Median IQ", value: String(s.median), sub: "nilai tengah", fill: WHITE },
 			{ label: "IQ Tertinggi", value: String(s.max), sub: bandFor(s.max).label.split(" (")[0], fill: WHITE },
 			{ label: "IQ Terendah", value: String(s.min), sub: bandFor(s.min).label.split(" (")[0], fill: WHITE },
-			{ label: "Proporsi IQ 110+", value: pctText(above, s.n), sub: `${above} peserta`, fill: GREEN_SOFT },
+			{ label: "Proporsi IQ 110+", value: pctText(above, s.n), sub: `${above} peserta`, fill: ACCENT_SOFT },
 		];
 		kpis.forEach((k, i) => {
 			const col = i % 3;
@@ -1198,7 +1226,7 @@ export function buildCfitRekapPDF(
 			doc,
 			"Capaian Tertinggi",
 			top,
-			MINT,
+			AQUA,
 			margin,
 			y,
 			colW,
@@ -1243,6 +1271,8 @@ export function buildCfitRekapPDF(
 		doc.setPage(i);
 		fillHex(doc, INK);
 		doc.rect(0, pageH - 20, pageW, 20, "F");
+		fillHex(doc, ACCENT);
+		doc.rect(0, pageH - 20, 148, 2.6, "F");
 		textHex(doc, WHITE);
 		doc.setFont("helvetica", "bold");
 		fittedLeftText(
