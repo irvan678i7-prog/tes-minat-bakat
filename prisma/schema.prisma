@@ -125,6 +125,12 @@ model Submission {
   startedAt     DateTime     @default(now())
   finishedAt    DateTime?
   randomSeed    String
+  // "Kode Lanjut" — kode pemulihan sesi, format XXXX-XX. Dipakai siswa untuk
+  // MELANJUTKAN submission yang sama lewat halaman /lanjut kalau cookie
+  // hilang (mati lampu, komputer mereset profil browser, ganti komputer).
+  // Tanpa ini, satu-satunya penanda sesi adalah cookie `tmb_student` — kalau
+  // cookie hilang, sesi lama tidak bisa dijangkau lagi.
+  resumeCode       String?   @unique
   violationCount   Int       @default(0)
   violationLog     Json      @default("[]")
   flaggedCheating  Boolean   @default(false)
@@ -139,8 +145,10 @@ model Submission {
 // Per-subtest lock state. Created when student first opens a subtest.
 // finishedAt: kapan subtes terkunci (manual via tombol Selesai, atau auto
 // karena timer habis). finishReason: "MANUAL" | "TIME_UP" | "AUTO_FLAG".
-// startedAt jadi sumber kebenaran timer (server-authoritative), bukan
-// localStorage.
+//
+// TIMER SADAR-JEDA: timer TIDAK lagi memakai jam dinding
+// (startedAt + durationSec), melainkan `consumedSec` — akumulasi waktu AKTIF
+// siswa di halaman soal. Lihat src/lib/subtestLock.ts.
 model SubtestProgress {
   id           String     @id @default(cuid())
   submissionId String
@@ -150,6 +158,18 @@ model SubtestProgress {
   startedAt    DateTime   @default(now())
   finishedAt   DateTime?
   finishReason String?
+  // Waktu AKTIF yang sudah terpakai di subtes ini (detik). Ini yang dipakai
+  // timer, bukan (now - startedAt). Subtes terkunci saat consumedSec >=
+  // durationSec.
+  consumedSec  Int        @default(0)
+  // Denyut terakhir dari browser siswa (heartbeat / kirim jawaban / buka
+  // halaman). Selisih now - lastSeenAt dipakai untuk membedakan "masih
+  // mengerjakan" vs "terputus".
+  lastSeenAt   DateTime?
+  // Statistik jeda untuk pengawas: berapa kali sesi terputus, dan total
+  // detik jeda yang DIMAAFKAN (maksimal PAUSE_BUDGET_SEC = 600 detik).
+  pauseCount   Int        @default(0)
+  pausedSec    Int        @default(0)
 
   @@unique([submissionId, subtestId])
   @@index([submissionId])
