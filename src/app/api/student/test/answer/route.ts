@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getStudentFromRequest } from "@/lib/auth";
-
-const TIME_UP_GRACE_MS = 3_000;
+import { projectSubtestTime, TIME_UP_GRACE_SEC } from "@/lib/subtestLock";
 
 const Body = z.object({
   questionId: z.string().min(1),
@@ -51,7 +50,15 @@ export async function POST(req: NextRequest) {
   // instead of sequential computeSubtestLock (1-2 queries) → upsert (1 query).
   const progress = await prisma.subtestProgress.findUnique({
     where: { submissionId_subtestId: { submissionId: sub.id, subtestId: q.subtestId } },
-    select: { startedAt: true, finishedAt: true, finishReason: true },
+    select: {
+      startedAt: true,
+      finishedAt: true,
+      finishReason: true,
+      consumedSec: true,
+      lastSeenAt: true,
+      pausedSec: true,
+      pauseCount: true,
+    },
   });
 
   // Subtes BELUM dimulai (tidak ada SubtestProgress) → jawaban ditolak.
@@ -84,18 +91,41 @@ export async function POST(req: NextRequest) {
     );
   }
   if (progress) {
-    const deadline = new Date(progress.startedAt.getTime() + q.subtest.durationSec * 1000);
-    if (Date.now() >= deadline.getTime() + TIME_UP_GRACE_MS) {
+    // TIMER SADAR-JEDA: yang dipakai adalah waktu AKTIF (consumedSec), bukan
+    // jam dinding. Jadi jawaban yang tertahan di antrian offline karena mati
+    // lampu tidak otomatis ditolak sebagai "waktu habis" saat dikirim ulang.
+    const now = new Date();
+    const durationSec = q.subtest.durationSec;
+    const projected = projectSubtestTime(progress, durationSec, now);
+    if (projected.consumedSec >= durationSec + TIME_UP_GRACE_SEC) {
       // Auto-lock (fire-and-forget) and reject.
       prisma.subtestProgress.updateMany({
         where: { submissionId: sub.id, subtestId: q.subtestId, finishedAt: null },
-        data: { finishedAt: deadline, finishReason: "TIME_UP" },
+        data: {
+          finishedAt: now,
+          finishReason: "TIME_UP",
+          consumedSec: Math.min(projected.consumedSec, durationSec),
+          pausedSec: projected.pausedSec,
+          pauseCount: projected.pauseCount,
+          lastSeenAt: now,
+        },
       }).catch(() => {});
       return NextResponse.json(
         { error: "Waktu subtes sudah habis. Jawaban tidak bisa diubah.", locked: true, finishReason: "TIME_UP" },
         { status: 409 },
       );
     }
+    // Kirim jawaban = bukti siswa masih mengerjakan → sekalian jadi denyut.
+    // Fire-and-forget supaya latensi menyimpan jawaban tidak bertambah.
+    prisma.subtestProgress.updateMany({
+      where: { submissionId: sub.id, subtestId: q.subtestId, finishedAt: null },
+      data: {
+        consumedSec: Math.min(projected.consumedSec, durationSec),
+        pausedSec: projected.pausedSec,
+        pauseCount: projected.pauseCount,
+        lastSeenAt: now,
+      },
+    }).catch(() => {});
   }
 
   await prisma.answer.upsert({
