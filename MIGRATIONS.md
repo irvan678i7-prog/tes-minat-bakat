@@ -44,9 +44,17 @@ di DB, lalu menjalankan `ALTER TABLE` yang diperlukan secara otomatis.
 | `prisma/sql/0003_drop_stale_subtestprogress_updatedat.sql` | Drop kolom `updatedAt` (peninggalan schema lama) dari `SubtestProgress` (fix error P2011 saat upsert) | **PERLU DI-APPLY** |
 | `prisma/sql/0005_submission_jenjang.sql` | Tambah kolom `jenjang` (TEXT) di `Submission` untuk pilihan jenjang SMP/SMA/SMK | **PERLU DI-APPLY** |
 | `prisma/sql/0006_cfit_tables.sql` | Tes IQ CFIT Skala 3 (3A & 3B): tabel `Cfit*` (token, subtes, bank soal, submission, jawaban, hasil, norma) TERPISAH dari minat-bakat + seed 8 subtes & norma RS→IQ usia 17+ | **PERLU DI-APPLY** |
+| `prisma/sql/0007_subtestprogress_pause_columns.sql` | Timer sadar-jeda: kolom `consumedSec`, `lastSeenAt`, `pauseCount`, `pausedSec` di `SubtestProgress` + backfill sesi lama & sesi berjalan | **PERLU DI-APPLY** |
+| `prisma/sql/0008_submission_resume_code.sql` | "Kode Lanjut": kolom `resumeCode` + unique index di `Submission` untuk melanjutkan sesi yang cookie-nya hilang | **PERLU DI-APPLY** |
 
 Setiap SQL di folder `prisma/sql/` ditulis idempoten, jadi tidak masalah
 kalau kamu jalankan ulang.
+
+> ⚠️ **Urutan penting untuk 0007 & 0008.** Dua file itu menambah kolom yang
+> LANGSUNG dipakai kode (timer jeda & pemulihan sesi). Apply `0003`, `0005`,
+> `0006` lebih dulu, lalu `0007` dan `0008`, dan lakukan SAAT TIDAK ADA SESI
+> TES BERJALAN. Kalau kode sudah ter-deploy tapi kolomnya belum ada, Prisma
+> akan melempar error P2022 di tengah tes.
 
 ## Untuk perubahan schema ke depan
 

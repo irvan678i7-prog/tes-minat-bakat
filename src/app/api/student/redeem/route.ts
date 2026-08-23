@@ -6,6 +6,7 @@ import { signStudentToken } from "@/lib/jwt";
 import { STUDENT_COOKIE, getStudentFromRequest } from "@/lib/auth";
 import { getClientIp, rateLimit } from "@/lib/rate-limit";
 import { STUDENT_JWT_EXPIRES_IN } from "@/lib/env";
+import { pickFreeResumeCode } from "@/lib/resume";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -97,12 +98,17 @@ export async function POST(req: NextRequest) {
       // token). Kalau token tidak membawanya → null, alur lama tidak berubah:
       // siswa mengetik sendiri di form data diri.
       const tokenSchool = (tok.school ?? "").trim();
+      // "Kode Lanjut" dibuat sejak awal supaya siswa bisa mencatatnya SEBELUM
+      // ada masalah. Kalau gagal (mis. kolom belum ada karena migrasi 0008
+      // belum di-apply), redeem tetap jalan tanpa kode.
+      const resumeCode = await pickFreeResumeCode().catch(() => null);
       submission = await prisma.submission.create({
         data: {
           tokenId: tok.id,
           testKind: tok.testKind,
           school: tokenSchool || null,
           randomSeed: randomUUID(),
+          ...(resumeCode ? { resumeCode } : {}),
         },
       });
       // Tandai waktu redeem pertama kali (sekedar informasi untuk admin —
@@ -129,6 +135,8 @@ export async function POST(req: NextRequest) {
       profileFilled: !!submission.fullName,
       fullName: submission.fullName ?? null,
       finishedAt: submission.finishedAt,
+      // Kode pemulihan sesi — dipakai di halaman /lanjut kalau cookie hilang.
+      resumeCode: submission.resumeCode ?? null,
     });
     res.cookies.set(STUDENT_COOKIE, jwtTok, {
       httpOnly: true,
