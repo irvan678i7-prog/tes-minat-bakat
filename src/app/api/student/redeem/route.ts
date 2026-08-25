@@ -98,19 +98,38 @@ export async function POST(req: NextRequest) {
       // token). Kalau token tidak membawanya → null, alur lama tidak berubah:
       // siswa mengetik sendiri di form data diri.
       const tokenSchool = (tok.school ?? "").trim();
+      const baseData = {
+        tokenId: tok.id,
+        testKind: tok.testKind,
+        school: tokenSchool || null,
+        randomSeed: randomUUID(),
+      };
+
       // "Kode Lanjut" dibuat sejak awal supaya siswa bisa mencatatnya SEBELUM
-      // ada masalah. Kalau gagal (mis. kolom belum ada karena migrasi 0008
-      // belum di-apply), redeem tetap jalan tanpa kode.
+      // ada masalah — TAPI kode itu TIDAK BOLEH PERNAH menjatuhkan redeem.
+      //
+      // Dulu pickFreeResumeCode() sudah dibungkus catch, tapi create()-nya
+      // tidak: P2002 (kode bentrok) atau kolom yang belum ada bikin seluruh
+      // redeem jatuh 500 → siswa tidak bisa mulai tes sama sekali.
+      // Sekarang gagal apa pun → submission dibuat TANPA kode, dan kodenya
+      // menyusul dibuat oleh GET /api/student/resume-code.
       const resumeCode = await pickFreeResumeCode().catch(() => null);
-      submission = await prisma.submission.create({
-        data: {
-          tokenId: tok.id,
-          testKind: tok.testKind,
-          school: tokenSchool || null,
-          randomSeed: randomUUID(),
-          ...(resumeCode ? { resumeCode } : {}),
-        },
-      });
+      if (resumeCode) {
+        try {
+          submission = await prisma.submission.create({
+            data: { ...baseData, resumeCode },
+          });
+        } catch (err) {
+          console.warn(
+            "[redeem] gagal menyimpan resumeCode, sesi dibuat tanpa Kode Lanjut:",
+            err,
+          );
+        }
+      }
+      if (!submission) {
+        submission = await prisma.submission.create({ data: baseData });
+      }
+
       // Tandai waktu redeem pertama kali (sekedar informasi untuk admin —
       // tidak meng-lock token). updateMany dengan filter redeemedAt=null
       // memastikan idempoten kalau token sudah pernah dipakai siswa lain.

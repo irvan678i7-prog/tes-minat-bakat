@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getCfitFromRequest } from "@/lib/cfit/auth";
-import { computeCfitSubtestLock, isCfitAnswerCorrect } from "@/lib/cfit/lock";
+import {
+  computeCfitSubtestLock,
+  isCfitAnswerCorrect,
+  touchCfitSubtest,
+} from "@/lib/cfit/lock";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,6 +73,20 @@ export async function POST(req: NextRequest) {
     },
     update: { selected: parsed.data.selected, isCorrect, answeredAt: new Date() },
   });
+
+  // DENYUT: mengirim jawaban juga bukti peserta masih aktif di halaman soal.
+  // Penting kalau denyut biasa terhalang jaringan sekolah yang galak.
+  if (!question.isExample) {
+    await touchCfitSubtest({
+      submissionId: submission.id,
+      subtestId: question.subtestId,
+      durationSec: question.subtest.durationSec,
+      minWriteGapSec: 10,
+    }).catch((err) => {
+      // Jawaban SUDAH tersimpan — kegagalan denyut tidak boleh membatalkannya.
+      console.warn("[cfit/answer] gagal mencatat denyut:", err);
+    });
+  }
 
   // `isCorrect` TIDAK dikembalikan ke klien — mencegah trial-and-error.
   return NextResponse.json({ ok: true });

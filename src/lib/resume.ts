@@ -1,4 +1,4 @@
-import { randomInt } from "crypto";
+import { randomInt, randomUUID } from "crypto";
 import jwt, { type SignOptions } from "jsonwebtoken";
 import { prisma } from "@/lib/db";
 import { JWT_SECRET } from "@/lib/env";
@@ -14,7 +14,7 @@ import { JWT_SECRET } from "@/lib/env";
 // File ini menyediakan dua jalur pemulihan:
 //   1. Kode Lanjut  — kode pendek milik siswa (Submission.resumeCode),
 //                      dipakai di halaman /lanjut bersama token kelas & nama.
-//   2. Link pengawas — token sekali-pakai berumur pendek yang dibuat admin
+//   2. Link pengawas — token SEKALI PAKAI berumur pendek yang dibuat admin
 //                      dari /admin/pemulihan, langsung memulihkan sesi.
 
 // Alfabet 32 huruf tanpa karakter yang mudah keliru (0/O, 1/I, dst) — sama
@@ -26,11 +26,38 @@ const MAX_ATTEMPTS = 8;
 // Umur link pemulihan buatan pengawas. Sengaja pendek: link ini melewati
 // verifikasi nama, jadi jangan sampai beredar lama di grup WA.
 const RESUME_LINK_TTL: SignOptions["expiresIn"] = "30m";
+export const RESUME_LINK_TTL_MINUTES = 30;
 
 export type ResumeLinkPayload = {
   sub: string; // submissionId
   role: "resume";
+  jti: string; // id token, dicatat di DB supaya benar-benar sekali pakai
 };
+
+/**
+ * Kolom baru (migrasi 0008/0010) mungkin belum ada di database production.
+ * Dipakai bersama oleh modul pemulihan minat-bakat & tes IQ supaya kolom yang
+ * belum ada tidak pernah menjatuhkan halaman tes.
+ */
+export function isMissingColumnError(err: unknown): boolean {
+  const code = (err as { code?: string } | null)?.code;
+  if (code === "P2022" || code === "P2021") return true;
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  return /resumeCode|resumeLinkJti|resumeLinkUsedAt|does not exist in the current database|Unknown argument|Unknown field/i.test(
+    msg,
+  );
+}
+
+let warnedMissingColumn = false;
+function warnMissingColumnOnce(): void {
+  if (warnedMissingColumn) return;
+  warnedMissingColumn = true;
+  console.warn(
+    "[resume] Kolom resumeLinkJti/resumeLinkUsedAt belum ada di database. " +
+      "Link pemulihan masih bisa dipakai berulang. Apply " +
+      "prisma/sql/0010_resume_link_single_use.sql.",
+  );
+}
 
 /** Bangkitkan satu Kode Lanjut acak, format ABC-DEF. */
 export function generateResumeCode(): string {
@@ -55,15 +82,21 @@ export function normalizeResumeCode(raw: string): string {
 
 /** Cari kode yang belum terpakai. Mengembalikan null kalau gagal terus. */
 export async function pickFreeResumeCode(): Promise<string | null> {
-  for (let i = 0; i < MAX_ATTEMPTS; i++) {
-    const code = generateResumeCode();
-    const taken = await prisma.submission.findUnique({
-      where: { resumeCode: code },
-      select: { id: true },
-    });
-    if (!taken) return code;
+  try {
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      const code = generateResumeCode();
+      const taken = await prisma.submission.findUnique({
+        where: { resumeCode: code },
+        select: { id: true },
+      });
+      if (!taken) return code;
+    }
+    return null;
+  } catch (err) {
+    // Kolom belum ada (0008 belum di-apply) → redeem TIDAK boleh gagal.
+    if (!isMissingColumnError(err)) throw err;
+    return null;
   }
-  return null;
 }
 
 /**
@@ -101,10 +134,27 @@ export async function ensureResumeCode(submissionId: string): Promise<string | n
   }
 }
 
-/** Token link pemulihan (dibuat pengawas). Umur pendek, sekali pakai praktis. */
-export function signResumeLinkToken(submissionId: string): string {
-  const payload: ResumeLinkPayload = { sub: submissionId, role: "resume" };
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: RESUME_LINK_TTL });
+/**
+ * Terbitkan link pemulihan (dibuat pengawas). Umur pendek DAN sekali pakai:
+ * `jti` dicatat di baris submission, `resumeLinkUsedAt` di-reset. Karena jti
+ * yang dicatat hanya SATU, menerbitkan link baru otomatis mematikan link lama
+ * yang mungkin masih beredar di grup WA.
+ */
+export async function issueResumeLinkToken(submissionId: string): Promise<string> {
+  const jti = randomUUID();
+  const payload: ResumeLinkPayload = { sub: submissionId, role: "resume", jti };
+  const token = jwt.sign(payload, JWT_SECRET, { expiresIn: RESUME_LINK_TTL });
+  try {
+    await prisma.submission.update({
+      where: { id: submissionId },
+      data: { resumeLinkJti: jti, resumeLinkUsedAt: null },
+    });
+  } catch (err) {
+    if (!isMissingColumnError(err)) throw err;
+    warnMissingColumnOnce();
+    // Link tetap diterbitkan, hanya belum benar-benar sekali pakai.
+  }
+  return token;
 }
 
 export function verifyResumeLinkToken(token: string): ResumeLinkPayload | null {
@@ -112,9 +162,35 @@ export function verifyResumeLinkToken(token: string): ResumeLinkPayload | null {
     const decoded = jwt.verify(token, JWT_SECRET) as ResumeLinkPayload;
     // Token student & admin TIDAK boleh dipakai sebagai link pemulihan.
     if (!decoded || decoded.role !== "resume" || !decoded.sub) return null;
+    // Token lama tanpa jti tidak bisa dipastikan sekali pakai → tolak.
+    if (!decoded.jti) return null;
     return decoded;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Pakai link pemulihan SEKALI SAJA. Konsumsi atomik lewat updateMany dengan
+ * filter `resumeLinkUsedAt: null`, jadi kalau link tersebar di grup WA dan
+ * dibuka beberapa orang sekaligus, hanya SATU yang berhasil masuk.
+ */
+export async function consumeResumeLinkToken(
+  submissionId: string,
+  jti: string,
+): Promise<boolean> {
+  try {
+    const res = await prisma.submission.updateMany({
+      where: { id: submissionId, resumeLinkJti: jti, resumeLinkUsedAt: null },
+      data: { resumeLinkUsedAt: new Date() },
+    });
+    return res.count > 0;
+  } catch (err) {
+    if (!isMissingColumnError(err)) throw err;
+    warnMissingColumnOnce();
+    // Kolom belum ada → jangan matikan pemulihan; link sementara masih bisa
+    // dipakai berulang (perilaku lama).
+    return true;
   }
 }
 

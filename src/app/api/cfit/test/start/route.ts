@@ -42,11 +42,9 @@ export async function GET(req: NextRequest) {
       subtestId: s.id,
       durationSec: s.durationSec,
     });
-    const remainingSec = lock.locked
-      ? 0
-      : lock.startedAt
-        ? Math.max(0, Math.round((lock.startedAt.getTime() + s.durationSec * 1000 - Date.now()) / 1000))
-        : s.durationSec;
+    // SISA WAKTU SADAR-JEDA: diambil langsung dari lock (durationSec -
+    // consumedSec), BUKAN dari jam dinding (startedAt + durationSec - now).
+    // Dengan begitu waktu yang hilang karena mati lampu tidak ikut termakan.
     items.push({
       code: s.code,
       form: s.form,
@@ -60,7 +58,10 @@ export async function GET(req: NextRequest) {
       locked: lock.locked,
       finishReason: lock.finishReason,
       finishedAt: lock.finishedAt,
-      remainingSec,
+      remainingSec: lock.remainingSec,
+      // Statistik jeda — berguna untuk layar pengawas & audit.
+      pausedSec: lock.pausedSec,
+      pauseCount: lock.pauseCount,
     });
   }
 

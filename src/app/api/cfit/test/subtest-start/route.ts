@@ -262,15 +262,21 @@ export async function POST(req: NextRequest) {
   // Jawaban yang sudah tersimpan (resume setelah refresh).
   const saved = await savedFor(rows.map((q) => q.id));
 
-  const remainingSec = lock.startedAt
-    ? Math.max(0, Math.round((lock.startedAt.getTime() + subtest.durationSec * 1000 - Date.now()) / 1000))
-    : subtest.durationSec;
+  // SISA WAKTU SADAR-JEDA. Dulu di sini dihitung dari jam dinding
+  // (startedAt + durationSec - now), sehingga waktu mati lampu ikut termakan.
+  // Sekarang sumbernya lock: durationSec - consumedSec.
+  //
+  // `startedAt` yang dikirim ke klien juga BUKAN startedAt asli, melainkan
+  // timerStartedAt (= now - consumedSec). Dengan begitu hitungan mundur di
+  // layar — yang menghitung dari startedAt — otomatis MELANJUTKAN sisa waktu
+  // dan tidak pernah berselisih dengan hitungan server.
+  const remainingSec = lock.remainingSec;
 
   return NextResponse.json({
     phase: "test",
     alreadyStarted: current.started,
     subtest: meta,
-    startedAt: lock.startedAt,
+    startedAt: lock.timerStartedAt ?? lock.startedAt,
     remainingSec,
     questions: toClient(rows),
     savedAnswers: saved,

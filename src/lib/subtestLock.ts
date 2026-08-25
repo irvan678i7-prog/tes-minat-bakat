@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 // /test/[code], dan API answer/finish/heartbeat/violation. Hindari duplikasi
 // logika di banyak tempat.
 //
-// ── TIMER SADAR-JEDA (pause-aware) ────────────────────────────────────────
+// ── TIMER SADAR-JEDA (pause-aware) ──────────────────────────────────
 // DULU: deadline = startedAt + durationSec (jam dinding). Kalau listrik mati
 // atau browser tertutup, waktu tetap berjalan → subtes terkunci TIME_UP
 // padahal siswa belum mengerjakan.
@@ -21,6 +21,11 @@ import { prisma } from "@/lib/db";
 // subtes, tapi hanya sebanyak PAUSE_BUDGET_SEC per subtes. Lewat dari jatah
 // itu, selisihnya kembali dihitung sebagai waktu terpakai supaya jeda tidak
 // bisa dipakai untuk mengulur waktu.
+//
+// CATATAN PENGAWASAN: jeda yang dimaafkan TIDAK tercatat sebagai pelanggaran
+// (anti-cheat hanya bisa mencatat kalau halaman masih hidup). Karena itu
+// `pauseCount` & `pausedSec` WAJIB ditampilkan ke admin — lihat
+// /api/admin/pause-report dan tab "Jeda & Kunci" di dashboard.
 
 export type LockReason = "MANUAL" | "TIME_UP" | "AUTO_FLAG";
 
@@ -247,13 +252,21 @@ export async function computeSubtestLock(args: {
  * Aman dipanggil kapan saja: kalau subtes belum dimulai (belum ada baris
  * SubtestProgress), fungsi ini TIDAK membuat baris baru dan tidak
  * menghabiskan waktu — jadi layar instruksi/contoh soal tetap gratis.
+ *
+ * `minWriteGapSec` (opsional) menekan biaya tulis DB: denyut tiap 15 detik
+ * per siswa aktif berarti 40 siswa ≈ 2,7 tulis/detik terus-menerus. Kalau
+ * denyut datang lebih rapat dari nilai ini dan waktu belum habis, proyeksi
+ * tetap dihitung & dikembalikan tapi TIDAK ditulis ke DB. Akuntansi waktu
+ * tetap benar karena lastSeenAt yang lama dipertahankan — denyut berikutnya
+ * menghitung selisih dari titik yang sama.
  */
 export async function touchSubtest(args: {
   submissionId: string;
   subtestId: string;
   durationSec: number;
+  minWriteGapSec?: number;
 }): Promise<SubtestLockInfo> {
-  const { submissionId, subtestId, durationSec } = args;
+  const { submissionId, subtestId, durationSec, minWriteGapSec = 0 } = args;
   const progress = await prisma.subtestProgress.findUnique({
     where: { submissionId_subtestId: { submissionId, subtestId } },
   });
@@ -264,6 +277,13 @@ export async function touchSubtest(args: {
   const projected = projectSubtestTime(progress, durationSec, now);
   const timeUp = projected.consumedSec >= durationSec + TIME_UP_GRACE_SEC;
   const consumedSec = Math.min(projected.consumedSec, durationSec);
+
+  // Hemat tulis DB: denyut yang datang terlalu rapat cukup dijawab dari
+  // proyeksi, tanpa UPDATE. Kalau waktu sudah habis, TETAP tulis supaya
+  // subtes benar-benar terkunci.
+  if (!timeUp && minWriteGapSec > 0 && projected.gapSec < minWriteGapSec) {
+    return runningInfo(progress, projected, durationSec, now);
+  }
 
   await prisma.subtestProgress.updateMany({
     where: { id: progress.id, finishedAt: null },
