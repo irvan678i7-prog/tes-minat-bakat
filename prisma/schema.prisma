@@ -131,6 +131,15 @@ model Submission {
   // Tanpa ini, satu-satunya penanda sesi adalah cookie `tmb_student` — kalau
   // cookie hilang, sesi lama tidak bisa dijangkau lagi.
   resumeCode       String?   @unique
+  // Link pemulihan buatan pengawas: SEKALI PAKAI.
+  // `resumeLinkJti`    = id (jti) token link yang TERAKHIR diterbitkan admin.
+  //                      Menerbitkan link baru otomatis mematikan link lama.
+  // `resumeLinkUsedAt` = kapan link itu dipakai. Sudah terisi → link mati.
+  // Tanpa ini, link /lanjut?t=... bisa dibuka berkali-kali oleh siapa pun
+  // yang memegangnya (mis. tersebar di grup WA) — padahal jalur link
+  // MELEWATI verifikasi nama.
+  resumeLinkJti    String?
+  resumeLinkUsedAt DateTime?
   violationCount   Int       @default(0)
   violationLog     Json      @default("[]")
   flaggedCheating  Boolean   @default(false)
@@ -289,6 +298,15 @@ model CfitSubmission {
   startedAt       DateTime        @default(now())
   finishedAt      DateTime?
   randomSeed      String          @default("")
+  // "Kode Lanjut" TES IQ — sejajar dengan Submission.resumeCode di
+  // minat-bakat. Dipakai peserta di halaman /lanjut untuk MELANJUTKAN sesi
+  // tes IQ yang sama kalau cookie `tmb_cfit` hilang (mati lampu, komputer
+  // lab mereset profil browser, ganti komputer). Tanpa kolom ini, sesi tes
+  // IQ yang cookie-nya hilang tidak bisa dipulihkan oleh siapa pun.
+  resumeCode       String?        @unique
+  // Link pemulihan buatan pengawas: SEKALI PAKAI (lihat Submission di atas).
+  resumeLinkJti    String?
+  resumeLinkUsedAt DateTime?
   violationCount  Int             @default(0)
   violationLog    Json            @default("[]")
   flaggedCheating Boolean         @default(false)
@@ -301,6 +319,10 @@ model CfitSubmission {
 }
 
 // Lock per-subtes (server-authoritative timer), pola sama dgn SubtestProgress.
+//
+// TIMER SADAR-JEDA: sejak 0009, timer tes IQ TIDAK lagi memakai jam dinding
+// (startedAt + durationSec) melainkan `consumedSec` — akumulasi waktu AKTIF
+// peserta di halaman soal. Lihat src/lib/cfit/lock.ts.
 model CfitSubtestProgress {
   id           String         @id @default(cuid())
   submissionId String
@@ -310,6 +332,18 @@ model CfitSubtestProgress {
   startedAt    DateTime       @default(now())
   finishedAt   DateTime?
   finishReason String? // "MANUAL" | "TIME_UP" | "AUTO_FLAG"
+  // Waktu AKTIF yang sudah terpakai di subtes ini (detik). Subtes terkunci
+  // saat consumedSec >= durationSec.
+  consumedSec  Int            @default(0)
+  // Denyut terakhir dari browser peserta (heartbeat / kirim jawaban / buka
+  // halaman subtes).
+  lastSeenAt   DateTime?
+  // Statistik jeda untuk pengawas: berapa kali sesi terputus, dan total
+  // detik jeda yang DIMAAFKAN (maks CFIT_PAUSE_BUDGET_SEC = 300 detik —
+  // sengaja lebih kecil dari minat-bakat karena satu subtes CFIT hanya
+  // 150-240 detik).
+  pauseCount   Int            @default(0)
+  pausedSec    Int            @default(0)
 
   @@unique([submissionId, subtestId])
   @@index([submissionId])
