@@ -6,6 +6,7 @@ import { STUDENT_COOKIE } from "@/lib/auth";
 import { getClientIp, rateLimit } from "@/lib/rate-limit";
 import { STUDENT_JWT_EXPIRES_IN } from "@/lib/env";
 import {
+  consumeResumeLinkToken,
   expiresInToSeconds,
   normalizeName,
   normalizeResumeCode,
@@ -60,7 +61,7 @@ export async function POST(req: NextRequest) {
     } | null = null;
 
     if (parsed.data.linkToken) {
-      // ── Jalur 2: link pemulihan dari pengawas ──────────────────────────
+      // ── Jalur 2: link pemulihan dari pengawas ──────────────────────
       const payload = verifyResumeLinkToken(parsed.data.linkToken);
       if (!payload) {
         return NextResponse.json(
@@ -77,6 +78,23 @@ export async function POST(req: NextRequest) {
       });
       if (!submission) {
         return NextResponse.json({ error: "Sesi tidak ditemukan." }, { status: 404 });
+      }
+
+      // SEKALI PAKAI. Jalur ini melewati verifikasi nama, jadi link yang
+      // sempat beredar di grup WA tidak boleh bisa dipakai siswa kedua.
+      // Konsumsinya atomik (updateMany + filter resumeLinkUsedAt: null),
+      // jadi kalau lima orang membuka link yang sama pada detik yang sama,
+      // hanya SATU yang lolos.
+      const consumed = await consumeResumeLinkToken(payload.sub, payload.jti);
+      if (!consumed) {
+        return NextResponse.json(
+          {
+            error:
+              "Link pemulihan ini sudah dipakai. Minta link baru ke pengawas, " +
+              "atau lanjutkan dengan Kode Lanjut.",
+          },
+          { status: 409 },
+        );
       }
     } else {
       // ── Jalur 1: siswa mengetik token kelas + Kode Lanjut + nama ────────
