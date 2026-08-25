@@ -5,10 +5,11 @@ import AdminTokens from "@/components/admin/AdminTokens";
 import AdminQuestions from "@/components/admin/AdminQuestions";
 import AdminSubmissions from "@/components/admin/AdminSubmissions";
 import AdminPanduan from "@/components/admin/AdminPanduan";
+import AdminJedaKunci from "@/components/admin/AdminJedaKunci";
 import CfitAdminPanel from "@/components/admin/cfit/CfitAdminPanel";
 
-type Tab = "tokens" | "questions" | "submissions" | "panduan" | "cfit";
-const TABS = ["tokens", "questions", "submissions", "panduan", "cfit"] as const;
+type Tab = "tokens" | "questions" | "submissions" | "jeda" | "panduan" | "cfit";
+const TABS = ["tokens", "questions", "submissions", "jeda", "panduan", "cfit"] as const;
 
 export default function AdminDashboard() {
   const [tab, setTab] = useState<Tab>(() => {
@@ -33,6 +34,7 @@ export default function AdminDashboard() {
           ["tokens", "Token"],
           ["questions", "Bank Soal"],
           ["submissions", "Hasil"],
+          ["jeda", "Jeda & Kunci"],
           ["panduan", "Panduan"],
           ["cfit", "Tes IQ (CFIT)"],
         ] as const).map(([k, l]) => (
@@ -43,7 +45,13 @@ export default function AdminDashboard() {
               window.location.hash = k;
             }}
             className={`brut-tab ${tab === k ? "active" : ""}`}
-            style={k === "cfit" && tab !== "cfit" ? { background: "#22d3ee" } : undefined}
+            style={
+              k === "cfit" && tab !== "cfit"
+                ? { background: "#22d3ee" }
+                : k === "jeda" && tab !== "jeda"
+                  ? { background: "#fbbf24" }
+                  : undefined
+            }
           >
             {l}
           </button>
@@ -52,6 +60,7 @@ export default function AdminDashboard() {
       {tab === "tokens" && <AdminTokens />}
       {tab === "questions" && <AdminQuestions />}
       {tab === "submissions" && <AdminSubmissions />}
+      {tab === "jeda" && <AdminJedaKunci />}
       {tab === "panduan" && <AdminPanduan />}
       {tab === "cfit" && <CfitAdminPanel />}
     </div>
