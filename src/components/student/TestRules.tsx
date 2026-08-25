@@ -4,6 +4,14 @@ import { useEffect, useState } from "react";
 
 // Aturan tes — di-render sebagai modal/overlay full-screen sebelum siswa
 // masuk ke daftar subtes. Wajib dibaca & disetujui sekali per submission.
+//
+// KODE LANJUT ADA DI DALAM MODAL INI (audit #3). Modal ini menutup seluruh
+// halaman (fixed inset-0 z-50 + latar hitam 70% + body.overflow hidden),
+// termasuk banner Kode Lanjut di halaman /test. Dan karena flag persetujuan
+// disimpan di localStorage, komputer lab yang mereset profil browser akan
+// memunculkan modal ini LAGI — persis pada siswa yang baru pulih dari mati
+// lampu. Menaikkan z-index banner hanya akan menutupi modal, jadi kodenya
+// yang dipindahkan ke sini, di posisi paling atas.
 
 type RuleItem = {
   icon: string;
@@ -13,37 +21,37 @@ type RuleItem = {
 
 const FORBIDDEN: RuleItem[] = [
   {
-    icon: "✕",
+    icon: "\u2715",
     title: "Pindah tab / aplikasi",
     desc: "Membuka tab baru, pindah ke browser/aplikasi lain, atau split-screen di HP terdeteksi sebagai pelanggaran.",
   },
   {
-    icon: "✕",
+    icon: "\u2715",
     title: "Keluar dari mode full-screen",
     desc: "Setelah mode full-screen aktif, jangan tekan Esc atau tombol keluar full-screen.",
   },
   {
-    icon: "✕",
+    icon: "\u2715",
     title: "Menyalin / menempel / memotong teks",
     desc: "Aksi copy, paste, dan cut (Ctrl/Cmd + C/V/X) dilarang.",
   },
   {
-    icon: "✕",
+    icon: "\u2715",
     title: "Klik kanan",
     desc: "Menu klik-kanan dinonaktifkan selama tes berlangsung.",
   },
   {
-    icon: "✕",
+    icon: "\u2715",
     title: "Mengambil screenshot",
     desc: "PrintScreen, Cmd+Shift+3/4/5, Win+Shift+S, dan sejenisnya akan dicatat sebagai pelanggaran.",
   },
   {
-    icon: "✕",
+    icon: "\u2715",
     title: "Merekam layar",
     desc: "Menggunakan aplikasi atau ekstensi perekam layar dilarang.",
   },
   {
-    icon: "✕",
+    icon: "\u2715",
     title: "Pintasan keyboard terlarang",
     desc: "Pintasan untuk developer tools (F12, Ctrl+Shift+I/J), print, simpan halaman, dsb. diblokir.",
   },
@@ -51,17 +59,17 @@ const FORBIDDEN: RuleItem[] = [
 
 const ALLOWED: RuleItem[] = [
   {
-    icon: "✓",
+    icon: "\u2713",
     title: "Layar mati / device sleep",
     desc: "Layar yang mati otomatis karena idle TIDAK dihitung sebagai pelanggaran. Sistem juga akan mencoba menjaga layar tetap menyala selama tes.",
   },
   {
-    icon: "✓",
+    icon: "\u2713",
     title: "Reload halaman",
     desc: "Anda boleh menyegarkan halaman jika perlu — jawaban tersimpan otomatis ke server.",
   },
   {
-    icon: "✓",
+    icon: "\u2713",
     title: "Resume dari soal terakhir",
     desc: "Jika koneksi terputus, Anda dapat melanjutkan dari soal terakhir yang dijawab.",
   },
@@ -86,6 +94,7 @@ export default function TestRules({
   onClose?: () => void;
 }) {
   const [agreed, setAgreed] = useState(false);
+  const [resumeCode, setResumeCode] = useState<string | null>(null);
   const readOnly = !!onClose;
 
   // Cegah body scroll saat modal terbuka.
@@ -94,6 +103,22 @@ export default function TestRules({
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = prev;
+    };
+  }, []);
+
+  // Ambil Kode Lanjut sendiri, supaya TestHub.tsx tidak perlu diubah dan
+  // tidak ada props baru yang harus diteruskan. Gagal / kolom belum ada →
+  // kotaknya sekadar tidak muncul.
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/student/resume-code", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (alive && d?.resumeCode) setResumeCode(String(d.resumeCode));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
     };
   }, []);
 
@@ -119,7 +144,7 @@ export default function TestRules({
                 id="test-rules-title"
                 className="text-2xl sm:text-3xl font-black uppercase"
               >
-                ⚑ Aturan Tes {testKind}
+                \u2691 Aturan Tes {testKind}
               </h2>
               <div className="flex items-center gap-2">
                 <span
@@ -135,7 +160,7 @@ export default function TestRules({
                     className="brut-btn brut-btn-white text-xs"
                     aria-label="Tutup"
                   >
-                    ✕ TUTUP
+                    \u2715 TUTUP
                   </button>
                 )}
               </div>
@@ -146,14 +171,37 @@ export default function TestRules({
             </p>
           </div>
 
+          {/* KODE LANJUT — paling atas, sebelum daftar larangan. Inilah satu
+              hal yang harus siswa catat SEBELUM tes dimulai. */}
+          {resumeCode && (
+            <section
+              className="border-4 border-black p-3 mb-4"
+              style={{ background: "#a5f3fc" }}
+            >
+              <h3 className="text-base font-black uppercase mb-1">
+                \u2691 Catat Kode Lanjut Anda Sekarang
+              </h3>
+              <div className="font-mono text-3xl font-black tracking-widest">
+                {resumeCode}
+              </div>
+              <p className="text-sm font-semibold leading-relaxed mt-2">
+                Tulis kode ini di kertas <strong>sebelum mulai</strong>. Kalau
+                listrik mati, komputer mereset sendiri, atau Anda harus pindah
+                komputer, buka halaman <strong>/lanjut</strong> lalu masukkan
+                kode ini bersama token kelas dan nama lengkap Anda. Jawaban dan
+                sisa waktu Anda akan kembali seperti semula.
+              </p>
+            </section>
+          )}
+
           <section className="mb-4">
             <h3 className="text-lg font-black uppercase mb-2">
-              ✕ Yang Dilarang
+              \u2715 Yang Dilarang
             </h3>
             <p className="text-xs font-bold opacity-70 mb-3">
               Setiap pelanggaran dicatat. Setelah <strong>5 pelanggaran</strong>,
               tes akan diselesaikan otomatis dan Anda ditandai{" "}
-              <strong>“dicurigai mencurangi”</strong> di laporan admin.
+              <strong>\u201Cdicurigai mencurangi\u201D</strong> di laporan admin.
             </p>
             <ul className="space-y-2">
               {FORBIDDEN.map((r, i) => (
@@ -181,7 +229,7 @@ export default function TestRules({
 
           <section className="mb-4">
             <h3 className="text-lg font-black uppercase mb-2">
-              ✓ Yang Diizinkan
+              \u2713 Yang Diizinkan
             </h3>
             <ul className="space-y-2">
               {ALLOWED.map((r, i) => (
@@ -212,7 +260,7 @@ export default function TestRules({
             style={{ background: "#dbeafe" }}
           >
             <h3 className="text-base font-black uppercase mb-2">
-              ⓘ Tips Sebelum Mulai
+              \u24D8 Tips Sebelum Mulai
             </h3>
             <ul className="list-disc pl-5 space-y-1 text-sm font-semibold leading-relaxed">
               {TIPS.map((t, i) => (
@@ -251,7 +299,7 @@ export default function TestRules({
                 disabled={!agreed}
                 className="brut-btn brut-btn-pink w-full text-lg"
               >
-                SAYA MENGERTI, MULAI TES ▶
+                SAYA MENGERTI, MULAI TES \u25B6
               </button>
             </>
           )}
