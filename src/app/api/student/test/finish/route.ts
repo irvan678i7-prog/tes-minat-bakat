@@ -55,6 +55,7 @@ export async function POST(req: NextRequest) {
           parts: a.question.parts,
           correct: a.question.correct,
           scoringTag: a.question.scoringTag,
+          isExample: a.question.isExample,
         },
       })),
       fullName: sub.fullName,
