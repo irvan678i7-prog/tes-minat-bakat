@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSessionScope } from "./SessionScope";
 
 // Per-question queued payload. We re-send the most-recent value if the user
 // edits the same answer multiple times.
@@ -16,8 +17,16 @@ export type RejectedAnswer = {
   error: string;
 };
 
-const STORE_KEY = "tmb-pending-answers-v1";
-const REJECTED_KEY = "tmb-rejected-answers-v1";
+// Kunci penyimpanan DIPISAH PER SESI (Submission.id). Versi v1 memakai satu
+// kunci global untuk semua sesi di satu perangkat, sehingga jawaban sisa sesi
+// lain ikut terkirim ke sesi yang sedang jalan — ditolak server kalau jenis
+// tesnya beda, atau lebih buruk lagi TERSIMPAN ke sesi yang salah kalau jenis
+// tesnya sama.
+const PENDING_PREFIX = "tmb-pending-answers-v2";
+const REJECTED_PREFIX = "tmb-rejected-answers-v2";
+const LEGACY_PENDING_KEY = "tmb-pending-answers-v1";
+const LEGACY_REJECTED_KEY = "tmb-rejected-answers-v1";
+
 const RETRY_INTERVAL_MS = 4000; // background flush every 4s
 const MAX_BACKOFF_MS = 30000;
 // Sesi mati (401) tidak akan sembuh dengan retry cepat — hanya bisa sembuh
@@ -36,21 +45,68 @@ const SEND_TIMEOUT_MS = 12000;
 // Kirim maksimal 6 jawaban sekaligus, sisanya menyusul. Masih cepat untuk
 // menyusul setelah offline, tapi tidak menabrak batas request keepalive.
 const MAX_PARALLEL_SENDS = 6;
+// Batas waktu TOTAL satu putaran flush. Kalau antrean masih panjang saat
+// jatah habis, sisanya ditinggal untuk putaran berikutnya. Penting karena
+// SubtestRunner menunggu `await sync.flush()` sebelum mengunci subtes: tanpa
+// batas ini, antrean panjang di jaringan lambat bisa menahan tombol kunci.
+const FLUSH_BUDGET_MS = 10000;
 
 // Status yang berarti "jawaban ini BUKAN milik sesi tes yang sedang aktif":
 //   403 → "Soal tidak sesuai dengan jenis tes"
 //   404 → "Soal tidak ditemukan"
 //
-// Antrean ini tersimpan di localStorage per PERANGKAT, bukan per sesi. Jadi
-// jawaban sisa dari sesi atau jenis tes sebelumnya di komputer yang sama ikut
-// terkirim ke sesi baru dan PASTI ditolak dengan salah satu status di atas.
-// Itu sampah antrean, BUKAN kehilangan data sesi ini — jadi jangan dicatat
-// sebagai kehilangan dan jangan memicu banner merah. Penolakan lain (mis. 409
-// "Waktu subtes sudah habis") tetap dilaporkan apa adanya.
+// Sejak antrean dipisah per sesi, ini seharusnya jarang terjadi — tapi tetap
+// dipertahankan sebagai jaring pengaman: itu sampah antrean, BUKAN kehilangan
+// data sesi ini, jadi jangan dicatat sebagai kehilangan dan jangan memicu
+// banner merah. Penolakan lain (mis. 409 "Waktu subtes sudah habis") tetap
+// dilaporkan apa adanya.
 const STALE_STATUSES = [403, 404];
 
 function isStaleStatus(status: number): boolean {
   return STALE_STATUSES.includes(status);
+}
+
+function scopeOf(sessionId?: string | null): string {
+  const trimmed = (sessionId ?? "").trim();
+  return trimmed || "anon";
+}
+
+function pendingStoreKey(sessionId?: string | null): string {
+  return `${PENDING_PREFIX}:${scopeOf(sessionId)}`;
+}
+
+function rejectedStoreKey(sessionId?: string | null): string {
+  return `${REJECTED_PREFIX}:${scopeOf(sessionId)}`;
+}
+
+// Pindahkan antrean lama (kunci global tanpa id sesi) ke kunci sesi ini,
+// sekali saja per perangkat.
+//
+// - Antrean PENDING dipindahkan hanya kalau antrean sesi ini masih kosong,
+//   supaya jawaban siswa yang sedang mengerjakan saat versi ini di-deploy
+//   tidak hilang.
+// - Catatan PENOLAKAN lama TIDAK dipindahkan: isinya bercampur antar sesi dan
+//   itulah sumber banner merah palsu yang tidak pernah bisa hilang.
+//
+// Antrean sesi LAIN (kunci v2 milik Submission.id lain) sengaja TIDAK dihapus:
+// kalau siswa itu memulihkan sesinya lewat /lanjut, Submission.id-nya sama,
+// jadi jawabannya masih bisa terkirim.
+function migrateLegacyKeys(sessionId?: string | null) {
+  if (typeof window === "undefined") return;
+  try {
+    const legacy = window.localStorage.getItem(LEGACY_PENDING_KEY);
+    if (legacy) {
+      const key = pendingStoreKey(sessionId);
+      const current = window.localStorage.getItem(key);
+      if (!current || current === "{}") {
+        window.localStorage.setItem(key, legacy);
+      }
+      window.localStorage.removeItem(LEGACY_PENDING_KEY);
+    }
+    window.localStorage.removeItem(LEGACY_REJECTED_KEY);
+  } catch {
+    // localStorage tidak tersedia / penuh — abaikan.
+  }
 }
 
 // Disiarkan ke seluruh halaman supaya banner peringatan (AnswerSyncAlert)
@@ -58,31 +114,34 @@ function isStaleStatus(status: number): boolean {
 export const ANSWER_REJECTED_EVENT = "tmb:answer-rejected";
 export const SESSION_DEAD_EVENT = "tmb:session-dead";
 
-function loadPending(): Pending {
+function loadPending(sessionId?: string | null): Pending {
   if (typeof window === "undefined") return {};
   try {
-    const raw = window.localStorage.getItem(STORE_KEY);
+    const raw = window.localStorage.getItem(pendingStoreKey(sessionId));
     return raw ? (JSON.parse(raw) as Pending) : {};
   } catch {
     return {};
   }
 }
 
-function savePending(p: Pending) {
+function savePending(sessionId: string | null | undefined, p: Pending) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(STORE_KEY, JSON.stringify(p));
+    window.localStorage.setItem(pendingStoreKey(sessionId), JSON.stringify(p));
   } catch {
     // Quota exceeded etc — ignore; in-memory state still drives retries.
   }
 }
 
 // Dibaca juga oleh AnswerSyncAlert, termasuk setelah halaman di-refresh:
-// catatan kehilangan data harus selamat dari reload.
-export function readRejectedAnswers(): RejectedAnswer[] {
+// catatan kehilangan data harus selamat dari reload. Selalu kirim id sesi
+// supaya catatan sesi lain tidak ikut terbaca.
+export function readRejectedAnswers(
+  sessionId?: string | null,
+): RejectedAnswer[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(REJECTED_KEY);
+    const raw = window.localStorage.getItem(rejectedStoreKey(sessionId));
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed) ? (parsed as RejectedAnswer[]) : [];
   } catch {
@@ -90,10 +149,16 @@ export function readRejectedAnswers(): RejectedAnswer[] {
   }
 }
 
-function saveRejected(list: RejectedAnswer[]) {
+function saveRejected(
+  sessionId: string | null | undefined,
+  list: RejectedAnswer[],
+) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(REJECTED_KEY, JSON.stringify(list));
+    window.localStorage.setItem(
+      rejectedStoreKey(sessionId),
+      JSON.stringify(list),
+    );
   } catch {
     // ignore
   }
@@ -113,6 +178,10 @@ type SendResult =
   | { kind: "rejected"; status: number; error: string };
 
 export function useAnswerSync() {
+  // Id sesi tes aktif (Submission.id), disuntikkan server lewat layout /test.
+  // Semua penyimpanan lokal di hook ini memakai id ini sebagai pemisah.
+  const sessionId = useSessionScope();
+
   // In-memory mirror of the persisted queue. Avoids reading localStorage on
   // every render.
   const pendingRef = useRef<Pending>({});
@@ -133,32 +202,32 @@ export function useAnswerSync() {
   }, []);
 
   const persist = useCallback(() => {
-    savePending(pendingRef.current);
+    savePending(sessionId, pendingRef.current);
     updateCount();
-  }, [updateCount]);
+  }, [sessionId, updateCount]);
 
   const persistRejected = useCallback(() => {
-    saveRejected(rejectedRef.current);
+    saveRejected(sessionId, rejectedRef.current);
     setRejectedCount(rejectedRef.current.length);
-  }, []);
+  }, [sessionId]);
 
-  // Hydrate from localStorage on mount.
+  // Hydrate from localStorage on mount — hanya antrean milik sesi ini.
   useEffect(() => {
-    pendingRef.current = loadPending();
-    const stored = readRejectedAnswers();
-    // Bersihkan catatan lama berstatus 403/404 — itu jawaban sisa sesi lain di
-    // perangkat ini yang dulu salah dicatat sebagai kehilangan data. Tanpa
-    // pembersihan ini, banner merah palsu dan badge GAGAL SYNC menempel di
-    // browser siswa selamanya, di semua subtes.
+    migrateLegacyKeys(sessionId);
+    pendingRef.current = loadPending(sessionId);
+    const stored = readRejectedAnswers(sessionId);
+    // Jaring pengaman: catatan berstatus 403/404 bukan kehilangan data sesi
+    // ini (lihat STALE_STATUSES), jadi jangan sampai memunculkan banner merah
+    // palsu yang menempel selamanya.
     const cleaned = stored.filter((r) => !isStaleStatus(r.status));
     rejectedRef.current = cleaned;
-    if (cleaned.length !== stored.length) saveRejected(cleaned);
+    if (cleaned.length !== stored.length) saveRejected(sessionId, cleaned);
     updateCount();
     setRejectedCount(cleaned.length);
     // Kehilangan data dari sesi sebelumnya harus tetap terlihat setelah
     // refresh, bukan hilang bersama state React.
     if (cleaned.length > 0) setStatus("error");
-  }, [updateCount]);
+  }, [sessionId, updateCount]);
 
   // Send one item. `keepalive: true` membuat request tetap dikirim meski user
   // keburu klik tombol navigasi — penting supaya jawaban terakhir sebelum
@@ -239,15 +308,22 @@ export function useAnswerSync() {
     let anyRejected = false;
     let unauthorized = false;
 
-    // Kirim jawaban dengan jumlah request serentak TERBATAS. Sebelumnya semua
-    // item dikirim sekaligus lewat Promise.all: 27 jawaban = 27 request
-    // keepalive serentak, melebihi batas browser, sehingga sebagian request
-    // menggantung dan Promise.all tidak pernah selesai — itu yang membuat
-    // tombol kunci subtes macet di "MENGUNCI…". Server tetap upsert per
-    // (submissionId, questionId) sehingga aman dikirim bersamaan.
+    // Kirim jawaban dengan jumlah request serentak TERBATAS dan jatah waktu
+    // TOTAL. Sebelumnya semua item dikirim sekaligus lewat Promise.all: 27
+    // jawaban = 27 request keepalive serentak, melebihi batas browser,
+    // sehingga sebagian menggantung dan Promise.all tidak pernah selesai —
+    // itu yang membuat tombol kunci subtes macet di "MENGUNCI…". Server tetap
+    // upsert per (submissionId, questionId) sehingga aman dikirim bersamaan.
+    const deadline = Date.now() + FLUSH_BUDGET_MS;
     const queue = ids.slice();
     const sendNext = async (): Promise<void> => {
       for (;;) {
+        if (Date.now() >= deadline) {
+          // Jatah habis: sisa antrean ditinggal untuk putaran berikutnya
+          // supaya pemanggil (mis. tombol kunci subtes) tidak ikut tertahan.
+          if (queue.length > 0) anyFailed = true;
+          return;
+        }
         const qid = queue.shift();
         if (!qid) return;
         const item = pendingRef.current[qid];
