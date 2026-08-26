@@ -26,6 +26,33 @@ const MAX_BACKOFF_MS = 30000;
 const SESSION_DEAD_BACKOFF_MS = 30000;
 const MAX_REJECTED = 50;
 
+// Batas waktu SATU request jawaban. Tanpa ini `fetch` bisa menggantung tanpa
+// batas: request dikirim dengan `keepalive`, dan jumlah request keepalive
+// serentak dibatasi browser — antrean besar (mis. 27 jawaban) bisa saling
+// mengunci sehingga `flush()` tidak pernah selesai. Akibatnya tombol
+// "SELESAIKAN SUBTES" berhenti di "MENGUNCI…" selamanya, karena runner
+// menunggu flush selesai sebelum mengunci subtes.
+const SEND_TIMEOUT_MS = 12000;
+// Kirim maksimal 6 jawaban sekaligus, sisanya menyusul. Masih cepat untuk
+// menyusul setelah offline, tapi tidak menabrak batas request keepalive.
+const MAX_PARALLEL_SENDS = 6;
+
+// Status yang berarti "jawaban ini BUKAN milik sesi tes yang sedang aktif":
+//   403 → "Soal tidak sesuai dengan jenis tes"
+//   404 → "Soal tidak ditemukan"
+//
+// Antrean ini tersimpan di localStorage per PERANGKAT, bukan per sesi. Jadi
+// jawaban sisa dari sesi atau jenis tes sebelumnya di komputer yang sama ikut
+// terkirim ke sesi baru dan PASTI ditolak dengan salah satu status di atas.
+// Itu sampah antrean, BUKAN kehilangan data sesi ini — jadi jangan dicatat
+// sebagai kehilangan dan jangan memicu banner merah. Penolakan lain (mis. 409
+// "Waktu subtes sudah habis") tetap dilaporkan apa adanya.
+const STALE_STATUSES = [403, 404];
+
+function isStaleStatus(status: number): boolean {
+  return STALE_STATUSES.includes(status);
+}
+
 // Disiarkan ke seluruh halaman supaya banner peringatan (AnswerSyncAlert)
 // tidak perlu berbagi instance hook dengan SubtestRunner.
 export const ANSWER_REJECTED_EVENT = "tmb:answer-rejected";
@@ -75,11 +102,14 @@ function saveRejected(list: RejectedAnswer[]) {
 export type SyncStatus = "idle" | "syncing" | "queued" | "offline" | "error";
 
 // Hasil satu kali kirim. Dipisah tegas supaya "ditolak" TIDAK BISA lagi
-// tersamar sebagai "berhasil" — itu inti bug audit #2.
+// tersamar sebagai "berhasil" — itu inti bug audit #2. `stale` dipisah dari
+// `rejected` supaya sampah antrean sesi lain tidak dilaporkan sebagai
+// kehilangan data milik siswa yang sedang mengerjakan.
 type SendResult =
   | { kind: "ok" }
   | { kind: "retry" }
   | { kind: "unauthorized" }
+  | { kind: "stale"; status: number }
   | { kind: "rejected"; status: number; error: string };
 
 export function useAnswerSync() {
@@ -115,27 +145,41 @@ export function useAnswerSync() {
   // Hydrate from localStorage on mount.
   useEffect(() => {
     pendingRef.current = loadPending();
-    rejectedRef.current = readRejectedAnswers();
+    const stored = readRejectedAnswers();
+    // Bersihkan catatan lama berstatus 403/404 — itu jawaban sisa sesi lain di
+    // perangkat ini yang dulu salah dicatat sebagai kehilangan data. Tanpa
+    // pembersihan ini, banner merah palsu dan badge GAGAL SYNC menempel di
+    // browser siswa selamanya, di semua subtes.
+    const cleaned = stored.filter((r) => !isStaleStatus(r.status));
+    rejectedRef.current = cleaned;
+    if (cleaned.length !== stored.length) saveRejected(cleaned);
     updateCount();
-    setRejectedCount(rejectedRef.current.length);
+    setRejectedCount(cleaned.length);
     // Kehilangan data dari sesi sebelumnya harus tetap terlihat setelah
     // refresh, bukan hilang bersama state React.
-    if (rejectedRef.current.length > 0) setStatus("error");
+    if (cleaned.length > 0) setStatus("error");
   }, [updateCount]);
 
   // Send one item. `keepalive: true` membuat request tetap dikirim meski user
   // keburu klik tombol navigasi — penting supaya jawaban terakhir sebelum
-  // pindah soal/subtes tidak hilang.
+  // pindah soal/subtes tidak hilang. `signal` memberi batas waktu keras
+  // supaya request yang menggantung tidak ikut menahan flush().
   const sendOne = async (
     questionId: string,
     selected: string | string[],
   ): Promise<SendResult> => {
+    const controller =
+      typeof AbortController === "undefined" ? null : new AbortController();
+    const timeoutId = controller
+      ? setTimeout(() => controller.abort(), SEND_TIMEOUT_MS)
+      : null;
     try {
       const res = await fetch("/api/student/test/answer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ questionId, selected }),
         keepalive: true,
+        signal: controller ? controller.signal : undefined,
       });
       if (res.ok) return { kind: "ok" };
       // Sesi mati — jawaban HARUS tetap di antrean. Begitu siswa memulihkan
@@ -144,6 +188,9 @@ export function useAnswerSync() {
       // Kena rate limit atau server bermasalah → jelas BELUM tersimpan.
       // Dulu 429 ikut dianggap sukses dan jawabannya dibuang.
       if (res.status === 429 || res.status >= 500) return { kind: "retry" };
+      // Soal tidak dikenali sesi ini (403/404) = sisa antrean sesi lain di
+      // perangkat yang sama. Bukan kehilangan data siswa ini.
+      if (isStaleStatus(res.status)) return { kind: "stale", status: res.status };
       if (res.status >= 400) {
         // 4xx lain (mis. 409 "Waktu subtes sudah habis") = penolakan permanen.
         // Mengulang tidak akan menolong, tapi ini WAJIB dilaporkan, bukan
@@ -163,7 +210,11 @@ export function useAnswerSync() {
       }
       return { kind: "retry" };
     } catch {
+      // Termasuk abort karena timeout — jawaban tetap di antrean dan dicoba
+      // ulang, TIDAK dianggap hilang.
       return { kind: "retry" };
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
     }
   };
 
@@ -187,47 +238,67 @@ export function useAnswerSync() {
     let anyFailed = false;
     let anyRejected = false;
     let unauthorized = false;
-    // Kirim semua pending answers PARALEL. Sebelumnya sequential (for...of)
-    // sehingga 5 jawaban di antrian = 5×latency. Server upsert per
-    // (submissionId,questionId) sehingga aman dikirim bersamaan tanpa
-    // conflict. Mempercepat catch-up setelah offline atau saat siswa cepat
-    // mengubah banyak jawaban berurutan.
-    const work = ids.map(async (qid) => {
-      const item = pendingRef.current[qid];
-      if (!item) return;
-      const result = await sendOne(qid, item.selected);
-      // Nilai sempat diubah siswa selama percobaan ini → jangan diapa-apakan,
-      // biarkan percobaan berikutnya mengirim nilai terbaru.
-      const bumped = pendingRef.current[qid]?.ts !== item.ts;
-      if (result.kind === "ok") {
-        if (!bumped) delete pendingRef.current[qid];
-        return;
-      }
-      if (result.kind === "rejected") {
-        // Keluarkan dari antrean supaya tidak berputar selamanya, TAPI catat
-        // sebagai kehilangan data — inilah yang dulu dibuang diam-diam.
-        if (!bumped) delete pendingRef.current[qid];
-        rejectedRef.current = [
-          ...rejectedRef.current.filter((r) => r.questionId !== qid),
-          {
-            questionId: qid,
-            selected: item.selected,
-            ts: item.ts,
-            status: result.status,
-            error: result.error,
-          },
-        ].slice(-MAX_REJECTED);
-        anyRejected = true;
-        return;
-      }
-      if (result.kind === "unauthorized") {
-        unauthorized = true;
+
+    // Kirim jawaban dengan jumlah request serentak TERBATAS. Sebelumnya semua
+    // item dikirim sekaligus lewat Promise.all: 27 jawaban = 27 request
+    // keepalive serentak, melebihi batas browser, sehingga sebagian request
+    // menggantung dan Promise.all tidak pernah selesai — itu yang membuat
+    // tombol kunci subtes macet di "MENGUNCI…". Server tetap upsert per
+    // (submissionId, questionId) sehingga aman dikirim bersamaan.
+    const queue = ids.slice();
+    const sendNext = async (): Promise<void> => {
+      for (;;) {
+        const qid = queue.shift();
+        if (!qid) return;
+        const item = pendingRef.current[qid];
+        if (!item) continue;
+        const result = await sendOne(qid, item.selected);
+        // Nilai sempat diubah siswa selama percobaan ini → jangan diapa-apakan,
+        // biarkan percobaan berikutnya mengirim nilai terbaru.
+        const bumped = pendingRef.current[qid]?.ts !== item.ts;
+        if (result.kind === "ok") {
+          if (!bumped) delete pendingRef.current[qid];
+          continue;
+        }
+        if (result.kind === "stale") {
+          // Sisa antrean dari sesi lain di perangkat ini. Buang dari antrean
+          // tanpa menakut-nakuti siswa; cukup catat di console untuk pengawas.
+          if (!bumped) delete pendingRef.current[qid];
+          console.warn(
+            `[answer-sync] jawaban lama dibuang (status ${result.status}): bukan milik sesi tes ini.`,
+          );
+          continue;
+        }
+        if (result.kind === "rejected") {
+          // Keluarkan dari antrean supaya tidak berputar selamanya, TAPI catat
+          // sebagai kehilangan data — inilah yang dulu dibuang diam-diam.
+          if (!bumped) delete pendingRef.current[qid];
+          rejectedRef.current = [
+            ...rejectedRef.current.filter((r) => r.questionId !== qid),
+            {
+              questionId: qid,
+              selected: item.selected,
+              ts: item.ts,
+              status: result.status,
+              error: result.error,
+            },
+          ].slice(-MAX_REJECTED);
+          anyRejected = true;
+          continue;
+        }
+        if (result.kind === "unauthorized") {
+          unauthorized = true;
+          anyFailed = true;
+          continue;
+        }
         anyFailed = true;
-        return;
       }
-      anyFailed = true;
-    });
-    await Promise.all(work);
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(MAX_PARALLEL_SENDS, queue.length) }, () =>
+        sendNext(),
+      ),
+    );
     persist();
     if (anyRejected) persistRejected();
     flushingRef.current = false;
