@@ -237,11 +237,11 @@ export const MINAT_SUBTESTS: SubtestSeed[] = [
   },
 ];
 
-// ───────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 // Kategori per subtes (dari Tabel 4.1 / Kategori Skor Bakat di buku)
 // Tier ranges are inclusive lower bounds. Keys: BR (Bawah Rata-rata),
 // RR (Rata-rata), AR (Atas Rata-rata), B (Baik), LB (Luar Biasa).
-// ───────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 export const CATEGORY_LABEL: Record<string, string> = {
   BR: "Di bawah rata-rata",
   RR: "Rata-rata",
@@ -274,10 +274,10 @@ export function categorize(code: string, raw: number): "BR" | "RR" | "AR" | "B" 
   return "LB";
 }
 
-// ───────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 // 35 Profil Bakat dari Tabel 4.2 (Buku 1, Bab III). Each profile has 3
 // dominant aspects (mapped to subtest codes by short tag).
-// ───────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 const TAG: Record<string, string> = {
   Vis: "BAKAT_1_VISUAL",
   Num: "BAKAT_2_NUMERIK",
@@ -336,10 +336,10 @@ export const APTITUDE_PROFILES: ProfileDef[] = [
   { name: "Teknologi Tekstil", aspects: [TAG.Num, TAG.Spa, TAG.Fig], description: "Material & ukuran tekstil.", majors: ["Teknik Tekstil", "Teknik Kimia Tekstil", "Teknologi Garmen"], careers: ["Engineer Tekstil", "Quality Control Garment", "Manajer Produksi Garmen"] },
 ];
 
-// ───────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 // MINAT — pemetaan Bidang (huruf A..H) → Program Keahlian
 // (Tabel 4.3 Buku 1).
-// ───────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 export const MINAT_BIDANG_TO_PROGRAM: Record<string, { kind: string; programs: { letter: string; label: string; major: string }[] }> = {
   A: {
     kind: "Komunikasi",
@@ -451,10 +451,10 @@ export const MINAT_BIDANG_TO_PROGRAM: Record<string, { kind: string; programs: {
   },
 };
 
-// ───────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 // IQ Estimate — bukan IQ klinis, sekedar prediksi berbasis profil performa.
 // Mean = 100, SD = 15. Z-skor agregat dari 9 subtes (raw / max ekspektasi).
-// ───────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 export function estimateIQ(perSubtest: Record<string, { raw: number; max: number }>): number {
   const norms = Object.values(perSubtest).map((s) => (s.max > 0 ? s.raw / s.max : 0));
   if (norms.length === 0) return 100;
