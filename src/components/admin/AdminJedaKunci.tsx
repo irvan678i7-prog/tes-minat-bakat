@@ -167,107 +167,132 @@ export default function AdminJedaKunci() {
   const budget = data?.pauseBudgetSec ?? 0;
 
   return (
-    <div>
-      <div className="brut-card mb-4" style={{ background: "#fef9c3" }}>
-        <h2 className="text-xl font-black uppercase mb-1">Jeda &amp; Kunci Subtes</h2>
-        <p className="text-sm font-semibold leading-relaxed">
+    <div className="space-y-4">
+      {/* PENJELASAN */}
+      <div className="brut-card" style={{ background: "#fef9c3" }}>
+        <h2 className="text-xl font-black uppercase">Jeda &amp; Kunci Subtes</h2>
+        <p className="mt-1 text-sm font-semibold leading-relaxed">
           Timer sadar-jeda memberi tiap subtes jatah jeda{" "}
-          <strong>{budget ? fmtSec(budget) : "—"}</strong>, supaya mati lampu tidak
-          memakan waktu ujian. Konsekuensinya: kalau siswa <strong>menutup tab</strong>,
-          anti-cheat tidak mencatat apa pun — pencatatan pindah-tab butuh halaman yang
-          masih hidup. Jadi jatah itu juga jendela yang bisa dipakai membuka catatan.
-          Daftar di bawah diurutkan dari <strong>jeda terpanjang</strong> supaya celah
-          itu tetap terlihat.
+          <strong>{budget ? fmtSec(budget) : "—"}</strong>, supaya mati lampu
+          tidak memakan waktu ujian.
         </p>
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm font-semibold leading-relaxed">
+          <li>
+            Kalau siswa <strong>menutup tab</strong>, anti-cheat tidak mencatat
+            apa pun — pencatatan pindah-tab butuh halaman yang masih hidup.
+          </li>
+          <li>
+            Jadi jatah jeda itu juga jendela yang bisa dipakai membuka catatan.
+            Daftar di bawah diurutkan dari <strong>jeda terpanjang</strong>{" "}
+            supaya celah itu tetap terlihat.
+          </li>
+        </ul>
       </div>
 
-      <div className="flex flex-wrap items-end gap-2 mb-4">
-        <div>
-          <label className="block text-xs font-black uppercase">Jenis tes</label>
-          <div className="flex gap-0">
-            {([
-              ["MINAT_BAKAT", "Minat / Bakat"],
-              ["CFIT", "Tes IQ"],
-            ] as const).map(([k, l]) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => setKind(k)}
-                className={`brut-btn ${kind === k ? "brut-btn-black" : "brut-btn-white"} text-xs`}
-              >
-                {l}
-              </button>
-            ))}
+      {/* PENYARING + PENGATURAN BUKA KUNCI */}
+      <div className="brut-card">
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+          <div>
+            <span className="mb-1 block text-xs font-black uppercase">Jenis tes</span>
+            <div className="flex flex-wrap gap-2">
+              {([
+                ["MINAT_BAKAT", "Minat / Bakat"],
+                ["CFIT", "Tes IQ"],
+              ] as const).map(([k, l]) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setKind(k)}
+                  className={`brut-btn ${kind === k ? "brut-btn-black" : "brut-btn-white"} text-xs`}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label htmlFor="jk-nama" className="mb-1 block text-xs font-black uppercase">
+              Nama siswa
+            </label>
+            <input
+              id="jk-nama"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="cari nama"
+              className="brut-input w-full text-sm"
+            />
+          </div>
+          <div>
+            <label htmlFor="jk-token" className="mb-1 block text-xs font-black uppercase">
+              Token
+            </label>
+            <input
+              id="jk-token"
+              value={tokenCode}
+              onChange={(e) => setTokenCode(e.target.value)}
+              placeholder="XXXX-XXXX"
+              className="brut-input w-full text-sm font-black uppercase"
+            />
+          </div>
+          <div>
+            <label htmlFor="jk-urut" className="mb-1 block text-xs font-black uppercase">
+              Urutkan
+            </label>
+            <select
+              id="jk-urut"
+              value={sort}
+              onChange={(e) => setSort(e.target.value === "recent" ? "recent" : "paused")}
+              className="brut-input w-full text-sm"
+            >
+              <option value="paused">Jeda terpanjang</option>
+              <option value="recent">Paling baru</option>
+            </select>
           </div>
         </div>
-        <div>
-          <label className="block text-xs font-black uppercase">Nama siswa</label>
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="cari nama"
-            className="border-4 border-black px-2 py-1 font-bold text-sm"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-black uppercase">Token</label>
-          <input
-            value={tokenCode}
-            onChange={(e) => setTokenCode(e.target.value)}
-            placeholder="XXXX-XXXX"
-            className="border-4 border-black px-2 py-1 font-black uppercase text-sm w-40"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-black uppercase">Urutkan</label>
-          <select
-            value={sort}
-            onChange={(e) => setSort(e.target.value === "recent" ? "recent" : "paused")}
-            className="border-4 border-black px-2 py-1 font-bold text-sm"
-          >
-            <option value="paused">Jeda terpanjang</option>
-            <option value="recent">Paling baru</option>
-          </select>
-        </div>
-        <button type="button" onClick={() => void load()} className="brut-btn brut-btn-black text-xs">
-          {loading ? "MEMUAT…" : "MUAT ULANG"}
-        </button>
-      </div>
 
-      <div className="brut-card mb-4" style={{ background: "#e0f2fe" }}>
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="text-xs font-black uppercase">
-            Waktu tambahan saat membuka kunci
+        <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 border-t-4 border-black pt-3">
+          <label htmlFor="jk-extra" className="flex items-center gap-2 text-xs font-black uppercase">
+            Waktu tambahan
             <input
+              id="jk-extra"
               type="number"
               min={1}
               max={60}
               value={extraMin}
               onChange={(e) => setExtraMin(Number(e.target.value) || 5)}
-              className="ml-2 w-20 border-4 border-black px-2 py-1 font-black"
+              className="brut-input w-20 text-center font-black"
             />
-            <span className="ml-1">menit</span>
+            menit
           </label>
           <label className="flex items-center gap-2 text-xs font-black uppercase">
             <input
               type="checkbox"
+              className="brut-checkbox"
               checked={reopenSession}
               onChange={(e) => setReopenSession(e.target.checked)}
             />
             Buka juga sesi yang sudah tertutup
           </label>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="brut-btn brut-btn-black ml-auto text-xs"
+          >
+            {loading ? "MEMUAT…" : "MUAT ULANG"}
+          </button>
         </div>
       </div>
 
+      {/* PEMBERITAHUAN */}
       {data?.unavailable ? (
-        <div className="brut-card mb-4" style={{ background: "#fecaca" }}>
+        <div className="brut-card" style={{ background: "#fecaca" }}>
           <strong className="font-black uppercase">Data belum tersedia.</strong> Tabel atau
           kolom yang dibutuhkan belum ada di database. Apply migrasi di{" "}
           <code>prisma/sql/</code> lalu muat ulang.
         </div>
       ) : null}
       {data?.pauseColumnsMissing ? (
-        <div className="brut-card mb-4" style={{ background: "#fed7aa" }}>
+        <div className="brut-card" style={{ background: "#fed7aa" }}>
           <strong className="font-black uppercase">Angka jeda masih 0.</strong> Kolom
           timer sadar-jeda belum ada di database, jadi jeda belum tercatat. Apply{" "}
           <code>0007_subtestprogress_pause_columns.sql</code>
@@ -275,20 +300,23 @@ export default function AdminJedaKunci() {
         </div>
       ) : null}
       {error ? (
-        <div className="brut-card mb-4" style={{ background: "#fecaca" }}>
-          {error}
+        <div className="brut-card" style={{ background: "#fecaca" }}>
+          <span className="font-bold text-sm">{error}</span>
         </div>
       ) : null}
       {notice ? (
-        <div className="brut-card mb-4" style={{ background: "#bbf7d0" }}>
+        <div className="brut-card" style={{ background: "#bbf7d0" }}>
           <span className="font-bold text-sm">{notice}</span>
         </div>
       ) : null}
 
       {!loading && data && data.sessions.length === 0 ? (
-        <div className="brut-card">Tidak ada sesi yang cocok dengan filter.</div>
+        <div className="brut-card">
+          <span className="font-bold text-sm">Tidak ada sesi yang cocok dengan filter.</span>
+        </div>
       ) : null}
 
+      {/* DAFTAR SESI */}
       <div className="space-y-3">
         {(data?.sessions ?? []).map((s) => {
           const overBudget = budget > 0 && s.subtests.some((x) => x.pausedSec >= budget);
@@ -302,7 +330,7 @@ export default function AdminJedaKunci() {
               <button
                 type="button"
                 onClick={() => setOpenId(isOpen ? null : s.id)}
-                className="w-full text-left p-3"
+                className="w-full p-3 text-left"
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-black uppercase">{s.fullName ?? "(belum isi nama)"}</span>
@@ -316,28 +344,38 @@ export default function AdminJedaKunci() {
                       DICURIGAI
                     </span>
                   ) : null}
+                  <span className="ml-auto text-lg font-black">{isOpen ? "▾" : "▸"}</span>
                 </div>
-                <div className="text-sm font-bold mt-1">
-                  Total jeda <strong>{fmtSec(s.totalPausedSec)}</strong> dalam{" "}
-                  {s.totalPauseCount}× · subtes terkunci {s.lockedCount} · pelanggaran{" "}
-                  {s.violationCount} · mulai {fmtTime(s.startedAt)}
+                <div className="mt-2 grid gap-1 text-xs font-bold sm:grid-cols-2 lg:grid-cols-4">
+                  <span>
+                    Total jeda <strong>{fmtSec(s.totalPausedSec)}</strong> ({s.totalPauseCount}×)
+                  </span>
+                  <span>
+                    Subtes terkunci <strong>{s.lockedCount}</strong>
+                  </span>
+                  <span>
+                    Pelanggaran <strong>{s.violationCount}</strong>
+                  </span>
+                  <span>
+                    Mulai <strong>{fmtTime(s.startedAt)}</strong>
+                  </span>
                 </div>
               </button>
 
               {isOpen ? (
-                <div className="border-t-4 border-black p-3 overflow-x-auto">
+                <div className="overflow-x-auto border-t-4 border-black p-3">
                   {s.subtests.length === 0 ? (
                     <p className="text-sm font-bold">Belum ada subtes yang dibuka.</p>
                   ) : (
-                    <table className="w-full text-sm">
+                    <table className="brut-table w-full text-sm">
                       <thead>
-                        <tr className="text-left">
-                          <th className="pr-2 font-black uppercase text-xs">Subtes</th>
-                          <th className="pr-2 font-black uppercase text-xs">Terpakai</th>
-                          <th className="pr-2 font-black uppercase text-xs">Sisa</th>
-                          <th className="pr-2 font-black uppercase text-xs">Jeda</th>
-                          <th className="pr-2 font-black uppercase text-xs">Status</th>
-                          <th className="pr-2 font-black uppercase text-xs">Aksi</th>
+                        <tr>
+                          <th className="p-2 text-left text-xs font-black uppercase">Subtes</th>
+                          <th className="p-2 text-right text-xs font-black uppercase">Terpakai</th>
+                          <th className="p-2 text-right text-xs font-black uppercase">Sisa</th>
+                          <th className="p-2 text-right text-xs font-black uppercase">Jeda</th>
+                          <th className="p-2 text-left text-xs font-black uppercase">Status</th>
+                          <th className="p-2 text-right text-xs font-black uppercase">Aksi</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -346,23 +384,25 @@ export default function AdminJedaKunci() {
                           const hot = budget > 0 && sub.pausedSec >= budget * 0.8;
                           return (
                             <tr key={sub.subtestId} className="border-t-2 border-black">
-                              <td className="pr-2 py-1 font-bold">
+                              <td className="p-2 align-top font-bold">
                                 {sub.code}
-                                <div className="text-xs opacity-70">{sub.name}</div>
+                                <div className="text-xs font-semibold opacity-70">{sub.name}</div>
                               </td>
-                              <td className="pr-2 py-1">
+                              <td className="p-2 align-top text-right">
                                 {fmtSec(sub.consumedSec)}
                                 <div className="text-xs opacity-70">dari {fmtSec(sub.durationSec)}</div>
                               </td>
-                              <td className="pr-2 py-1 font-bold">{fmtSec(sub.remainingSec)}</td>
+                              <td className="p-2 align-top text-right font-bold">
+                                {fmtSec(sub.remainingSec)}
+                              </td>
                               <td
-                                className="pr-2 py-1 font-black"
+                                className="p-2 align-top text-right font-black"
                                 style={hot ? { background: "#fca5a5" } : undefined}
                               >
                                 {fmtSec(sub.pausedSec)}
                                 <div className="text-xs font-bold opacity-70">{sub.pauseCount}×</div>
                               </td>
-                              <td className="pr-2 py-1">
+                              <td className="p-2 align-top">
                                 {sub.locked ? (
                                   <span className="brut-tag" style={{ background: "#ef4444", color: "#fff" }}>
                                     {sub.finishReason ?? "TERKUNCI"}
@@ -372,16 +412,16 @@ export default function AdminJedaKunci() {
                                     BERJALAN
                                   </span>
                                 )}
-                                <div className="text-xs opacity-70">
+                                <div className="mt-1 text-xs opacity-70">
                                   denyut {fmtTime(sub.lastSeenAt)}
                                 </div>
                               </td>
-                              <td className="pr-2 py-1">
+                              <td className="p-2 align-top text-right">
                                 <button
                                   type="button"
                                   disabled={busyKey === key}
                                   onClick={() => void unlock(s, sub)}
-                                  className="brut-btn brut-btn-white text-xs"
+                                  className="brut-btn brut-btn-white whitespace-nowrap text-xs"
                                 >
                                   {busyKey === key ? "…" : sub.locked ? "BUKA KUNCI" : "+ WAKTU"}
                                 </button>

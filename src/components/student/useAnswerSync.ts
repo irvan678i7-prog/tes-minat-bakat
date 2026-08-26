@@ -8,7 +8,7 @@ import { useSessionScope } from "./SessionScope";
 type Pending = Record<string, { selected: string | string[]; ts: number }>;
 
 // Jawaban yang DITOLAK server — bukan "selesai", bukan "antri". Ini catatan
-// kehilangan data yang harus dilihat siswa & pengawas.
+// kehilangan data yang harus bisa diperiksa pengawas.
 export type RejectedAnswer = {
   questionId: string;
   selected: string | string[];
@@ -35,6 +35,28 @@ const MAX_BACKOFF_MS = 30000;
 const SESSION_DEAD_BACKOFF_MS = 30000;
 const MAX_REJECTED = 50;
 
+// MASA KEDALUWARSA CATATAN PENOLAKAN.
+//
+// Tanpa batas ini, catatan penolakan menempel di perangkat SELAMANYA. Satu
+// perangkat yang pernah dipakai latihan minggu lalu akan terus menampilkan
+// peringatan kehilangan jawaban kepada siswa berikutnya, padahal sesi itu
+// sudah lama ditutup dan tidak ada lagi yang bisa dilakukan siapa pun.
+// Catatan yang lebih tua dari ini dibuang saat halaman tes dibuka.
+const REJECTED_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
+// BERAPA LAMA JAWABAN "SUBTES BELUM DIMULAI" BOLEH DICOBA ULANG.
+//
+// Server menolak jawaban untuk subtes yang belum punya baris SubtestProgress
+// (penjagaan anti pre-answering). Penyebab paling sering BUKAN kecurangan,
+// melainkan perlombaan: satu putaran flush kebetulan jalan sebelum
+// /subtest-start selesai membuat baris itu — hitungan detik. Dulu jawaban
+// seperti itu dibuang permanen; sekarang dicoba ulang.
+//
+// Batasnya sengaja PENDEK. Kalau dicoba ulang berlama-lama, jawaban untuk
+// subtes yang belum dibuka akan ikut tersimpan begitu subtes itu akhirnya
+// dibuka — justru membuka lubang pre-answering yang dijaga server.
+const NOT_STARTED_RETRY_MAX_AGE_MS = 2 * 60 * 1000;
+
 // Batas waktu SATU request jawaban. Tanpa ini `fetch` bisa menggantung tanpa
 // batas: request dikirim dengan `keepalive`, dan jumlah request keepalive
 // serentak dibatasi browser — antrean besar (mis. 27 jawaban) bisa saling
@@ -57,9 +79,7 @@ const FLUSH_BUDGET_MS = 10000;
 //
 // Sejak antrean dipisah per sesi, ini seharusnya jarang terjadi — tapi tetap
 // dipertahankan sebagai jaring pengaman: itu sampah antrean, BUKAN kehilangan
-// data sesi ini, jadi jangan dicatat sebagai kehilangan dan jangan memicu
-// banner merah. Penolakan lain (mis. 409 "Waktu subtes sudah habis") tetap
-// dilaporkan apa adanya.
+// data sesi ini, jadi jangan dicatat sebagai kehilangan.
 const STALE_STATUSES = [403, 404];
 
 function isStaleStatus(status: number): boolean {
@@ -109,7 +129,7 @@ function migrateLegacyKeys(sessionId?: string | null) {
   }
 }
 
-// Disiarkan ke seluruh halaman supaya banner peringatan (AnswerSyncAlert)
+// Disiarkan ke seluruh halaman supaya banner sesi-berakhir (AnswerSyncAlert)
 // tidak perlu berbagi instance hook dengan SubtestRunner.
 export const ANSWER_REJECTED_EVENT = "tmb:answer-rejected";
 export const SESSION_DEAD_EVENT = "tmb:session-dead";
@@ -133,9 +153,8 @@ function savePending(sessionId: string | null | undefined, p: Pending) {
   }
 }
 
-// Dibaca juga oleh AnswerSyncAlert, termasuk setelah halaman di-refresh:
-// catatan kehilangan data harus selamat dari reload. Selalu kirim id sesi
-// supaya catatan sesi lain tidak ikut terbaca.
+// Catatan penolakan milik SESI INI. Dipakai untuk pemeriksaan pengawas, bukan
+// untuk menakut-nakuti siswa di tengah ujian.
 export function readRejectedAnswers(
   sessionId?: string | null,
 ): RejectedAnswer[] {
@@ -166,9 +185,9 @@ function saveRejected(
 
 export type SyncStatus = "idle" | "syncing" | "queued" | "offline" | "error";
 
-// Hasil satu kali kirim. Dipisah tegas supaya "ditolak" TIDAK BISA lagi
-// tersamar sebagai "berhasil" — itu inti bug audit #2. `stale` dipisah dari
-// `rejected` supaya sampah antrean sesi lain tidak dilaporkan sebagai
+// Hasil satu kali kirim. Dipisah tegas supaya "ditolak" TIDAK BISA tersamar
+// sebagai "berhasil" di dalam antrean — itu inti bug audit #2. `stale` dipisah
+// dari `rejected` supaya sampah antrean sesi lain tidak dihitung sebagai
 // kehilangan data milik siswa yang sedang mengerjakan.
 type SendResult =
   | { kind: "ok" }
@@ -216,23 +235,23 @@ export function useAnswerSync() {
     migrateLegacyKeys(sessionId);
     pendingRef.current = loadPending(sessionId);
     const stored = readRejectedAnswers(sessionId);
-    // Jaring pengaman: catatan berstatus 403/404 bukan kehilangan data sesi
-    // ini (lihat STALE_STATUSES), jadi jangan sampai memunculkan banner merah
-    // palsu yang menempel selamanya.
-    const cleaned = stored.filter((r) => !isStaleStatus(r.status));
+    // Dua pembersihan sekaligus:
+    //   1. status 403/404 bukan kehilangan data sesi ini (lihat STALE_STATUSES)
+    //   2. catatan yang sudah kedaluwarsa — sisa sesi lama di perangkat ini
+    const freshAfter = Date.now() - REJECTED_MAX_AGE_MS;
+    const cleaned = stored.filter(
+      (r) => !isStaleStatus(r.status) && r.ts >= freshAfter,
+    );
     rejectedRef.current = cleaned;
     if (cleaned.length !== stored.length) saveRejected(sessionId, cleaned);
     updateCount();
     setRejectedCount(cleaned.length);
-    // Kehilangan data dari sesi sebelumnya harus tetap terlihat setelah
-    // refresh, bukan hilang bersama state React.
-    if (cleaned.length > 0) setStatus("error");
 
-    // VERIFIKASI KE SERVER. Catatan penolakan hanya boleh memicu badge merah
-    // kalau jawabannya BENAR-BENAR tidak ada di server. Kalau ternyata sudah
-    // tersimpan — misalnya percobaan lain berhasil, atau server menerimanya
-    // sebagai susulan — catatannya dibuang supaya siswa tidak ditakuti
-    // peringatan yang sudah tidak benar.
+    // VERIFIKASI KE SERVER. Catatan penolakan hanya berarti kalau jawabannya
+    // BENAR-BENAR tidak ada di server. Kalau ternyata sudah tersimpan —
+    // misalnya percobaan lain berhasil, atau server menerimanya sebagai
+    // susulan — catatannya dibuang supaya pengawas tidak mengejar masalah
+    // yang sudah tidak ada.
     if (cleaned.length === 0) return;
     let alive = true;
     const ids = cleaned.map((r) => r.questionId);
@@ -253,11 +272,6 @@ export function useAnswerSync() {
         if (keep.length === rejectedRef.current.length) return;
         rejectedRef.current = keep;
         persistRejected();
-        if (keep.length === 0) {
-          setStatus(
-            Object.keys(pendingRef.current).length > 0 ? "queued" : "idle",
-          );
-        }
       } catch {
         // Offline atau server tidak menjawab — biarkan catatan apa adanya.
       }
@@ -278,9 +292,7 @@ export function useAnswerSync() {
   // Server memakainya untuk menerima jawaban SUSULAN: jawaban yang dipilih
   // sebelum subtes terkunci tetap disimpan walau baru sampai setelah terkunci
   // (mati lampu, jaringan putus, atau antrean belum habis saat tombol
-  // "SELESAIKAN SUBTES" ditekan). Tanpa ini jawaban seperti itu ditolak 409
-  // dan dicatat sebagai kehilangan data — itulah badge "GAGAL SYNC" yang
-  // muncul padahal siswa sudah menjawab.
+  // "SELESAIKAN SUBTES" ditekan).
   const sendOne = async (
     questionId: string,
     selected: string | string[],
@@ -311,16 +323,33 @@ export function useAnswerSync() {
       // perangkat yang sama. Bukan kehilangan data siswa ini.
       if (isStaleStatus(res.status)) return { kind: "stale", status: res.status };
       if (res.status >= 400) {
-        // 4xx lain (mis. 409 "Waktu subtes sudah habis") = penolakan permanen.
-        // Mengulang tidak akan menolong, tapi ini WAJIB dilaporkan, bukan
-        // disembunyikan.
         let error = "";
+        let code = "";
         try {
-          const body = (await res.json()) as { error?: unknown };
+          const body = (await res.json()) as {
+            error?: unknown;
+            code?: unknown;
+          };
           if (typeof body?.error === "string") error = body.error;
+          if (typeof body?.code === "string") code = body.code;
         } catch {
           // body bukan JSON — pakai pesan bawaan di bawah.
         }
+        // "Subtes belum dimulai" hampir selalu PERLOMBAAN, bukan penolakan
+        // sungguhan: putaran flush ini jalan sebelum /subtest-start selesai
+        // membuat baris SubtestProgress, jadi server belum punya timer untuk
+        // memeriksa jawaban ini. Coba ulang — tapi hanya selama jawabannya
+        // masih sangat baru, supaya ini tidak berubah menjadi jalur
+        // pre-answering untuk subtes yang belum dibuka.
+        if (
+          code === "SUBTEST_NOT_STARTED" &&
+          answeredAgoMs < NOT_STARTED_RETRY_MAX_AGE_MS
+        ) {
+          return { kind: "retry" };
+        }
+        // 4xx lain (mis. 409 di luar jendela susulan) = penolakan permanen.
+        // Mengulang tidak akan menolong, tapi ini WAJIB dicatat, bukan
+        // dianggap berhasil.
         return {
           kind: "rejected",
           status: res.status,
@@ -349,7 +378,7 @@ export function useAnswerSync() {
     }
     const ids = Object.keys(pendingRef.current);
     if (ids.length === 0) {
-      setStatus(rejectedRef.current.length > 0 ? "error" : "idle");
+      setStatus("idle");
       return;
     }
     flushingRef.current = true;
@@ -386,7 +415,7 @@ export function useAnswerSync() {
         if (result.kind === "ok") {
           if (!bumped) delete pendingRef.current[qid];
           // Akhirnya tersimpan → catatan penolakan lama untuk soal ini sudah
-          // tidak benar lagi, jangan biarkan memicu badge merah.
+          // tidak benar lagi.
           if (rejectedRef.current.some((r) => r.questionId === qid)) {
             rejectedRef.current = rejectedRef.current.filter(
               (r) => r.questionId !== qid,
@@ -407,7 +436,13 @@ export function useAnswerSync() {
         if (result.kind === "rejected") {
           // Keluarkan dari antrean supaya tidak berputar selamanya, TAPI catat
           // sebagai kehilangan data — inilah yang dulu dibuang diam-diam.
+          // Catatan ini TIDAK ditampilkan ke siswa (lihat AnswerSyncAlert):
+          // di tengah ujian siswa tidak bisa berbuat apa pun soal ini, jadi
+          // yang perlu tahu adalah pengawas.
           if (!bumped) delete pendingRef.current[qid];
+          console.warn(
+            `[answer-sync] jawaban DITOLAK server (status ${result.status}): ${result.error}`,
+          );
           rejectedRef.current = [
             ...rejectedRef.current.filter((r) => r.questionId !== qid),
             {
@@ -441,7 +476,8 @@ export function useAnswerSync() {
 
     if (unauthorized) setSessionExpired(true);
 
-    // Siarkan supaya banner peringatan bisa muncul dari mana saja di halaman.
+    // Siarkan supaya pengawas/halaman lain bisa bereaksi. Banner merah untuk
+    // siswa sudah dihapus, tapi event-nya dipertahankan sebagai titik sambung.
     if (typeof window !== "undefined") {
       if (anyRejected) {
         window.dispatchEvent(
@@ -453,10 +489,12 @@ export function useAnswerSync() {
       if (unauthorized) window.dispatchEvent(new CustomEvent(SESSION_DEAD_EVENT));
     }
 
-    if (anyRejected || unauthorized || rejectedRef.current.length > 0) {
-      // Status TIDAK BOLEH "idle"/hijau selama masih ada jawaban yang gagal.
-      setStatus("error");
-    } else if (anyFailed) {
+    // Badge sinkronisasi menggambarkan ANTREAN YANG HIDUP saja. Catatan
+    // penolakan tidak lagi mewarnai badge merah: sejak jawaban susulan
+    // diterima server, hampir semua penolakan yang tersisa adalah kejadian
+    // lama yang tidak bisa ditindaklanjuti siswa, dan badge merah permanen di
+    // tengah ujian hanya membuat panik.
+    if (anyFailed) {
       setStatus("queued");
     } else {
       setStatus("idle");
@@ -538,7 +576,7 @@ export function useAnswerSync() {
     return () => clearInterval(id);
   }, [flush]);
 
-  // Buang catatan penolakan (dipakai tombol "MENGERTI" di banner peringatan).
+  // Buang catatan penolakan.
   const clearRejected = useCallback(() => {
     rejectedRef.current = [];
     persistRejected();
