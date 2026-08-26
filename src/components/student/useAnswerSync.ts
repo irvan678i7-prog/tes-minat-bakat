@@ -272,18 +272,21 @@ export function useAnswerSync() {
   // pindah soal/subtes tidak hilang. `signal` memberi batas waktu keras
   // supaya request yang menggantung tidak ikut menahan flush().
   //
-  // `answeredAtMs` = kapan siswa MEMILIH jawaban ini di perangkatnya. Server
-  // memakainya untuk menerima jawaban SUSULAN: jawaban yang dipilih sebelum
-  // subtes terkunci tetap disimpan walau baru sampai setelah terkunci (mati
-  // lampu, jaringan putus, atau antrean belum habis saat tombol
+  // `pickedAtMs` = kapan siswa MEMILIH jawaban ini. Yang dikirim ke server
+  // adalah USIA jawaban (sekarang - waktu pilih), bukan jam perangkat, supaya
+  // jam perangkat yang tidak akurat tidak ikut menolak jawaban yang sah.
+  // Server memakainya untuk menerima jawaban SUSULAN: jawaban yang dipilih
+  // sebelum subtes terkunci tetap disimpan walau baru sampai setelah terkunci
+  // (mati lampu, jaringan putus, atau antrean belum habis saat tombol
   // "SELESAIKAN SUBTES" ditekan). Tanpa ini jawaban seperti itu ditolak 409
   // dan dicatat sebagai kehilangan data — itulah badge "GAGAL SYNC" yang
   // muncul padahal siswa sudah menjawab.
   const sendOne = async (
     questionId: string,
     selected: string | string[],
-    answeredAtMs: number,
+    pickedAtMs: number,
   ): Promise<SendResult> => {
+    const answeredAgoMs = Math.max(0, Date.now() - pickedAtMs);
     const controller =
       typeof AbortController === "undefined" ? null : new AbortController();
     const timeoutId = controller
@@ -293,7 +296,7 @@ export function useAnswerSync() {
       const res = await fetch("/api/student/test/answer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ questionId, selected, answeredAtMs }),
+        body: JSON.stringify({ questionId, selected, answeredAgoMs }),
         keepalive: true,
         signal: controller ? controller.signal : undefined,
       });

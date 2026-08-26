@@ -4,14 +4,6 @@ import { prisma } from "@/lib/db";
 import { getStudentFromRequest } from "@/lib/auth";
 import { projectSubtestTime, TIME_UP_GRACE_SEC } from "@/lib/subtestLock";
 
-const Body = z.object({
-  questionId: z.string().min(1),
-  selected: z.union([z.string(), z.array(z.string())]),
-  // Kapan siswa MEMILIH jawaban ini di perangkatnya (epoch milidetik).
-  // Opsional supaya klien versi lama tetap bisa mengirim jawaban.
-  answeredAtMs: z.number().int().positive().optional(),
-});
-
 // JAWABAN SUSULAN (late sync)
 //
 // Jawaban yang DIPILIH sebelum subtes terkunci tapi baru sampai ke server
@@ -22,25 +14,39 @@ const Body = z.object({
 // padahal siswa benar-benar sudah mengerjakannya — itulah sumber badge
 // "GAGAL SYNC" dan laporan "jawaban tidak tersimpan".
 //
+// Yang dikirim klien adalah USIA jawaban (dipilih berapa milidetik yang lalu),
+// BUKAN jam perangkat. Ini penting: jam perangkat sekolah sering tidak akurat,
+// dan membandingkan jam perangkat dengan jam server akan menolak jawaban yang
+// sah. Selisih dua Date.now() di perangkat yang sama tetap benar walau jam
+// perangkatnya salah.
+//
 // Penjagaan supaya ini TIDAK bisa dipakai menambah jawaban setelah waktu
 // habis:
 //   1. waktu pilih harus sebelum subtes terkunci (+ TIME_UP_GRACE_SEC)
 //   2. susulan hanya diterima dalam LATE_SYNC_WINDOW_SEC setelah terkunci
-//   3. waktu pilih tidak boleh berada di masa depan
-//   4. waktu pilih dari perangkat siswa disimpan apa adanya di
-//      Answer.answeredAt, jadi pengawas tetap bisa memeriksanya
+//   3. usia jawaban dibatasi MAX_ANSWER_AGE_MS
+//   4. waktu pilih hasil hitungan disimpan di Answer.answeredAt, jadi
+//      pengawas tetap bisa memeriksa kapan jawaban itu dipilih
 const LATE_SYNC_WINDOW_SEC = 15 * 60;
-const CLOCK_SKEW_TOLERANCE_MS = 60 * 1000;
+const MAX_ANSWER_AGE_MS = 24 * 60 * 60 * 1000;
+
+const Body = z.object({
+  questionId: z.string().min(1),
+  selected: z.union([z.string(), z.array(z.string())]),
+  // Jawaban ini dipilih berapa milidetik yang lalu (Date.now() - waktu pilih).
+  // Opsional supaya klien versi lama tetap bisa mengirim jawaban.
+  answeredAgoMs: z.number().int().min(0).max(MAX_ANSWER_AGE_MS).optional(),
+});
 
 function pickedBeforeLock(
-  answeredAtMs: number | undefined,
+  answeredAgoMs: number | undefined,
   lockedAt: Date | null | undefined,
   now: Date,
 ): Date | null {
-  if (!answeredAtMs || !lockedAt) return null;
-  const answeredAt = new Date(answeredAtMs);
-  if (Number.isNaN(answeredAt.getTime())) return null;
-  if (answeredAt.getTime() > now.getTime() + CLOCK_SKEW_TOLERANCE_MS) return null;
+  if (answeredAgoMs === undefined || !lockedAt) return null;
+  if (!Number.isFinite(answeredAgoMs) || answeredAgoMs < 0) return null;
+  if (answeredAgoMs > MAX_ANSWER_AGE_MS) return null;
+  const answeredAt = new Date(now.getTime() - answeredAgoMs);
   if (answeredAt.getTime() > lockedAt.getTime() + TIME_UP_GRACE_SEC * 1000) {
     return null;
   }
@@ -110,7 +116,7 @@ export async function POST(req: NextRequest) {
   // Seluruh tes sudah ditutup. Jawaban yang dipilih sebelum tes ditutup tetap
   // diterima sebagai susulan.
   if (sub.finishedAt) {
-    const late = pickedBeforeLock(parsed.data.answeredAtMs, sub.finishedAt, now);
+    const late = pickedBeforeLock(parsed.data.answeredAgoMs, sub.finishedAt, now);
     if (late) {
       await saveAnswer(late);
       return NextResponse.json({ ok: true, lateSync: true });
@@ -152,7 +158,7 @@ export async function POST(req: NextRequest) {
   if (progress?.finishedAt) {
     // SUSULAN: dipilih sebelum subtes terkunci → tetap disimpan, tidak dibuang.
     const late = pickedBeforeLock(
-      parsed.data.answeredAtMs,
+      parsed.data.answeredAgoMs,
       progress.finishedAt,
       now,
     );
@@ -196,7 +202,7 @@ export async function POST(req: NextRequest) {
       const deadline = new Date(
         now.getTime() - Math.max(0, projected.consumedSec - durationSec) * 1000,
       );
-      const late = pickedBeforeLock(parsed.data.answeredAtMs, deadline, now);
+      const late = pickedBeforeLock(parsed.data.answeredAgoMs, deadline, now);
       if (late) {
         await saveAnswer(late);
         return NextResponse.json({ ok: true, lateSync: true });
