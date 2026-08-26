@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSessionScope } from "./SessionScope";
 import {
   ANSWER_REJECTED_EVENT,
   SESSION_DEAD_EVENT,
@@ -20,17 +21,20 @@ import {
 //
 // Komponen ini tidak berbagi instance hook dengan SubtestRunner — ia membaca
 // localStorage dan mendengar event, jadi bisa dipasang dari layout tanpa
-// menyentuh file tes yang sudah besar.
+// menyentuh file tes yang sudah besar. Catatan yang dibaca HANYA milik sesi
+// tes ini (lihat SessionScope), supaya sisa jawaban sesi lain di perangkat
+// yang sama tidak dilaporkan sebagai kehilangan data siswa ini.
 export default function AnswerSyncAlert() {
+  const sessionId = useSessionScope();
   const [rejected, setRejected] = useState<RejectedAnswer[]>([]);
   const [sessionDead, setSessionDead] = useState(false);
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
-    setRejected(readRejectedAnswers());
+    setRejected(readRejectedAnswers(sessionId));
 
     const onRejected = () => {
-      setRejected(readRejectedAnswers());
+      setRejected(readRejectedAnswers(sessionId));
       setDismissed(false);
     };
     const onDead = () => {
@@ -40,13 +44,16 @@ export default function AnswerSyncAlert() {
     window.addEventListener(ANSWER_REJECTED_EVENT, onRejected);
     window.addEventListener(SESSION_DEAD_EVENT, onDead);
     // Jaring pengaman kalau event terlewat (mis. komponen baru dipasang).
-    const id = setInterval(() => setRejected(readRejectedAnswers()), 5000);
+    const id = setInterval(
+      () => setRejected(readRejectedAnswers(sessionId)),
+      5000,
+    );
     return () => {
       window.removeEventListener(ANSWER_REJECTED_EVENT, onRejected);
       window.removeEventListener(SESSION_DEAD_EVENT, onDead);
       clearInterval(id);
     };
-  }, []);
+  }, [sessionId]);
 
   if (dismissed) return null;
   if (!sessionDead && rejected.length === 0) return null;

@@ -50,6 +50,7 @@ di DB, lalu menjalankan `ALTER TABLE` yang diperlukan secara otomatis.
 | `prisma/sql/0008_submission_resume_code.sql` | "Kode Lanjut": kolom `resumeCode` + unique index di `Submission` untuk melanjutkan sesi yang cookie-nya hilang | **PERLU DI-APPLY** |
 | `prisma/sql/0009_cfit_pause_and_resume.sql` | **Anti mati lampu TES IQ**: kolom `consumedSec`, `lastSeenAt`, `pauseCount`, `pausedSec` di `CfitSubtestProgress` + `resumeCode` (unique) di `CfitSubmission` + backfill sesi lama & sesi berjalan | **PERLU DI-APPLY** |
 | `prisma/sql/0010_resume_link_single_use.sql` | Link pemulihan SEKALI PAKAI: kolom `resumeLinkJti` & `resumeLinkUsedAt` di `Submission` dan `CfitSubmission` | **PERLU DI-APPLY** |
+| `prisma/sql/0011_token_school_columns.sql` | **Fix tombol BUAT TOKEN**: kolom `school` di `AccessToken`, `school` & `grade` di `CfitAccessToken`, plus `nis` di `CfitSubmission` — kolom yang sudah dipakai kode tapi belum pernah punya migrasi | **PERLU DI-APPLY** |
 
 Setiap SQL di folder `prisma/sql/` ditulis idempoten, jadi tidak masalah
 kalau kamu jalankan ulang.
@@ -70,6 +71,13 @@ fiturnya mati sebagian — jadi jangan dianggap opsional:
 |----------------|--------|
 | `0009` | Tes IQ kembali memakai timer jam dinding lama (mati lampu tetap menghabiskan waktu subtes) dan "Kode Lanjut" tes IQ tidak muncul. Peringatan `[cfit/lock]` / `[cfit/resume]` tercatat di log server. |
 | `0010` | Link pemulihan pengawas tetap berfungsi tapi **belum benar-benar sekali pakai** (masih bisa dibuka berkali-kali sampai 30 menit). Peringatan `[resume]` tercatat di log server. |
+
+### Kalau 0011 belum di-apply
+
+Berbeda dari 0009/0010, yang ini **tidak** ada jalur amannya di kode: tombol
+"BUAT TOKEN" (minat-bakat maupun tes IQ) akan gagal dengan pesan umum "Gagal
+generate", dan daftar token tampil kosong karena request GET-nya juga ikut
+gagal. Tanpa token, tidak ada siswa yang bisa mulai tes.
 
 ## Untuk perubahan schema ke depan
 
