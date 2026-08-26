@@ -20,14 +20,31 @@ import { projectSubtestTime, TIME_UP_GRACE_SEC } from "@/lib/subtestLock";
 // sah. Selisih dua Date.now() di perangkat yang sama tetap benar walau jam
 // perangkatnya salah.
 //
-// Penjagaan supaya ini TIDAK bisa dipakai menambah jawaban setelah waktu
-// habis:
+// Penjagaan supaya ini TIDAK bisa dipakai menambah ATAU MENGUBAH jawaban
+// setelah waktu habis:
 //   1. waktu pilih harus sebelum subtes terkunci (+ TIME_UP_GRACE_SEC)
 //   2. susulan hanya diterima dalam LATE_SYNC_WINDOW_SEC setelah terkunci
 //   3. usia jawaban dibatasi MAX_ANSWER_AGE_MS
-//   4. waktu pilih hasil hitungan disimpan di Answer.answeredAt, jadi
+//   4. susulan hanya MENGISI yang masih kosong — jawaban yang sudah tersimpan
+//      saat subtes masih terbuka TIDAK BISA ditimpa lewat jalur ini
+//   5. waktu pilih hasil hitungan disimpan di Answer.answeredAt, jadi
 //      pengawas tetap bisa memeriksa kapan jawaban itu dipilih
-const LATE_SYNC_WINDOW_SEC = 15 * 60;
+//
+// JENDELA SUSULAN: 60 menit, dihitung dari saat subtes terkunci.
+//
+// Sebelumnya 15 menit, dan itu terlalu pendek untuk kejadian yang justru
+// paling sering terjadi di sekolah: mati lampu. Listrik mati 20 menit =
+// seluruh jawaban sisa di antrean ditolak, padahal semuanya dipilih dengan sah
+// sebelum waktu habis.
+//
+// Yang menjaga integritas ujian BUKAN panjang jendela ini, melainkan penjagaan
+// nomor 1 dan 4: waktu pilih harus sebelum kunci, dan susulan tidak bisa
+// menimpa jawaban yang sudah tersimpan. Jendela ini hanya membatasi berapa
+// lama server mau mendengar klaim "ini saya pilih sebelum waktu habis", jadi
+// memperlebarnya dari 15 ke 60 menit tidak menambah cara baru untuk berbuat
+// curang — hanya memperpanjang masa berlaku klaim yang tetap harus lolos
+// semua penjagaan lain.
+const LATE_SYNC_WINDOW_SEC = 60 * 60;
 const MAX_ANSWER_AGE_MS = 24 * 60 * 60 * 1000;
 
 const Body = z.object({
@@ -113,13 +130,52 @@ export async function POST(req: NextRequest) {
     });
   };
 
+  // SUSULAN HANYA MENGISI YANG KOSONG (penjagaan nomor 4).
+  //
+  // Jawaban yang sudah tersimpan saat subtes masih terbuka adalah bukti yang
+  // jauh lebih kuat daripada klaim usia yang datang dari perangkat, jadi
+  // jawaban itulah yang dipakai dan susulan TIDAK menimpanya.
+  //
+  // Konsekuensinya jujur: perubahan jawaban di detik-detik terakhir yang tidak
+  // sempat sampai ke server tidak akan diterapkan — pilihan sebelumnya yang
+  // berlaku. Itu jauh lebih ringan daripada kehilangan jawaban sama sekali,
+  // dan menutup penyalahgunaan "ganti jawaban setelah subtes dikunci" yang
+  // kalau tidak dijaga akan terbuka lebar begitu jendela susulan diperlebar.
+  //
+  // Dipakai `create` + tangani P2002, bukan `upsert`, supaya dua susulan yang
+  // datang bersamaan tetap aman: yang lebih dulu tersimpan menang.
+  // Mengembalikan true kalau jawaban benar-benar ditulis.
+  const saveLateAnswer = async (answeredAt: Date): Promise<boolean> => {
+    try {
+      await prisma.answer.create({
+        data: {
+          submissionId,
+          questionId,
+          selected: parsed.data.selected as never,
+          answeredAt,
+        },
+      });
+      return true;
+    } catch (err) {
+      const code = (err as { code?: unknown } | null)?.code;
+      // Sudah ada jawaban untuk soal ini (unique submissionId_questionId).
+      if (code === "P2002") return false;
+      // Galat lain (mis. database bermasalah) JANGAN disamarkan sebagai
+      // sukses — biarkan jadi 500 supaya klien mencoba ulang.
+      throw err;
+    }
+  };
+
   // Seluruh tes sudah ditutup. Jawaban yang dipilih sebelum tes ditutup tetap
   // diterima sebagai susulan.
   if (sub.finishedAt) {
     const late = pickedBeforeLock(parsed.data.answeredAgoMs, sub.finishedAt, now);
     if (late) {
-      await saveAnswer(late);
-      return NextResponse.json({ ok: true, lateSync: true });
+      // stored=false berarti soal ini sudah ada jawabannya. Tetap ok:true:
+      // tidak ada yang hilang, klien harus berhenti mencoba dan TIDAK boleh
+      // mencatatnya sebagai kehilangan data.
+      const stored = await saveLateAnswer(late);
+      return NextResponse.json({ ok: true, lateSync: true, stored });
     }
     return NextResponse.json({ error: "Tes sudah selesai" }, { status: 400 });
   }
@@ -144,10 +200,22 @@ export async function POST(req: NextRequest) {
   // timer subtes berjalan ("pre-answering") karena semua pemeriksaan waktu
   // di bawah hanya berlaku saat `progress` ada. Soal contoh dikecualikan,
   // sama seperti pada alur CFIT.
+  //
+  // TIDAK ADA jalur susulan di sini, dan itu memang disengaja: tanpa baris
+  // progress tidak ada timer sama sekali, jadi tidak ada apa pun yang bisa
+  // dipakai memeriksa apakah jawaban ini dipilih pada saat yang sah.
+  // Menerimanya = membuka lubang pre-answering yang dijaga blok ini.
+  //
+  // Tapi penyebab paling sering di lapangan BUKAN kecurangan, melainkan
+  // perlombaan: satu putaran flush kebetulan jalan sebelum /subtest-start
+  // selesai membuat baris ini. Karena itu ditambahkan penanda mesin `code`,
+  // supaya klien bisa MENCOBA ULANG sebentar (lihat NOT_STARTED_RETRY_MAX_AGE_MS
+  // di useAnswerSync) dan tidak membuang jawaban yang sebenarnya sah.
   if (!progress && !q.isExample) {
     return NextResponse.json(
       {
         error: "Subtes belum dimulai. Buka subtes terlebih dahulu.",
+        code: "SUBTEST_NOT_STARTED",
         locked: true,
         finishReason: null,
       },
@@ -163,8 +231,8 @@ export async function POST(req: NextRequest) {
       now,
     );
     if (late) {
-      await saveAnswer(late);
-      return NextResponse.json({ ok: true, lateSync: true });
+      const stored = await saveLateAnswer(late);
+      return NextResponse.json({ ok: true, lateSync: true, stored });
     }
     return NextResponse.json(
       {
@@ -204,8 +272,8 @@ export async function POST(req: NextRequest) {
       );
       const late = pickedBeforeLock(parsed.data.answeredAgoMs, deadline, now);
       if (late) {
-        await saveAnswer(late);
-        return NextResponse.json({ ok: true, lateSync: true });
+        const stored = await saveLateAnswer(late);
+        return NextResponse.json({ ok: true, lateSync: true, stored });
       }
       return NextResponse.json(
         { error: "Waktu subtes sudah habis. Jawaban tidak bisa diubah.", locked: true, finishReason: "TIME_UP" },
@@ -233,8 +301,8 @@ export async function POST(req: NextRequest) {
 //
 // Dipakai useAnswerSync saat halaman tes dibuka: catatan "gagal sync" yang
 // ternyata jawabannya sudah ada di server (mis. percobaan lain berhasil, atau
-// diterima sebagai susulan) dibuang, supaya badge "GAGAL SYNC" dan banner
-// merah hanya muncul untuk kehilangan data yang nyata.
+// diterima sebagai susulan) dibuang, supaya catatan kehilangan data hanya
+// berisi kehilangan yang nyata.
 export async function GET(req: NextRequest) {
   const student = getStudentFromRequest(req);
   if (!student) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

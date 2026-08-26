@@ -44,6 +44,19 @@ const MAX_REJECTED = 50;
 // Catatan yang lebih tua dari ini dibuang saat halaman tes dibuka.
 const REJECTED_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
+// BERAPA LAMA JAWABAN "SUBTES BELUM DIMULAI" BOLEH DICOBA ULANG.
+//
+// Server menolak jawaban untuk subtes yang belum punya baris SubtestProgress
+// (penjagaan anti pre-answering). Penyebab paling sering BUKAN kecurangan,
+// melainkan perlombaan: satu putaran flush kebetulan jalan sebelum
+// /subtest-start selesai membuat baris itu — hitungan detik. Dulu jawaban
+// seperti itu dibuang permanen; sekarang dicoba ulang.
+//
+// Batasnya sengaja PENDEK. Kalau dicoba ulang berlama-lama, jawaban untuk
+// subtes yang belum dibuka akan ikut tersimpan begitu subtes itu akhirnya
+// dibuka — justru membuka lubang pre-answering yang dijaga server.
+const NOT_STARTED_RETRY_MAX_AGE_MS = 2 * 60 * 1000;
+
 // Batas waktu SATU request jawaban. Tanpa ini `fetch` bisa menggantung tanpa
 // batas: request dikirim dengan `keepalive`, dan jumlah request keepalive
 // serentak dibatasi browser — antrean besar (mis. 27 jawaban) bisa saling
@@ -310,16 +323,33 @@ export function useAnswerSync() {
       // perangkat yang sama. Bukan kehilangan data siswa ini.
       if (isStaleStatus(res.status)) return { kind: "stale", status: res.status };
       if (res.status >= 400) {
-        // 4xx lain (mis. 409 di luar jendela susulan) = penolakan permanen.
-        // Mengulang tidak akan menolong, tapi ini WAJIB dicatat, bukan
-        // dianggap berhasil.
         let error = "";
+        let code = "";
         try {
-          const body = (await res.json()) as { error?: unknown };
+          const body = (await res.json()) as {
+            error?: unknown;
+            code?: unknown;
+          };
           if (typeof body?.error === "string") error = body.error;
+          if (typeof body?.code === "string") code = body.code;
         } catch {
           // body bukan JSON — pakai pesan bawaan di bawah.
         }
+        // "Subtes belum dimulai" hampir selalu PERLOMBAAN, bukan penolakan
+        // sungguhan: putaran flush ini jalan sebelum /subtest-start selesai
+        // membuat baris SubtestProgress, jadi server belum punya timer untuk
+        // memeriksa jawaban ini. Coba ulang — tapi hanya selama jawabannya
+        // masih sangat baru, supaya ini tidak berubah menjadi jalur
+        // pre-answering untuk subtes yang belum dibuka.
+        if (
+          code === "SUBTEST_NOT_STARTED" &&
+          answeredAgoMs < NOT_STARTED_RETRY_MAX_AGE_MS
+        ) {
+          return { kind: "retry" };
+        }
+        // 4xx lain (mis. 409 di luar jendela susulan) = penolakan permanen.
+        // Mengulang tidak akan menolong, tapi ini WAJIB dicatat, bukan
+        // dianggap berhasil.
         return {
           kind: "rejected",
           status: res.status,
