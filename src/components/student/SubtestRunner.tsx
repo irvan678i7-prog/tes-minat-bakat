@@ -26,6 +26,15 @@ type ExampleQuestion = Question & { correct: unknown };
 const STORAGE_KEY = (subtestCode: string) => `tmb-runner-${subtestCode}`;
 const STARTED_KEY = (subtestCode: string) => `tmb-runner-started-${subtestCode}`;
 
+// Batas waktu menunggu antrean jawaban terkirim sebelum subtes dikunci.
+// Sisanya tetap dikirim ulang di latar belakang oleh useAnswerSync, jadi
+// menunggu lebih lama tidak menambah keamanan data — hanya membuat tombol
+// "SELESAIKAN SUBTES" tampak macet.
+const FLUSH_WAIT_MS = 8000;
+// Batas waktu request kunci subtes. Tanpa ini request yang menggantung membuat
+// tombol berhenti di "MENGUNCI…" tanpa ujung.
+const FINISH_TIMEOUT_MS = 12000;
+
 function fmtTime(s: number): string {
   if (s < 0) s = 0;
   const m = Math.floor(s / 60);
@@ -278,8 +287,14 @@ export default function SubtestRunner({
     }
     (async () => {
       try {
-        // Flush any pending answers first.
-        await sync.flush();
+        // Flush any pending answers first — dibatasi FLUSH_WAIT_MS supaya
+        // request yang menggantung tidak menahan penyelesaian tes.
+        await Promise.race([
+          sync.flush(),
+          new Promise<void>((resolve) => {
+            setTimeout(() => resolve(), FLUSH_WAIT_MS);
+          }),
+        ]);
       } catch {
         // ignore; finish still runs.
       }
@@ -358,7 +373,7 @@ export default function SubtestRunner({
   const goNext = () => setIdx((i) => Math.min(i + 1, questions.length - 1));
   const goPrev = () => setIdx((i) => Math.max(i - 1, 0));
 
-  // ── Gulir ke ATAS setiap ganti soal ───────────────────────────────
+  // ── Gulir ke ATAS setiap ganti soal ─────────────────────────────────
   // Tombol SEBELUMNYA/SELANJUTNYA dan panel "Loncat ke Soal" ada di BAWAH
   // halaman. Tanpa ini, posisi scroll bertahan di bawah setelah pindah soal,
   // sehingga siswa melihat bagian bawah soal baru (pilihan jawaban / navigasi)
@@ -395,21 +410,51 @@ export default function SubtestRunner({
     setLocking(true);
     // Flush jawaban yang masih dalam buffer ke server SEBELUM kunci
     // subtes — supaya server tidak menolak dengan 409 "sudah dikunci".
+    // Menunggunya DIBATASI FLUSH_WAIT_MS: kalau antrean masih panjang atau
+    // jaringan lambat, sisanya tetap dikirim ulang di latar belakang oleh
+    // useAnswerSync. Tanpa batas ini tombol bisa berhenti di "MENGUNCI…".
     try {
-      await sync.flush();
+      await Promise.race([
+        sync.flush(),
+        new Promise<void>((resolve) => {
+          setTimeout(() => resolve(), FLUSH_WAIT_MS);
+        }),
+      ]);
     } catch {
       // ignore — retries will continue in background on next page
     }
     // Kunci subtes di server. Idempoten; aman dipanggil >1 kali.
+    let locked = false;
+    const controller =
+      typeof AbortController === "undefined" ? null : new AbortController();
+    const timeoutId = controller
+      ? setTimeout(() => controller.abort(), FINISH_TIMEOUT_MS)
+      : null;
     try {
-      await fetch("/api/student/test/subtest-finish", {
+      const res = await fetch("/api/student/test/subtest-finish", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ subtestCode: subtest.code, reason }),
+        signal: controller ? controller.signal : undefined,
       });
+      locked = res.ok;
     } catch {
-      // Best-effort; lazy-lock di /test akan tetap mengunci kalau timer
-      // sudah lewat. Kita lanjut redirect.
+      // Jaringan mati / timeout.
+      locked = false;
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+
+    if (!locked) {
+      // JANGAN pura-pura terkunci. Kode lama tetap menghapus state timer lalu
+      // redirect ke /test walau request-nya gagal, dan `locking` TIDAK PERNAH
+      // direset — jadi tombol mati permanen di "MENGUNCI…" tanpa jalan keluar.
+      // Sekarang tombol dihidupkan lagi supaya siswa bisa mencoba ulang.
+      setLocking(false);
+      toast.error(
+        "Gagal mengunci subtes: koneksi bermasalah. Periksa jaringan lalu tekan tombol ini lagi. Jawaban Anda tetap tersimpan.",
+      );
+      return;
     }
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(STORAGE_KEY(subtest.code));
@@ -650,7 +695,7 @@ export default function SubtestRunner({
                   const ok = await brutConfirm({
                     title: "Selesaikan Subtes?",
                     tone: "danger",
-                    icon: "🔒",
+                    icon: "\ud83d\udd12",
                     message:
                       unanswered > 0
                         ? `Masih ada ${unanswered} soal yang belum dijawab.\n\nSubtes akan DIKUNCI dan TIDAK BISA dibuka lagi setelah ini.`
@@ -982,7 +1027,7 @@ export default function SubtestRunner({
                 const ok = await brutConfirm({
                   title: "Selesaikan Subtes?",
                   tone: "danger",
-                  icon: "🔒",
+                  icon: "\ud83d\udd12",
                   message:
                     unanswered > 0
                       ? `Masih ada ${unanswered} soal yang belum dijawab.\n\nSubtes akan DIKUNCI dan TIDAK BISA dibuka lagi setelah ini.`
