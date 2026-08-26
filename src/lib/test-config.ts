@@ -71,7 +71,7 @@ export const BAKAT_SUBTESTS: SubtestSeed[] = [
     testKind: "BAKAT",
     name: "Pengenalan Spasial",
     description:
-      "Memutar objek 2D. Tiap soal = 1 gambar berisi 5 bentuk (1-5) — pilih B (sama) atau S (beda) untuk masing-masing.",
+      "Memutar objek 2D. Tiap soal = 1 gambar berisi 5 bentuk (1-5) \u2014 pilih B (sama) atau S (beda) untuk masing-masing.",
     durationSec: 10 * 60,
     orderIndex: 5,
     expectedQuestions: 14,
@@ -84,7 +84,7 @@ export const BAKAT_SUBTESTS: SubtestSeed[] = [
     testKind: "BAKAT",
     name: "Tiga Dimensi",
     description:
-      "Membayangkan sisi tersembunyi dari tumpukan balok — 3 sisi (I, II, III) per soal. Ketik isian per sisi.",
+      "Membayangkan sisi tersembunyi dari tumpukan balok \u2014 3 sisi (I, II, III) per soal. Ketik isian per sisi.",
     durationSec: 8 * 60,
     orderIndex: 6,
     expectedQuestions: 10,
@@ -98,7 +98,7 @@ export const BAKAT_SUBTESTS: SubtestSeed[] = [
     testKind: "BAKAT",
     name: "Sistematisasi",
     description:
-      "Tes klerikal cepat; tiap soal menampilkan 1 gambar berisi sejumlah simbol/posisi — ketik 1 jawaban per posisi. Jumlah posisi per gambar bisa berbeda (admin tentukan via kolom parts; max 12).",
+      "Tes klerikal cepat; tiap soal menampilkan 1 gambar berisi sejumlah simbol/posisi \u2014 ketik 1 jawaban per posisi. Jumlah posisi per gambar bisa berbeda (admin tentukan via kolom parts; max 12).",
     durationSec: 4 * 60,
     orderIndex: 7,
     expectedQuestions: 13,
@@ -122,7 +122,7 @@ export const BAKAT_SUBTESTS: SubtestSeed[] = [
     code: "BAKAT_9_FIGURAL",
     testKind: "BAKAT",
     name: "Figural Angka",
-    description: "Aritmatika cepat: desimal, persen, pembagian — ketik angka jawaban.",
+    description: "Aritmatika cepat: desimal, persen, pembagian \u2014 ketik angka jawaban.",
     durationSec: 7 * 60,
     orderIndex: 9,
     expectedQuestions: 25,
@@ -148,7 +148,7 @@ export const MINAT_SUBTESTS: SubtestSeed[] = [
   {
     code: "MINAT_PROG_A",
     testKind: "MINAT",
-    name: "Program A — Komunikasi",
+    name: "Program A \u2014 Komunikasi",
     description: "Komunikasi (TKI, Telekomunikasi, Broadcasting, Elektronika).",
     durationSec: 30 * 60,
     orderIndex: 2,
@@ -159,7 +159,7 @@ export const MINAT_SUBTESTS: SubtestSeed[] = [
   {
     code: "MINAT_PROG_B",
     testKind: "MINAT",
-    name: "Program B — Seni",
+    name: "Program B \u2014 Seni",
     description: "Seni Rupa, Kriya, Musik, Tari, Pedalangan, Karawitan, Teater.",
     durationSec: 30 * 60,
     orderIndex: 3,
@@ -170,7 +170,7 @@ export const MINAT_SUBTESTS: SubtestSeed[] = [
   {
     code: "MINAT_PROG_C",
     testKind: "MINAT",
-    name: "Program C — Kesehatan & Pekerja Sosial",
+    name: "Program C \u2014 Kesehatan & Pekerja Sosial",
     description: "Perawat, Dokter, Apoteker, Farmasi, Sosial, Psikologi.",
     durationSec: 30 * 60,
     orderIndex: 4,
@@ -181,7 +181,7 @@ export const MINAT_SUBTESTS: SubtestSeed[] = [
   {
     code: "MINAT_PROG_D",
     testKind: "MINAT",
-    name: "Program D — Pariwisata",
+    name: "Program D \u2014 Pariwisata",
     description: "Kepariwisataan, Tata Boga, Tata Kecantikan, Tata Busana.",
     durationSec: 30 * 60,
     orderIndex: 5,
@@ -192,7 +192,7 @@ export const MINAT_SUBTESTS: SubtestSeed[] = [
   {
     code: "MINAT_PROG_E",
     testKind: "MINAT",
-    name: "Program E — Administrasi & Niaga",
+    name: "Program E \u2014 Administrasi & Niaga",
     description: "Administrasi, Keuangan, Tata Niaga.",
     durationSec: 30 * 60,
     orderIndex: 6,
@@ -203,7 +203,7 @@ export const MINAT_SUBTESTS: SubtestSeed[] = [
   {
     code: "MINAT_PROG_F",
     testKind: "MINAT",
-    name: "Program F — Teknologi & Konstruksi",
+    name: "Program F \u2014 Teknologi & Konstruksi",
     description:
       "Energi Terbarukan, Geologi, Pesawat Udara, Geomatika, Bangunan, Furniture, Plambing, Listrik, Perminyakan, Grafika.",
     durationSec: 30 * 60,
@@ -215,7 +215,7 @@ export const MINAT_SUBTESTS: SubtestSeed[] = [
   {
     code: "MINAT_PROG_G",
     testKind: "MINAT",
-    name: "Program G — Agrobisnis",
+    name: "Program G \u2014 Agrobisnis",
     description: "Agrobisnis Tanaman, Ternak, Hewan, Perikanan, Pertanian, Kehutanan.",
     durationSec: 30 * 60,
     orderIndex: 8,
@@ -226,7 +226,7 @@ export const MINAT_SUBTESTS: SubtestSeed[] = [
   {
     code: "MINAT_PROG_H",
     testKind: "MINAT",
-    name: "Program H — Teknik Industri & Maritim",
+    name: "Program H \u2014 Teknik Industri & Maritim",
     description:
       "Teknik Mesin, Instrumentasi, Industri, Perkapalan, Tangkap Ikan, Budidaya, Tekstil, Pelayaran, Otomotif, Kimia.",
     durationSec: 30 * 60,
@@ -237,11 +237,11 @@ export const MINAT_SUBTESTS: SubtestSeed[] = [
   },
 ];
 
-// ───────────────────────────────────────────────────────────────────────
+// \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 // Kategori per subtes (dari Tabel 4.1 / Kategori Skor Bakat di buku)
 // Tier ranges are inclusive lower bounds. Keys: BR (Bawah Rata-rata),
 // RR (Rata-rata), AR (Atas Rata-rata), B (Baik), LB (Luar Biasa).
-// ───────────────────────────────────────────────────────────────────────
+// \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 export const CATEGORY_LABEL: Record<string, string> = {
   BR: "Di bawah rata-rata",
   RR: "Rata-rata",
@@ -274,10 +274,10 @@ export function categorize(code: string, raw: number): "BR" | "RR" | "AR" | "B" 
   return "LB";
 }
 
-// ───────────────────────────────────────────────────────────────────────
+// \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 // 35 Profil Bakat dari Tabel 4.2 (Buku 1, Bab III). Each profile has 3
 // dominant aspects (mapped to subtest codes by short tag).
-// ───────────────────────────────────────────────────────────────────────
+// \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 const TAG: Record<string, string> = {
   Vis: "BAKAT_1_VISUAL",
   Num: "BAKAT_2_NUMERIK",
@@ -336,10 +336,10 @@ export const APTITUDE_PROFILES: ProfileDef[] = [
   { name: "Teknologi Tekstil", aspects: [TAG.Num, TAG.Spa, TAG.Fig], description: "Material & ukuran tekstil.", majors: ["Teknik Tekstil", "Teknik Kimia Tekstil", "Teknologi Garmen"], careers: ["Engineer Tekstil", "Quality Control Garment", "Manajer Produksi Garmen"] },
 ];
 
-// ───────────────────────────────────────────────────────────────────────
-// MINAT — pemetaan Bidang (huruf A..H) → Program Keahlian
+// \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// MINAT \u2014 pemetaan Bidang (huruf A..H) \u2192 Program Keahlian
 // (Tabel 4.3 Buku 1).
-// ───────────────────────────────────────────────────────────────────────
+// \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 export const MINAT_BIDANG_TO_PROGRAM: Record<string, { kind: string; programs: { letter: string; label: string; major: string }[] }> = {
   A: {
     kind: "Komunikasi",
@@ -451,10 +451,10 @@ export const MINAT_BIDANG_TO_PROGRAM: Record<string, { kind: string; programs: {
   },
 };
 
-// ───────────────────────────────────────────────────────────────────────
-// IQ Estimate — bukan IQ klinis, sekedar prediksi berbasis profil performa.
+// \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// IQ Estimate \u2014 bukan IQ klinis, sekedar prediksi berbasis profil performa.
 // Mean = 100, SD = 15. Z-skor agregat dari 9 subtes (raw / max ekspektasi).
-// ───────────────────────────────────────────────────────────────────────
+// \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 export function estimateIQ(perSubtest: Record<string, { raw: number; max: number }>): number {
   const norms = Object.values(perSubtest).map((s) => (s.max > 0 ? s.raw / s.max : 0));
   if (norms.length === 0) return 100;
@@ -466,13 +466,13 @@ export function estimateIQ(perSubtest: Record<string, { raw: number; max: number
 
 // Kategori IQ mengikuti tabel "Penggolongan IQ berdasarkan skala David
 // Wechsler" (Suryani dkk., SNIMed 2019): 7 kategori dengan batas
-// ≥130, 120–129, 110–119, 90–109, 80–89, 70–79, ≤69.
+// \u2265130, 120\u2013129, 110\u2013119, 90\u2013109, 80\u201389, 70\u201379, \u226469.
 export function iqInterpretation(iq: number): { band: string; description: string } {
-  if (iq >= 130) return { band: "Sangat Superior", description: "EKIU ≥ 130 — kemampuan kognitif jauh di atas rata-rata." };
-  if (iq >= 120) return { band: "Superior", description: "EKIU 120–129 — kemampuan kognitif di atas rata-rata." };
-  if (iq >= 110) return { band: "Di Atas Rata-rata", description: "EKIU 110–119 — kemampuan kognitif sedikit di atas rata-rata." };
-  if (iq >= 90) return { band: "Rata-rata", description: "EKIU 90–109 — kemampuan kognitif setara dengan rata-rata populasi." };
-  if (iq >= 80) return { band: "Di Bawah Rata-rata", description: "EKIU 80–89 — kemampuan kognitif sedikit di bawah rata-rata." };
-  if (iq >= 70) return { band: "Lambat Belajar", description: "EKIU 70–79 — cukup di bawah rata-rata, perlu pendampingan belajar." };
-  return { band: "Keterbelakangan Mental", description: "EKIU ≤ 69 — jauh di bawah rata-rata, perlu evaluasi profesional." };
+  if (iq >= 130) return { band: "Sangat Superior", description: "EKIU \u2265 130 \u2014 kemampuan kognitif jauh di atas rata-rata." };
+  if (iq >= 120) return { band: "Superior", description: "EKIU 120\u2013129 \u2014 kemampuan kognitif di atas rata-rata." };
+  if (iq >= 110) return { band: "Di Atas Rata-rata", description: "EKIU 110\u2013119 \u2014 kemampuan kognitif sedikit di atas rata-rata." };
+  if (iq >= 90) return { band: "Rata-rata", description: "EKIU 90\u2013109 \u2014 kemampuan kognitif setara dengan rata-rata populasi." };
+  if (iq >= 80) return { band: "Di Bawah Rata-rata", description: "EKIU 80\u201389 \u2014 kemampuan kognitif sedikit di bawah rata-rata." };
+  if (iq >= 70) return { band: "Lambat Belajar", description: "EKIU 70\u201379 \u2014 cukup di bawah rata-rata, perlu pendampingan belajar." };
+  return { band: "Keterbelakangan Mental", description: "EKIU \u2264 69 \u2014 jauh di bawah rata-rata, perlu evaluasi profesional." };
 }
