@@ -227,15 +227,62 @@ export function useAnswerSync() {
     // Kehilangan data dari sesi sebelumnya harus tetap terlihat setelah
     // refresh, bukan hilang bersama state React.
     if (cleaned.length > 0) setStatus("error");
-  }, [sessionId, updateCount]);
+
+    // VERIFIKASI KE SERVER. Catatan penolakan hanya boleh memicu badge merah
+    // kalau jawabannya BENAR-BENAR tidak ada di server. Kalau ternyata sudah
+    // tersimpan — misalnya percobaan lain berhasil, atau server menerimanya
+    // sebagai susulan — catatannya dibuang supaya siswa tidak ditakuti
+    // peringatan yang sudah tidak benar.
+    if (cleaned.length === 0) return;
+    let alive = true;
+    const ids = cleaned.map((r) => r.questionId);
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/student/test/answer?ids=${encodeURIComponent(ids.join(","))}`,
+        );
+        if (!res.ok || !alive) return;
+        const body = (await res.json()) as { saved?: unknown };
+        const saved = Array.isArray(body?.saved)
+          ? body.saved.filter((v): v is string => typeof v === "string")
+          : [];
+        if (!alive || saved.length === 0) return;
+        const keep = rejectedRef.current.filter(
+          (r) => !saved.includes(r.questionId),
+        );
+        if (keep.length === rejectedRef.current.length) return;
+        rejectedRef.current = keep;
+        persistRejected();
+        if (keep.length === 0) {
+          setStatus(
+            Object.keys(pendingRef.current).length > 0 ? "queued" : "idle",
+          );
+        }
+      } catch {
+        // Offline atau server tidak menjawab — biarkan catatan apa adanya.
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [sessionId, updateCount, persistRejected]);
 
   // Send one item. `keepalive: true` membuat request tetap dikirim meski user
   // keburu klik tombol navigasi — penting supaya jawaban terakhir sebelum
   // pindah soal/subtes tidak hilang. `signal` memberi batas waktu keras
   // supaya request yang menggantung tidak ikut menahan flush().
+  //
+  // `answeredAtMs` = kapan siswa MEMILIH jawaban ini di perangkatnya. Server
+  // memakainya untuk menerima jawaban SUSULAN: jawaban yang dipilih sebelum
+  // subtes terkunci tetap disimpan walau baru sampai setelah terkunci (mati
+  // lampu, jaringan putus, atau antrean belum habis saat tombol
+  // "SELESAIKAN SUBTES" ditekan). Tanpa ini jawaban seperti itu ditolak 409
+  // dan dicatat sebagai kehilangan data — itulah badge "GAGAL SYNC" yang
+  // muncul padahal siswa sudah menjawab.
   const sendOne = async (
     questionId: string,
     selected: string | string[],
+    answeredAtMs: number,
   ): Promise<SendResult> => {
     const controller =
       typeof AbortController === "undefined" ? null : new AbortController();
@@ -246,7 +293,7 @@ export function useAnswerSync() {
       const res = await fetch("/api/student/test/answer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ questionId, selected }),
+        body: JSON.stringify({ questionId, selected, answeredAtMs }),
         keepalive: true,
         signal: controller ? controller.signal : undefined,
       });
@@ -306,6 +353,7 @@ export function useAnswerSync() {
     setStatus("syncing");
     let anyFailed = false;
     let anyRejected = false;
+    let rejectedChanged = false;
     let unauthorized = false;
 
     // Kirim jawaban dengan jumlah request serentak TERBATAS dan jatah waktu
@@ -328,12 +376,20 @@ export function useAnswerSync() {
         if (!qid) return;
         const item = pendingRef.current[qid];
         if (!item) continue;
-        const result = await sendOne(qid, item.selected);
+        const result = await sendOne(qid, item.selected, item.ts);
         // Nilai sempat diubah siswa selama percobaan ini → jangan diapa-apakan,
         // biarkan percobaan berikutnya mengirim nilai terbaru.
         const bumped = pendingRef.current[qid]?.ts !== item.ts;
         if (result.kind === "ok") {
           if (!bumped) delete pendingRef.current[qid];
+          // Akhirnya tersimpan → catatan penolakan lama untuk soal ini sudah
+          // tidak benar lagi, jangan biarkan memicu badge merah.
+          if (rejectedRef.current.some((r) => r.questionId === qid)) {
+            rejectedRef.current = rejectedRef.current.filter(
+              (r) => r.questionId !== qid,
+            );
+            rejectedChanged = true;
+          }
           continue;
         }
         if (result.kind === "stale") {
@@ -360,6 +416,7 @@ export function useAnswerSync() {
             },
           ].slice(-MAX_REJECTED);
           anyRejected = true;
+          rejectedChanged = true;
           continue;
         }
         if (result.kind === "unauthorized") {
@@ -376,7 +433,7 @@ export function useAnswerSync() {
       ),
     );
     persist();
-    if (anyRejected) persistRejected();
+    if (rejectedChanged) persistRejected();
     flushingRef.current = false;
 
     if (unauthorized) setSessionExpired(true);
