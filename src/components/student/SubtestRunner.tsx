@@ -92,13 +92,13 @@ function violationLabel(t: string | null): string {
 function cleanText(raw: string | null | undefined): string {
   if (!raw) return "";
   return raw
-    .replace(/\r\n?/g, "\n")
+    .replace(/\\r\\n?/g, "\\n")
     // Trim spasi/tab di ujung tiap baris.
-    .replace(/[ \t]+\n/g, "\n")
+    .replace(/[ \\t]+\\n/g, "\\n")
     // Runtuhkan baris kosong berturut-turut (>=3) menjadi 2.
-    .replace(/\n{3,}/g, "\n\n")
+    .replace(/\\n{3,}/g, "\\n\\n")
     // Runtuhkan spasi/tab beruntun (selain awal baris) menjadi satu.
-    .replace(/([^\n \t]) {2,}/g, "$1 ")
+    .replace(/([^\\n \\t]) {2,}/g, "$1 ")
     .trim();
 }
 
@@ -155,6 +155,7 @@ export default function SubtestRunner({
   examples,
   existingAnswers,
   isCompleted = false,
+  serverRemainingSec = null,
   serverStartedAt = null,
 }: {
   subtest: { code: string; name: string; description: string; instructions?: string; durationSec: number };
@@ -162,9 +163,14 @@ export default function SubtestRunner({
   examples: ExampleQuestion[];
   existingAnswers: Record<string, unknown>;
   isCompleted?: boolean;
-  // Timestamp ISO dari server: kapan subtes ini dimulai pertama kali.
-  // Jadi sumber kebenaran timer, mengalahkan localStorage. Null kalau
-  // belum ada progress di DB.
+  // SISA WAKTU resmi subtes ini menurut server (detik). Inilah sumber
+  // kebenaran timer. Server menghitungnya dengan jam dinding dari startedAt,
+  // jadi memuat ulang halaman tidak pernah menghasilkan angka lebih besar.
+  serverRemainingSec?: number | null;
+  // Timestamp ISO dari server: kapan subtes ini dimulai. Sekarang hanya
+  // dipakai sebagai PENANDA bahwa server sudah punya progress subtes ini
+  // (menentukan `started` + pemulihan otomatis /subtest-start), bukan lagi
+  // untuk menghitung sisa waktu.
   serverStartedAt?: string | null;
 }) {
   const router = useRouter();
@@ -209,43 +215,84 @@ export default function SubtestRunner({
     return firstUnanswered === -1 ? 0 : firstUnanswered;
   });
 
-  // Timer: starts only after student clicks "Mulai" (atau langsung kalau
-  // server sudah punya startedAt). Sumber timer = serverStartedAt kalau ada,
-  // fallback ke localStorage. localStorage TIDAK menimpa server — kalau
-  // server bilang sudah mulai jam X, itu yang dipakai.
-  const [tick, setTick] = useState<{ startedAt: number; now: number } | null>(null);
+  // TIMER. Angka awal = SISA WAKTU dari server, lalu berkurang memakai jam
+  // MONOTON (performance.now()).
+  //
+  // Cara lama: remaining = durationSec - (Date.now() - serverStartedAt).
+  // Rumus itu mencampur dua jam yang berbeda — titik mulai dari server,
+  // tetapi "sekarang" dari perangkat siswa. Dua akibatnya:
+  //   1. Server dulu memaafkan jeda (denyut hilang) sementara layar tetap
+  //      menghitung jam dinding. Tiap kali dimuat ulang, layar diselaraskan
+  //      ke angka server yang LEBIH BESAR — timer terlihat BERTAMBAH.
+  //   2. Memundurkan jam perangkat langsung menambah sisa waktu di layar.
+  //
+  // performance.now() tidak terpengaruh perubahan jam sistem, dan angka
+  // awalnya datang dari server, jadi hitungan mundur ini tidak bisa
+  // dimanipulasi dari sisi siswa.
+  const [remaining, setRemaining] = useState<number | null>(null);
 
   useEffect(() => {
     if (!started || typeof window === "undefined") return;
-    let s: number;
-    if (hasServerStart) {
-      s = serverStartedEpoch;
-      // Sinkronkan localStorage supaya kalau server tiba-tiba tidak kirim,
-      // tetap konsisten.
-      window.localStorage.setItem(STORAGE_KEY(subtest.code), String(s));
+    // Sisa waktu awal. Utamakan angka server; localStorage hanya cadangan
+    // untuk detik-detik pertama setelah klik MULAI, saat /subtest-start belum
+    // sempat menjawab dan server memang belum punya progress.
+    let base: number;
+    if (
+      typeof serverRemainingSec === "number" &&
+      Number.isFinite(serverRemainingSec)
+    ) {
+      base = Math.max(0, Math.min(serverRemainingSec, subtest.durationSec));
+      // Simpan padanan "kapan subtes ini dimulai" supaya cadangan lokal tetap
+      // punya arti yang sama seperti sebelumnya.
+      const impliedStart =
+        Date.now() - Math.max(0, subtest.durationSec - base) * 1000;
+      window.localStorage.setItem(
+        STORAGE_KEY(subtest.code),
+        String(impliedStart),
+      );
     } else {
       const saved = window.localStorage.getItem(STORAGE_KEY(subtest.code));
       // WAJIB divalidasi. parseInt("abc") = NaN, dan satu nilai localStorage
-      // yang rusak membuat startedAt = NaN → remaining = NaN → timer tampil
-      // "NaN:NaN" dan timeUp SELAMANYA false, jadi subtes tidak pernah
-      // terkunci otomatis dan siswa terjebak di layar soal.
+      // yang rusak membuat sisa waktu NaN → timer tampil "NaN:NaN" dan timeUp
+      // SELAMANYA false, jadi subtes tidak pernah terkunci otomatis dan siswa
+      // terjebak di layar soal.
       const savedEpoch = saved ? parseInt(saved, 10) : NaN;
       if (Number.isFinite(savedEpoch) && savedEpoch > 0) {
-        s = savedEpoch;
+        const usedSec = Math.max(
+          0,
+          Math.floor((Date.now() - savedEpoch) / 1000),
+        );
+        base = Math.max(0, subtest.durationSec - usedSec);
       } else {
-        s = Date.now();
-        window.localStorage.setItem(STORAGE_KEY(subtest.code), String(s));
+        base = subtest.durationSec;
+        window.localStorage.setItem(
+          STORAGE_KEY(subtest.code),
+          String(Date.now()),
+        );
       }
     }
-    const update = () => setTick({ startedAt: s, now: Date.now() });
+    // Jam monoton kalau tersedia. Kalau tidak, jatuh ke Date.now() yang
+    // dibaca sekali di awal — tetap lebih aman daripada membandingkan jam
+    // perangkat dengan titik mulai dari server.
+    const perfBase =
+      typeof performance !== "undefined" &&
+      typeof performance.now === "function"
+        ? performance.now()
+        : null;
+    const wallBase = Date.now();
+    const elapsedSince = () =>
+      perfBase != null
+        ? Math.max(0, Math.floor((performance.now() - perfBase) / 1000))
+        : Math.max(0, Math.floor((Date.now() - wallBase) / 1000));
+    const update = () => setRemaining(base - elapsedSince());
     update();
     const id = setInterval(update, 1000);
     return () => clearInterval(id);
-  }, [started, subtest.code, hasServerStart, serverStartedEpoch]);
+  }, [started, subtest.code, subtest.durationSec, serverRemainingSec]);
 
-  const elapsed = tick ? Math.floor((tick.now - tick.startedAt) / 1000) : 0;
-  const remaining = subtest.durationSec - elapsed;
-  const timeUp = tick != null && remaining <= 0;
+  // Sebelum efek di atas sempat jalan, tampilkan durasi penuh (perilaku lama).
+  const displayRemaining = remaining ?? subtest.durationSec;
+  const timeUp = remaining != null && remaining <= 0;
 
   const q = questions[idx];
   const opts: OptionItem[] = useMemo(() => {
@@ -755,9 +802,9 @@ export default function SubtestRunner({
             </span>
             <span
               className="brut-tag font-mono text-lg"
-              style={{ background: remaining < 60 ? "#ff4d8d" : "#000", color: "#fff" }}
+              style={{ background: displayRemaining < 60 ? "#ff4d8d" : "#000", color: "#fff" }}
             >
-              {fmtTime(remaining)}
+              {fmtTime(displayRemaining)}
             </span>
             {!timeUp && (
               <button
