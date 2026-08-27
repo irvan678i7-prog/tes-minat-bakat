@@ -96,9 +96,9 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
   // here (computeSubtestLock) so the runner can show the intro screen
   // (instructions + contoh soal) first. The server-side timer is started
   // explicitly when the student clicks "MULAI" (POST /subtest-start).
-  // computeSubtestLock still auto-marks TIME_UP — tapi sekarang berdasarkan
-  // WAKTU AKTIF (consumedSec), bukan jam dinding, jadi mati lampu tidak lagi
-  // menghabiskan waktu subtes. Run it in parallel with the answer fetch.
+  // computeSubtestLock juga menandai TIME_UP secara lazy, berdasarkan JAM
+  // DINDING sejak startedAt — memuat ulang halaman tidak menambah waktu.
+  // Run it in parallel with the answer fetch.
   const [startInfo, existing] = await Promise.all([
     computeSubtestLock({
       submissionId: sub.id,
@@ -123,9 +123,10 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
   return (
     <>
       {/* Denyut timer (render null). Dipasang di luar SubtestRunner supaya
-          komponen runner tidak perlu diubah sama sekali. Denyut inilah yang
-          membuat server tahu bedanya "siswa mengerjakan" dan "sesi terputus
-          karena mati lampu". */}
+          komponen runner tidak perlu diubah sama sekali. Denyut ini yang
+          membuat server bisa MENANDAI sesi terputus (mati lampu) di tab
+          admin "Jeda & Kunci". Sejak timer memakai jam dinding, denyut tidak
+          lagi memengaruhi sisa waktu — murni untuk pengawasan. */}
       <TimerHeartbeat subtestCode={subtest.code} />
       <SubtestRunner
         subtest={{
@@ -139,9 +140,12 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
         examples={examples}
         existingAnswers={existingMap}
         isCompleted={isCompleted}
-        /* Acuan timer yang sudah DIGESER: now - waktu aktif terpakai. Runner
-           menghitung sisa waktu dari nilai ini, jadi hitungan mundur otomatis
-           melanjutkan sisa waktu setelah listrik mati. */
+        /* Sisa waktu resmi dari server. Inilah sumber kebenaran timer di
+           layar siswa: nilainya dihitung dari startedAt, jadi memuat ulang
+           halaman tidak pernah menghasilkan angka yang lebih besar. */
+        serverRemainingSec={startInfo.remainingSec}
+        /* Acuan lama (now - waktu terpakai). Dipertahankan sebagai penanda
+           bahwa server sudah punya progress subtes ini. */
         serverStartedAt={
           startInfo.timerStartedAt ? startInfo.timerStartedAt.toISOString() : null
         }

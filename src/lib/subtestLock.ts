@@ -4,28 +4,33 @@ import { prisma } from "@/lib/db";
 // /test/[code], dan API answer/finish/heartbeat/violation. Hindari duplikasi
 // logika di banyak tempat.
 //
-// ── TIMER SADAR-JEDA (pause-aware) ──────────────────────────────────
-// DULU: deadline = startedAt + durationSec (jam dinding). Kalau listrik mati
-// atau browser tertutup, waktu tetap berjalan → subtes terkunci TIME_UP
-// padahal siswa belum mengerjakan.
+// TIMER JAM DINDING MURNI
 //
-// SEKARANG: yang dihitung adalah `consumedSec`, yaitu akumulasi waktu AKTIF
-// siswa di halaman soal. consumedSec bertambah dari:
-//   - denyut (POST /api/student/test/heartbeat, tiap ±15 detik),
-//   - pengiriman jawaban (POST /api/student/test/answer),
-//   - pembukaan/refresh halaman subtes.
+// Waktu terpakai satu subtes = selisih apa adanya antara sekarang dan
+// startedAt. Tidak ada akumulasi dari denyut, dan tidak ada pemaafan jeda.
 //
-// Kalau selisih antar-denyut masih wajar (<= HEARTBEAT_TOLERANCE_SEC),
-// selisih itu dihitung sebagai waktu mengerjakan. Kalau selisihnya besar
-// (browser mati / listrik mati), itu dianggap JEDA: tidak menghabiskan waktu
-// subtes, tapi hanya sebanyak PAUSE_BUDGET_SEC per subtes. Lewat dari jatah
-// itu, selisihnya kembali dihitung sebagai waktu terpakai supaya jeda tidak
-// bisa dipakai untuk mengulur waktu.
+// RIWAYAT & ALASAN: sebelumnya yang dihitung adalah waktu AKTIF hasil
+// akumulasi denyut, dan selisih besar antar-denyut dimaafkan sebagai JEDA
+// (maksimal PAUSE_BUDGET_SEC per subtes) supaya mati lampu tidak
+// menghanguskan waktu siswa.
 //
-// CATATAN PENGAWASAN: jeda yang dimaafkan TIDAK tercatat sebagai pelanggaran
-// (anti-cheat hanya bisa mencatat kalau halaman masih hidup). Karena itu
-// `pauseCount` & `pausedSec` WAJIB ditampilkan ke admin — lihat
-// /api/admin/pause-report dan tab "Jeda & Kunci" di dashboard.
+// Model itu ternyata bisa dipakai MENAMBAH waktu. Di mata server, "mati
+// lampu" dan "sengaja memutus jaringan" terlihat sama persis: denyut
+// berhenti. Siswa cukup memutus jaringan lebih lama dari
+// HEARTBEAT_TOLERANCE_SEC lalu memuat ulang halaman, dan selisih itu tidak
+// dihitung — diulang terus sampai jatah jeda habis. Angka di layar pun ikut
+// melompat NAIK tiap kali dimuat ulang, karena klien menghitung jam dinding
+// sementara server memaafkan.
+//
+// Dengan jam dinding murni, hasilnya TIDAK BISA dipengaruhi siswa: memuat
+// ulang, memutus jaringan, menutup tab, atau mengubah jam perangkat tidak
+// mengubah waktu terpakai sedikit pun.
+//
+// KOMPENSASI UNTUK MATI LAMPU SUNGGUHAN: `pausedSec` & `pauseCount` TETAP
+// dicatat dan wajib ditampilkan ke admin (lihat /api/admin/pause-report dan
+// tab "Jeda & Kunci"). Perannya sekarang justru lebih penting: pengawas yang
+// menilai apakah sebuah jeda layak diberi waktu tambahan lewat tombol
+// "+ WAKTU" (/api/admin/subtest-unlock dengan extraSec).
 
 export type LockReason = "MANUAL" | "TIME_UP" | "AUTO_FLAG";
 
@@ -37,9 +42,12 @@ export const TIME_UP_GRACE_SEC = 3;
 export const TIME_UP_GRACE_MS = TIME_UP_GRACE_SEC * 1_000;
 // Selisih antar-denyut yang masih dianggap "siswa mengerjakan terus".
 // Runner mengirim denyut tiap 15 detik → 45 detik memberi toleransi 3x
-// denyut untuk jaringan sekolah yang lambat.
+// denyut untuk jaringan sekolah yang lambat. Sekarang ambang ini hanya
+// MENANDAI jeda untuk statistik pengawas, tidak lagi menghitung waktu.
 export const HEARTBEAT_TOLERANCE_SEC = 45;
-// Jatah jeda per subtes yang DIMAAFKAN: 10 menit.
+// Jatah jeda per subtes. TIDAK LAGI dipakai untuk menghitung waktu — timer
+// sudah jam dinding murni. Dipertahankan sebagai konstanta acuan bagi modul
+// lain yang mengimpornya.
 export const PAUSE_BUDGET_SEC = 10 * 60;
 
 export type SubtestLockInfo = {
@@ -47,21 +55,20 @@ export type SubtestLockInfo = {
   started: boolean;
   // Kapan siswa menekan MULAI (dipertahankan apa adanya, untuk audit).
   startedAt: Date | null;
-  // Acuan timer UNTUK KLIEN: now - consumedSec. SubtestRunner menghitung
-  // remaining = durationSec - (now - serverStartedAt), jadi nilai yang
-  // digeser ini membuat hitungan mundur otomatis MELANJUTKAN sisa waktu
-  // setelah listrik mati — tanpa perlu mengubah SubtestRunner.tsx.
+  // Acuan timer UNTUK KLIEN: now - consumedSec. Dengan jam dinding murni
+  // nilainya setara dengan startedAt. Dipertahankan supaya pemakai lama
+  // tidak rusak; sumber utama timer klien sekarang adalah remainingSec.
   timerStartedAt: Date | null;
   // Kapan dikunci. null = belum dikunci.
   finishedAt: Date | null;
   finishReason: LockReason | null;
-  // Kalau waktu aktif sudah habis tapi siswa belum klik selesai, lock secara
+  // Kalau waktu sudah habis tapi siswa belum klik selesai, lock secara
   // LAZY: kembalikan true di sini & tulis finishedAt di DB.
   locked: boolean;
-  // Waktu aktif terpakai & sisanya (detik).
+  // Waktu terpakai & sisanya (detik).
   consumedSec: number;
   remainingSec: number;
-  // Statistik jeda untuk pengawas.
+  // Statistik jeda untuk pengawas. Tidak memengaruhi perhitungan waktu.
   pausedSec: number;
   pauseCount: number;
 };
@@ -82,7 +89,7 @@ export type ProjectedTime = {
   pauseCount: number;
   // Selisih detik sejak denyut terakhir.
   gapSec: number;
-  // true kalau selisih itu diperlakukan sebagai jeda.
+  // true kalau selisih itu ditandai sebagai jeda (statistik saja).
   paused: boolean;
 };
 
@@ -104,27 +111,30 @@ export function projectSubtestTime(
     0,
     Math.floor((now.getTime() - last.getTime()) / 1000),
   );
-  let consumedSec = Math.max(0, p.consumedSec ?? 0);
+
+  // JAM DINDING MURNI. Waktu terpakai dihitung ulang dari startedAt setiap
+  // kali, bukan diakumulasi dari denyut. Konsekuensinya nilai ini tidak bisa
+  // dikecilkan oleh siswa dengan cara apa pun: memuat ulang halaman,
+  // memutus jaringan, atau menutup tab tidak mengubah hasilnya.
+  const elapsedSec = Math.max(
+    0,
+    Math.floor((now.getTime() - p.startedAt.getTime()) / 1000),
+  );
+  const consumedSec = Math.min(elapsedSec, durationSec + TIME_UP_GRACE_SEC);
+
+  // Statistik jeda TETAP dicatat untuk pengawas. Hilangnya denyut lebih lama
+  // dari toleransi tetap ditandai sebagai jeda supaya mati lampu sungguhan
+  // terlihat di tab "Jeda & Kunci" — bedanya, sekarang jeda itu TIDAK
+  // mengurangi waktu terpakai. Pengawas yang memutuskan kompensasinya.
   let pausedSec = Math.max(0, p.pausedSec ?? 0);
   let pauseCount = Math.max(0, p.pauseCount ?? 0);
   let paused = false;
-
-  if (gapSec <= HEARTBEAT_TOLERANCE_SEC) {
-    // Denyut normal → siswa memang sedang mengerjakan.
-    consumedSec += gapSec;
-  } else {
-    // Denyut hilang lama → sesi terputus (mati lampu, tab ditutup, dsb).
+  if (gapSec > HEARTBEAT_TOLERANCE_SEC) {
     paused = true;
-    const budgetLeft = Math.max(0, PAUSE_BUDGET_SEC - pausedSec);
-    const forgiven = Math.min(gapSec, budgetLeft);
-    pausedSec += forgiven;
+    pausedSec += gapSec;
     pauseCount += 1;
-    // Selisih yang melebihi jatah jeda TETAP dihitung sebagai waktu
-    // terpakai — jeda tidak bisa dipakai untuk mengulur waktu.
-    consumedSec += gapSec - forgiven;
   }
 
-  consumedSec = Math.min(consumedSec, durationSec + TIME_UP_GRACE_SEC);
   return { consumedSec, pausedSec, pauseCount, gapSec, paused };
 }
 
@@ -180,8 +190,8 @@ function runningInfo(
 
 /**
  * Hitung lock info untuk satu subtes TANPA menambah denyut. Sekaligus
- * auto-finish (write ke DB) kalau waktu AKTIF sudah habis tapi belum
- * dikunci secara eksplisit. Idempoten.
+ * auto-finish (write ke DB) kalau waktu sudah habis tapi belum dikunci
+ * secara eksplisit. Idempoten.
  */
 export async function computeSubtestLock(args: {
   submissionId: string;
@@ -199,7 +209,7 @@ export async function computeSubtestLock(args: {
   const now = new Date();
   const projected = projectSubtestTime(progress, durationSec, now);
   if (projected.consumedSec >= durationSec + TIME_UP_GRACE_SEC) {
-    // Waktu aktif habis → auto-finish TIME_UP. Pakai updateMany + filter
+    // Waktu habis → auto-finish TIME_UP. Pakai updateMany + filter
     // finishedAt:null supaya race tidak menimpa MANUAL yang lebih awal.
     const consumedSec = Math.min(projected.consumedSec, durationSec);
     const updated = await prisma.subtestProgress.updateMany({
@@ -247,7 +257,7 @@ export async function computeSubtestLock(args: {
 
 /**
  * DENYUT: catat bahwa siswa masih ada di halaman subtes, lalu simpan waktu
- * aktif + statistik jeda. Kalau waktu aktif sudah habis, sekalian kunci.
+ * terpakai + statistik jeda. Kalau waktu sudah habis, sekalian kunci.
  *
  * Aman dipanggil kapan saja: kalau subtes belum dimulai (belum ada baris
  * SubtestProgress), fungsi ini TIDAK membuat baris baru dan tidak
@@ -257,8 +267,8 @@ export async function computeSubtestLock(args: {
  * per siswa aktif berarti 40 siswa ≈ 2,7 tulis/detik terus-menerus. Kalau
  * denyut datang lebih rapat dari nilai ini dan waktu belum habis, proyeksi
  * tetap dihitung & dikembalikan tapi TIDAK ditulis ke DB. Akuntansi waktu
- * tetap benar karena lastSeenAt yang lama dipertahankan — denyut berikutnya
- * menghitung selisih dari titik yang sama.
+ * tetap benar karena waktu terpakai dihitung dari startedAt, bukan
+ * diakumulasi antar-denyut.
  */
 export async function touchSubtest(args: {
   submissionId: string;
@@ -315,8 +325,8 @@ export async function touchSubtest(args: {
 /**
  * Tandai subtes dimulai (upsert progress). Kalau sudah dikunci, jangan ubah
  * startedAt — kembalikan lock info apa adanya. Kalau sudah dimulai, sekalian
- * catat denyut: membuka ulang halaman setelah mati lampu akan tercatat
- * sebagai JEDA, bukan sebagai waktu mengerjakan.
+ * catat denyut: membuka ulang halaman setelah mati lampu tercatat sebagai
+ * JEDA pada statistik pengawas, tetapi waktunya TETAP dihitung.
  */
 export async function ensureSubtestStarted(args: {
   submissionId: string;
