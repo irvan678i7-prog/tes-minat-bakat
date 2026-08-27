@@ -465,14 +465,28 @@ export function useAnswerSync() {
         anyFailed = true;
       }
     };
-    await Promise.all(
-      Array.from({ length: Math.min(MAX_PARALLEL_SENDS, queue.length) }, () =>
-        sendNext(),
-      ),
-    );
-    persist();
-    if (rejectedChanged) persistRejected();
-    flushingRef.current = false;
+    try {
+      await Promise.all(
+        Array.from({ length: Math.min(MAX_PARALLEL_SENDS, queue.length) }, () =>
+          sendNext(),
+        ),
+      );
+    } catch {
+      // Kesalahan tak terduga di dalam putaran. Antrean TIDAK dibuang —
+      // ditandai gagal supaya dicoba lagi di putaran berikutnya.
+      anyFailed = true;
+    } finally {
+      // WAJIB di finally. Sebelumnya tiga baris ini hanya jalan di jalur
+      // sukses: satu kesalahan tak terduga saja membuat flushingRef bernilai
+      // true SELAMANYA, sehingga setiap flush() berikutnya langsung keluar di
+      // baris pertama, denyut latar 4 detik ikut mati, status terkunci di
+      // "syncing" (badge macet di "MENYIMPAN…"), dan jawaban berhenti
+      // terkirim tanpa peringatan apa pun ke siswa. Satu-satunya pemulihan
+      // adalah muat ulang halaman — yang tidak diketahui siswa.
+      persist();
+      if (rejectedChanged) persistRejected();
+      flushingRef.current = false;
+    }
 
     if (unauthorized) setSessionExpired(true);
 
