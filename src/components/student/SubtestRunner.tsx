@@ -31,9 +31,19 @@ const STARTED_KEY = (subtestCode: string) => `tmb-runner-started-${subtestCode}`
 // menunggu lebih lama tidak menambah keamanan data — hanya membuat tombol
 // "SELESAIKAN SUBTES" tampak macet.
 const FLUSH_WAIT_MS = 8000;
-// Batas waktu request kunci subtes. Tanpa ini request yang menggantung membuat
-// tombol berhenti di "MENGUNCI…" tanpa ujung.
+// Batas waktu SATU percobaan request kunci subtes. Tanpa ini request yang
+// menggantung membuat tombol berhenti di "MENGUNCI…" tanpa ujung.
 const FINISH_TIMEOUT_MS = 12000;
+// Percobaan mengunci subtes. Dulu HANYA SEKALI, dan itu penyebab keluhan
+// "Gagal mengunci subtes... periksa jaringan": satu gangguan jaringan atau
+// satu balasan lambat sudah cukup untuk memunculkannya, padahal endpoint
+// /subtest-finish IDEMPOTEN dan sering kali penguncian SUDAH berhasil di
+// server — yang gagal hanya balasannya sampai ke siswa. Tombol SELESAIKAN
+// TES di daftar subtes sudah punya percobaan ulang sejak awal; tombol
+// per-subtes ini belum.
+const FINISH_MAX_ATTEMPTS = 4;
+const FINISH_RETRY_BASE_MS = 800;
+const FINISH_RETRY_MAX_MS = 6000;
 // Batas waktu request "selesaikan tes otomatis" saat siswa terdeteksi curang.
 // Tanpa batas ini satu koneksi yang menggantung membuat siswa TERKUNCI di
 // layar soal selamanya: perpindahan ke /test/done baru jalan setelah fetch
@@ -51,6 +61,56 @@ function fmtTime(s: number): string {
   const m = Math.floor(s / 60);
   const r = s % 60;
   return `${m.toString().padStart(2, "0")}:${r.toString().padStart(2, "0")}`;
+}
+
+// Kunci subtes di server, dengan percobaan ulang dan batas waktu per
+// percobaan. Endpoint /subtest-finish IDEMPOTEN: kalau subtes sudah terkunci
+// ia tetap menjawab ok. Jadi mengulang itu aman, dan justru menyembuhkan
+// kasus tersering — request pertama sampai ke server dan penguncian BERHASIL,
+// tetapi balasannya keburu kena batas waktu sehingga layar bilang GAGAL
+// padahal subtesnya sudah beres.
+async function lockSubtestOnServer(
+  subtestCode: string,
+  reason: "MANUAL" | "TIME_UP",
+): Promise<{ ok: boolean; error?: string }> {
+  let delay = FINISH_RETRY_BASE_MS;
+  for (let attempt = 0; attempt < FINISH_MAX_ATTEMPTS; attempt++) {
+    const controller =
+      typeof AbortController === "undefined" ? null : new AbortController();
+    const timeoutId = controller
+      ? setTimeout(() => controller.abort(), FINISH_TIMEOUT_MS)
+      : null;
+    try {
+      const res = await fetch("/api/student/test/subtest-finish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subtestCode, reason }),
+        signal: controller ? controller.signal : undefined,
+      });
+      if (res.ok) return { ok: true };
+      // 4xx = penolakan sungguhan dari server (sesi habis, subtes tidak
+      // valid). Mengulang tidak akan menolong.
+      if (res.status >= 400 && res.status < 500) {
+        const d = (await res.json().catch(() => ({}))) as { error?: string };
+        return {
+          ok: false,
+          error: d.error || `ditolak server (${res.status})`,
+        };
+      }
+      // 5xx → jatuh ke percobaan berikutnya.
+    } catch {
+      // Jaringan mati atau kena batas waktu → coba lagi.
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+    if (attempt < FINISH_MAX_ATTEMPTS - 1) {
+      await new Promise<void>((resolve) => {
+        setTimeout(() => resolve(), delay);
+      });
+      delay = Math.min(delay * 2, FINISH_RETRY_MAX_MS);
+    }
+  }
+  return { ok: false, error: "koneksi gagal setelah beberapa kali percobaan" };
 }
 
 function correctSetFor(q: ExampleQuestion): Set<string> {
@@ -92,13 +152,13 @@ function violationLabel(t: string | null): string {
 function cleanText(raw: string | null | undefined): string {
   if (!raw) return "";
   return raw
-    .replace(/\\r\\n?/g, "\\n")
+    .replace(/\r\n?/g, "\n")
     // Trim spasi/tab di ujung tiap baris.
-    .replace(/[ \\t]+\\n/g, "\\n")
+    .replace(/[ \t]+\n/g, "\n")
     // Runtuhkan baris kosong berturut-turut (>=3) menjadi 2.
-    .replace(/\\n{3,}/g, "\\n\\n")
+    .replace(/\n{3,}/g, "\n\n")
     // Runtuhkan spasi/tab beruntun (selain awal baris) menjadi satu.
-    .replace(/([^\\n \\t]) {2,}/g, "$1 ")
+    .replace(/([^\n \t]) {2,}/g, "$1 ")
     .trim();
 }
 
@@ -500,36 +560,18 @@ export default function SubtestRunner({
     } catch {
       // ignore — retries will continue in background on next page
     }
-    // Kunci subtes di server. Idempoten; aman dipanggil >1 kali.
-    let locked = false;
-    const controller =
-      typeof AbortController === "undefined" ? null : new AbortController();
-    const timeoutId = controller
-      ? setTimeout(() => controller.abort(), FINISH_TIMEOUT_MS)
-      : null;
-    try {
-      const res = await fetch("/api/student/test/subtest-finish", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subtestCode: subtest.code, reason }),
-        signal: controller ? controller.signal : undefined,
-      });
-      locked = res.ok;
-    } catch {
-      // Jaringan mati / timeout.
-      locked = false;
-    } finally {
-      if (timeoutId) clearTimeout(timeoutId);
-    }
+    // Kunci subtes di server. Idempoten, dan sudah ada percobaan ulang di
+    // dalam lockSubtestOnServer.
+    const result = await lockSubtestOnServer(subtest.code, reason);
 
-    if (!locked) {
+    if (!result.ok) {
       // JANGAN pura-pura terkunci. Kode lama tetap menghapus state timer lalu
       // redirect ke /test walau request-nya gagal, dan `locking` TIDAK PERNAH
       // direset — jadi tombol mati permanen di "MENGUNCI…" tanpa jalan keluar.
       // Sekarang tombol dihidupkan lagi supaya siswa bisa mencoba ulang.
       setLocking(false);
       toast.error(
-        "Gagal mengunci subtes: koneksi bermasalah. Periksa jaringan lalu tekan tombol ini lagi. Jawaban Anda tetap tersimpan.",
+        `Belum bisa mengunci subtes (${result.error}). Jawaban Anda TETAP TERSIMPAN. Tekan tombol ini sekali lagi; kalau masih gagal, panggil pengawas.`,
       );
       return;
     }
@@ -542,6 +584,18 @@ export default function SubtestRunner({
         ? "Waktu habis. Subtes terkunci, kembali ke daftar."
         : "Subtes selesai. Kembali ke daftar.",
     );
+    // MUAT ULANG PENUH ke daftar subtes, bukan router.push.
+    //
+    // Daftar subtes (/test) adalah server component. router.push boleh
+    // menyajikannya dari cache router di sisi klien, sehingga subtes yang
+    // BARU SAJA dikunci masih tampil sebagai "LANJUT"/"MULAI". Siswa lalu
+    // membukanya lagi dan MENGULANG JAWABAN. window.location.assign memaksa
+    // halaman dibaca ulang dari server, jadi status kunci yang tampil selalu
+    // yang terbaru.
+    if (typeof window !== "undefined") {
+      window.location.assign("/test");
+      return;
+    }
     router.push("/test");
   };
 
@@ -588,6 +642,11 @@ export default function SubtestRunner({
               if (typeof window !== "undefined") {
                 window.localStorage.removeItem(STORAGE_KEY(subtest.code));
                 window.localStorage.removeItem(STARTED_KEY(subtest.code));
+                // Muat ulang penuh, alasannya sama seperti di finishSub:
+                // daftar subtes tidak boleh tampil dari cache lama yang
+                // masih menganggap subtes ini terbuka.
+                window.location.assign("/test");
+                return;
               }
               router.push("/test");
             }
@@ -813,10 +872,10 @@ export default function SubtestRunner({
                   const ok = await brutConfirm({
                     title: "Selesaikan Subtes?",
                     tone: "danger",
-                    icon: "\\ud83d\\udd12",
+                    icon: "\ud83d\udd12",
                     message:
                       unanswered > 0
-                        ? `Masih ada ${unanswered} soal yang belum dijawab.\\n\\nSubtes akan DIKUNCI dan TIDAK BISA dibuka lagi setelah ini.`
+                        ? `Masih ada ${unanswered} soal yang belum dijawab.\n\nSubtes akan DIKUNCI dan TIDAK BISA dibuka lagi setelah ini.`
                         : "Semua soal sudah dijawab. Subtes akan DIKUNCI dan TIDAK BISA dibuka lagi setelah ini.",
                     confirmLabel: "YA, KUNCI SUBTES",
                     cancelLabel: "Lanjut Mengerjakan",
@@ -1145,10 +1204,10 @@ export default function SubtestRunner({
                 const ok = await brutConfirm({
                   title: "Selesaikan Subtes?",
                   tone: "danger",
-                  icon: "\\ud83d\\udd12",
+                  icon: "\ud83d\udd12",
                   message:
                     unanswered > 0
-                      ? `Masih ada ${unanswered} soal yang belum dijawab.\\n\\nSubtes akan DIKUNCI dan TIDAK BISA dibuka lagi setelah ini.`
+                      ? `Masih ada ${unanswered} soal yang belum dijawab.\n\nSubtes akan DIKUNCI dan TIDAK BISA dibuka lagi setelah ini.`
                       : "Semua soal sudah dijawab. Subtes akan DIKUNCI dan TIDAK BISA dibuka lagi setelah ini.",
                   confirmLabel: "YA, KUNCI SUBTES",
                   cancelLabel: "Lanjut Mengerjakan",
