@@ -23,11 +23,30 @@ export const dynamic = "force-dynamic";
 // POST → buat link pemulihan SEKALI PAKAI (umur 30 menit) untuk satu sesi.
 //
 // Link inilah jalan keluar kalau siswa tidak mencatat Kode Lanjut sama sekali.
-// Sebelumnya jalur ini hanya ada untuk minat-bakat; sesi tes IQ yang cookienya
-// hilang benar-benar tidak bisa dipulihkan oleh siapa pun.
+//
+// ── CATATAN BUG PRODUKSI (Agustus 2026) ────────────────────────────────────
+// Dulu hanya blok CFIT yang dibungkus try/catch + isMissingColumnError,
+// sedangkan query daftar minat-bakat TIDAK — padahal ia men-select kolom
+// "resumeCode" yang baru datang dari prisma/sql/0008. Karena repo ini tidak
+// memakai `prisma migrate deploy` (build hanya `prisma generate`), SQL di
+// prisma/sql/ harus dijalankan manual di Supabase. Kalau lupa:
+//
+//   * pickFreeResumeCode() → null  → submission dibuat TANPA Kode Lanjut,
+//     jadi kode yang dipegang siswa memang tidak pernah ada di database →
+//     /lanjut selalu menolak ("kode tidak ditemukan").
+//   * GET ini → P2022 → 500 → panel Pemulihan gagal memuat daftar →
+//     pengawas tidak bisa mengirim link, padahal POST-nya sanggup jalan.
+//
+// Sekarang kedua tes memakai pola yang sama dan ada FALLBACK tanpa kolom
+// pemulihan: kolom yang belum ada tidak lagi mematikan panel, dan response
+// menyebutkan file SQL mana yang perlu di-apply.
 
 const KIND = z.enum(["MINAT_BAKAT", "CFIT"]);
 type Kind = z.infer<typeof KIND>;
+
+const SQL_MINAT_RESUME_CODE = "prisma/sql/0008_submission_resume_code.sql";
+const SQL_CFIT_RESUME = "prisma/sql/0009_cfit_pause_and_resume.sql";
+const SQL_SINGLE_USE = "prisma/sql/0010_resume_link_single_use.sql";
 
 type Row = {
   id: string;
@@ -53,31 +72,37 @@ export async function GET(req: NextRequest) {
 
   const nameFilter = q ? { fullName: { contains: q, mode: "insensitive" as const } } : {};
   const tokenFilter = tokenCode ? { token: { code: tokenCode } } : {};
+  const where = { finishedAt: null, ...tokenFilter, ...nameFilter };
 
   const wantMinat = onlyKind === null || onlyKind === "MINAT_BAKAT";
   const wantCfit = onlyKind === null || onlyKind === "CFIT";
 
+  // File SQL yang terdeteksi belum di-apply. Dikirim ke panel supaya pengawas
+  // tahu persis apa yang harus diminta ke admin teknis.
+  const missingMigrations: string[] = [];
+
   // Sesi minat-bakat.
-  const minatRows: Row[] = !wantMinat
-    ? []
-    : (
-        await prisma.submission.findMany({
-          where: { finishedAt: null, ...tokenFilter, ...nameFilter },
-          orderBy: { startedAt: "desc" },
-          take: 50,
-          select: {
-            id: true,
-            fullName: true,
-            school: true,
-            grade: true,
-            testKind: true,
-            startedAt: true,
-            resumeCode: true,
-            token: { select: { code: true } },
-            _count: { select: { answers: true } },
-          },
-        })
-      ).map((r) => ({
+  let minatRows: Row[] = [];
+  let minatUnavailable = false;
+  if (wantMinat) {
+    try {
+      const rows = await prisma.submission.findMany({
+        where,
+        orderBy: { startedAt: "desc" },
+        take: 50,
+        select: {
+          id: true,
+          fullName: true,
+          school: true,
+          grade: true,
+          testKind: true,
+          startedAt: true,
+          resumeCode: true,
+          token: { select: { code: true } },
+          _count: { select: { answers: true } },
+        },
+      });
+      minatRows = rows.map((r) => ({
         id: r.id,
         kind: "MINAT_BAKAT" as const,
         fullName: r.fullName,
@@ -89,16 +114,53 @@ export async function GET(req: NextRequest) {
         tokenCode: r.token?.code ?? null,
         answered: r._count.answers,
       }));
+    } catch (err) {
+      if (!isMissingColumnError(err)) throw err;
+      minatUnavailable = true;
+      missingMigrations.push(SQL_MINAT_RESUME_CODE, SQL_SINGLE_USE);
+      console.warn(
+        `[admin/resume-link] Kolom pemulihan minat-bakat belum ada. Apply ${SQL_MINAT_RESUME_CODE} dan ${SQL_SINGLE_USE}.`,
+      );
+      // Ulangi TANPA kolom pemulihan. Daftar harus tetap tampil supaya
+      // pengawas masih bisa memilih siswa dan menerbitkan link — link tetap
+      // berfungsi, hanya belum bisa dibatasi sekali pakai.
+      const rows = await prisma.submission.findMany({
+        where,
+        orderBy: { startedAt: "desc" },
+        take: 50,
+        select: {
+          id: true,
+          fullName: true,
+          school: true,
+          grade: true,
+          testKind: true,
+          startedAt: true,
+          token: { select: { code: true } },
+          _count: { select: { answers: true } },
+        },
+      });
+      minatRows = rows.map((r) => ({
+        id: r.id,
+        kind: "MINAT_BAKAT" as const,
+        fullName: r.fullName,
+        school: r.school,
+        grade: r.grade,
+        testKind: r.testKind,
+        startedAt: r.startedAt ? r.startedAt.toISOString() : null,
+        resumeCode: null,
+        tokenCode: r.token?.code ?? null,
+        answered: r._count.answers,
+      }));
+    }
+  }
 
-  // Sesi tes IQ. Dibungkus try/catch: kalau migrasi 0009 belum di-apply,
-  // kolom resumeCode belum ada — panel TIDAK BOLEH ikut mati, daftar
-  // minat-bakat harus tetap tampil.
+  // Sesi tes IQ. Pola sama: kolom yang belum ada TIDAK boleh mematikan panel.
   let cfitRows: Row[] = [];
   let cfitUnavailable = false;
   if (wantCfit) {
     try {
       const rows = await prisma.cfitSubmission.findMany({
-        where: { finishedAt: null, ...tokenFilter, ...nameFilter },
+        where,
         orderBy: { startedAt: "desc" },
         take: 50,
         select: {
@@ -128,9 +190,43 @@ export async function GET(req: NextRequest) {
     } catch (err) {
       if (!isMissingColumnError(err)) throw err;
       cfitUnavailable = true;
+      missingMigrations.push(SQL_CFIT_RESUME, SQL_SINGLE_USE);
       console.warn(
-        "[admin/resume-link] Kolom pemulihan CFIT belum ada. Apply prisma/sql/0009_cfit_pause_and_resume.sql.",
+        `[admin/resume-link] Kolom pemulihan CFIT belum ada. Apply ${SQL_CFIT_RESUME} dan ${SQL_SINGLE_USE}.`,
       );
+      try {
+        const rows = await prisma.cfitSubmission.findMany({
+          where,
+          orderBy: { startedAt: "desc" },
+          take: 50,
+          select: {
+            id: true,
+            fullName: true,
+            school: true,
+            grade: true,
+            form: true,
+            startedAt: true,
+            token: { select: { code: true } },
+            _count: { select: { answers: true } },
+          },
+        });
+        cfitRows = rows.map((r) => ({
+          id: r.id,
+          kind: "CFIT" as const,
+          fullName: r.fullName,
+          school: r.school,
+          grade: r.grade,
+          testKind: `CFIT ${String(r.form).replace("FORM_", "")}`,
+          startedAt: r.startedAt ? r.startedAt.toISOString() : null,
+          resumeCode: null,
+          tokenCode: r.token?.code ?? null,
+          answered: r._count.answers,
+        }));
+      } catch (fallbackErr) {
+        // Tabel/kolom dasarnya pun belum ada — biarkan daftar CFIT kosong,
+        // daftar minat-bakat tetap harus tampil.
+        if (!isMissingColumnError(fallbackErr)) throw fallbackErr;
+      }
     }
   }
 
@@ -141,8 +237,10 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     sessions,
     // Supaya panel admin bisa memberi tahu pengawas kalau fitur pemulihan
-    // tes IQ belum aktif karena migrasi belum dijalankan.
+    // belum sepenuhnya aktif karena migrasi belum dijalankan.
     cfitUnavailable,
+    minatUnavailable,
+    missingMigrations: [...new Set(missingMigrations)],
   });
 }
 
@@ -150,6 +248,14 @@ const Body = z.object({
   submissionId: z.string().min(1),
   kind: KIND.optional(),
 });
+
+function missingColumnWarning(files: string[]): string {
+  return (
+    "Kode Lanjut belum bisa dibuat karena kolom database-nya belum ada. " +
+    "Link di bawah tetap berfungsi, tapi BELUM sekali pakai — jangan sebar ke grup kelas. " +
+    `Minta admin teknis menjalankan ${files.join(" dan ")} di Supabase SQL Editor.`
+  );
+}
 
 export async function POST(req: NextRequest) {
   const admin = getAdminFromRequest(req);
@@ -186,6 +292,7 @@ export async function POST(req: NextRequest) {
       // k=cfit memberi tahu halaman /lanjut bahwa ini sesi tes IQ.
       url: `${origin}/lanjut?t=${encodeURIComponent(token)}&k=cfit`,
       expiresInMinutes: CFIT_RESUME_LINK_TTL_MINUTES,
+      ...(resumeCode ? {} : { warning: missingColumnWarning([SQL_CFIT_RESUME, SQL_SINGLE_USE]) }),
     });
   }
 
@@ -211,5 +318,8 @@ export async function POST(req: NextRequest) {
     resumeCode,
     url: `${origin}/lanjut?t=${encodeURIComponent(token)}`,
     expiresInMinutes: RESUME_LINK_TTL_MINUTES,
+    ...(resumeCode
+      ? {}
+      : { warning: missingColumnWarning([SQL_MINAT_RESUME_CODE, SQL_SINGLE_USE]) }),
   });
 }
