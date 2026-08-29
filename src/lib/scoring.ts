@@ -76,6 +76,8 @@ type AnswerRow = {
     scoringTag: string | null;
     inputMode?: string;
     questionNo?: number;
+    /** Soal contoh — TIDAK boleh ikut dinilai (max dihitung tanpa contoh). */
+    isExample?: boolean;
   };
 };
 
@@ -426,6 +428,7 @@ async function loadBidangScores(
   // Fallback: recompute bidang scores from raw answers.
   const scores: Record<string, number> = {};
   for (const ans of m.answers) {
+    if (ans.question.isExample) continue;
     if (ans.question.subtest.code !== "MINAT_BIDANG") continue;
     const sel = pickAnswerLetter(ans.selected);
     if (sel) scores[sel] = (scores[sel] || 0) + 1;
@@ -466,6 +469,11 @@ export function computeScoringPayload(
   subtestMeta: SubtestMeta[] | null = null,
   minatBidang: Record<string, number> | MinatCrossLink | null = null,
 ): ScoringPayload {
+  // Buang jawaban SOAL CONTOH sebelum dinilai. Route answer memang menyimpan
+  // jawaban contoh (untuk latihan), tapi max per subtes (loadSubtestMeta)
+  // dihitung TANPA contoh — kalau ikut dinilai, raw bisa melebihi max dan
+  // menginflasi persen/z-score/FSIQ (BAKAT) atau menggeser bidangScores (MINAT).
+  sub = { ...sub, answers: sub.answers.filter((a) => !a.question.isExample) };
   const crossLink: MinatCrossLink | null = isCrossLink(minatBidang)
     ? minatBidang
     : minatBidang

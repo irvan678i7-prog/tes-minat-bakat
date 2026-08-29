@@ -10,6 +10,7 @@ import {
   getCfitFromRequest,
   signCfitToken,
 } from "@/lib/cfit/auth";
+import { pickFreeCfitResumeCode } from "@/lib/cfit/resume";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +24,36 @@ const Body = z.object({
 
 const REDEEM_LIMIT = 20;
 const REDEEM_WINDOW_MS = 5 * 60 * 1000;
+
+type NewSubmissionData = {
+  tokenId: string;
+  form: "FORM_3A" | "FORM_3B" | "FORM_3AB";
+  school: string | null;
+  grade: string | null;
+  randomSeed: string;
+};
+
+/**
+ * Buat sesi baru + "Kode Lanjut" sekaligus, TAPI kode tidak boleh pernah
+ * menjatuhkan redeem: kalau kodenya bentrok (P2002, peluangnya 1 : 1,07
+ * miliar) atau kolomnya belum ada di DB (migrasi 0009 belum di-apply), sesi
+ * tetap dibuat TANPA kode. Peserta harus bisa mulai tes apa pun yang terjadi;
+ * kode bisa dibuat menyusul oleh /api/cfit/resume-code.
+ */
+async function createSubmissionWithResumeCode(data: NewSubmissionData) {
+  const resumeCode = await pickFreeCfitResumeCode().catch(() => null);
+  if (resumeCode) {
+    try {
+      return await prisma.cfitSubmission.create({ data: { ...data, resumeCode } });
+    } catch (err) {
+      console.warn(
+        "[cfit/redeem] gagal menyimpan resumeCode, sesi dibuat tanpa Kode Lanjut:",
+        err,
+      );
+    }
+  }
+  return prisma.cfitSubmission.create({ data });
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -62,14 +93,12 @@ export async function POST(req: NextRequest) {
       }
       // Sekolah & kelas diwarisi dari token (diisi admin saat membuat token),
       // supaya semua peserta satu sesi punya tulisan yang identik.
-      submission = await prisma.cfitSubmission.create({
-        data: {
-          tokenId: tok.id,
-          form: tok.form,
-          school: tok.school,
-          grade: tok.grade,
-          randomSeed: randomUUID(),
-        },
+      submission = await createSubmissionWithResumeCode({
+        tokenId: tok.id,
+        form: tok.form,
+        school: tok.school,
+        grade: tok.grade,
+        randomSeed: randomUUID(),
       });
       if (!tok.redeemedAt) {
         await prisma.cfitAccessToken.updateMany({

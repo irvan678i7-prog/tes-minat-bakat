@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getStudentFromRequest } from "@/lib/auth";
-import { ensureSubtestStarted } from "@/lib/subtestLock";
+import { ensureSubtestStarted, PAUSE_BUDGET_SEC } from "@/lib/subtestLock";
 
 const Body = z.object({
   subtestCode: z.string().min(1),
@@ -13,6 +13,11 @@ const Body = z.object({
 // TIDAK lagi memulai timer; pemicunya adalah endpoint ini. Idempoten: kalau
 // subtes sudah dimulai/dikunci, kembalikan status saat ini tanpa mengubah
 // startedAt.
+//
+// TIMER SADAR-JEDA: `startedAt` yang dikirim ke klien adalah acuan timer
+// (now - waktu aktif terpakai), BUKAN jam mulai asli. Jadi kalau siswa
+// membuka ulang subtes setelah mati lampu, hitungan mundur melanjutkan sisa
+// waktunya. Jam mulai asli tetap disimpan di DB untuk audit.
 export async function POST(req: NextRequest) {
   const student = getStudentFromRequest(req);
   if (!student) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -38,11 +43,19 @@ export async function POST(req: NextRequest) {
     durationSec: subtest.durationSec,
   });
 
+  const timerRef = info.timerStartedAt ?? info.startedAt;
   return NextResponse.json({
     ok: true,
     locked: info.locked,
-    startedAt: info.startedAt ? info.startedAt.toISOString() : null,
+    startedAt: timerRef ? timerRef.toISOString() : null,
+    // Jam mulai asli — informasi tambahan, tidak dipakai untuk hitung timer.
+    firstStartedAt: info.startedAt ? info.startedAt.toISOString() : null,
     finishedAt: info.finishedAt ? info.finishedAt.toISOString() : null,
     finishReason: info.finishReason,
+    remainingSec: info.remainingSec,
+    consumedSec: info.consumedSec,
+    pausedSec: info.pausedSec,
+    pauseCount: info.pauseCount,
+    pauseBudgetSec: PAUSE_BUDGET_SEC,
   });
 }
