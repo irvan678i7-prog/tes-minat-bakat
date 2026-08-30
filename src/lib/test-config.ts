@@ -252,6 +252,18 @@ export const CATEGORY_LABEL: Record<string, string> = {
 
 type CategoryRanges = { [code: string]: [number, number, number, number] };
 // thresholds: [maxBR, maxRR, maxAR, maxB] -> >maxB = LB
+//
+// PENTING — SATUAN SKOR MENTAH (harus cocok dengan norma Tabel 4.1):
+// - Subtes yang normanya MELEBIHI jumlah soal dinilai PER-BAGIAN (per isian):
+//   SPASIAL  (14 soal × 5 isian = 70; LB mulai 43 > 14),
+//   3DIMENSI (10 soal × 3 isian = 30; LB mulai 22 > 10),
+//   SISTEMATISASI (13 soal × ±12 isian = ±156; LB mulai 121 > 13).
+// - PENALARAN URUTAN dinilai PER-SOAL (maks 20): satu soal berisi 2 isian dan
+//   baru dihitung 1 poin bila KEDUA isian benar. Batas normanya (BR ≤2,
+//   RR ≤7, AR ≤11, B ≤15, LB ≥16) proporsional dengan maks 20 — bukan 40.
+//   Dulu subtes ini ikut dihitung per-isian sehingga raw menggembung sampai
+//   2×: siswa yang hanya benar 3-4 soal bisa terlabel "Di atas rata-rata".
+//   Lihat SCORE_UNIT di bawah.
 export const CATEGORY_RANGES: CategoryRanges = {
   BAKAT_1_VISUAL: [2, 6, 12, 19],
   BAKAT_2_NUMERIK: [2, 5, 8, 13],
@@ -263,6 +275,23 @@ export const CATEGORY_RANGES: CategoryRanges = {
   BAKAT_8_KOSAKATA: [6, 13, 19, 26],
   BAKAT_9_FIGURAL: [5, 11, 17, 23],
 };
+
+/**
+ * Satuan penghitungan skor mentah per subtes agar cocok dengan norma
+ * Tabel 4.1 di buku panduan.
+ * - "PART"     (default): 1 poin per bagian/isian yang benar.
+ * - "QUESTION": 1 poin per SOAL — soal multi-bagian baru dihitung benar
+ *   bila SEMUA bagiannya benar (tanpa poin parsial).
+ */
+export const SCORE_UNIT: Record<string, "PART" | "QUESTION"> = {
+  // Buku: maks 20 (20 soal), LB mulai 16. Per-isian (maks 40) akan
+  // menggandakan raw dan menggeser kategori 1-2 tingkat ke atas.
+  BAKAT_4_URUTAN: "QUESTION",
+};
+
+export function scoreUnit(code: string): "PART" | "QUESTION" {
+  return SCORE_UNIT[code] ?? "PART";
+}
 
 export function categorize(code: string, raw: number): "BR" | "RR" | "AR" | "B" | "LB" {
   const r = CATEGORY_RANGES[code];
