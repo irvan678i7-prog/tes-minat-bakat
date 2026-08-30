@@ -142,8 +142,17 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
         isCompleted={isCompleted}
         /* Sisa waktu resmi dari server. Inilah sumber kebenaran timer di
            layar siswa: nilainya dihitung dari startedAt, jadi memuat ulang
-           halaman tidak pernah menghasilkan angka yang lebih besar. */
-        serverRemainingSec={startInfo.remainingSec}
+           halaman tidak pernah menghasilkan angka yang lebih besar.
+
+           HANYA dikirim kalau server BENAR-BENAR sudah punya progress
+           (startInfo.started). Kalau belum — misalnya /subtest-start gagal
+           saat siswa klik MULAI — remainingSec dari notStartedInfo() adalah
+           DURASI PENUH, dan mengirimkannya membuat timer siswa KEMBALI PENUH
+           setiap kali halaman dimuat ulang. Itulah bug "waktu habis, di-
+           refresh, waktunya malah bertambah". Dengan null, runner memakai
+           cadangan localStorage yang melanjutkan hitungan dari titik mulai
+           lokal. */
+        serverRemainingSec={startInfo.started ? startInfo.remainingSec : null}
         /* Acuan lama (now - waktu terpakai). Dipertahankan sebagai penanda
            bahwa server sudah punya progress subtes ini. */
         serverStartedAt={

@@ -86,25 +86,50 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const now = new Date();
   const consumedSec = Math.max(0, subtest.durationSec - extraSec);
+  // Timer MINAT/BAKAT sekarang JAM DINDING MURNI: waktu terpakai dihitung
+  // ulang dari startedAt (lihat projectSubtestTime di subtestLock.ts), BUKAN
+  // dari kolom consumedSec. Kalau hanya consumedSec yang ditulis, subtes akan
+  // langsung terkunci lagi begitu siswa membukanya — tombol "+ WAKTU" jadi
+  // tidak berfungsi sama sekali. Karena itu startedAt ikut DIGESER sehingga
+  // (now - startedAt) = consumedSec baru = durationSec - extraSec. Jam mulai
+  // asli memang berubah, tapi jejak tindakan ini dicatat di log audit bawah.
+  const shiftedStartedAt = new Date(now.getTime() - consumedSec * 1000);
   const fullData = {
     finishedAt: null,
     finishReason: null,
     consumedSec,
-    lastSeenAt: new Date(),
+    lastSeenAt: now,
   };
   // Cadangan kalau migrasi 0007/0009 belum di-apply: minimal kuncinya dibuka.
   const liteData = { finishedAt: null, finishReason: null };
   let partial = false;
 
   try {
-    if (isCfit) await prisma.cfitSubtestProgress.update({ where, data: fullData });
-    else await prisma.subtestProgress.update({ where, data: fullData });
+    if (isCfit) {
+      // Timer CFIT masih sadar-jeda (akumulasi consumedSec) — startedAt
+      // TIDAK perlu digeser.
+      await prisma.cfitSubtestProgress.update({ where, data: fullData });
+    } else {
+      await prisma.subtestProgress.update({
+        where,
+        data: { ...fullData, startedAt: shiftedStartedAt },
+      });
+    }
   } catch (err) {
     if (!isMissingColumnError(err)) throw err;
     partial = true;
-    if (isCfit) await prisma.cfitSubtestProgress.update({ where, data: liteData });
-    else await prisma.subtestProgress.update({ where, data: liteData });
+    if (isCfit) {
+      await prisma.cfitSubtestProgress.update({ where, data: liteData });
+    } else {
+      // Tanpa kolom timer sadar-jeda pun, geser startedAt tetap bisa — dan
+      // memang inilah yang menentukan sisa waktu pada timer jam dinding.
+      await prisma.subtestProgress.update({
+        where,
+        data: { ...liteData, startedAt: shiftedStartedAt },
+      });
+    }
   }
 
   // 4. Opsional: buka kembali sesi yang sudah tertutup.
