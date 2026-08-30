@@ -47,15 +47,22 @@ const REJECTED_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 // BERAPA LAMA JAWABAN "SUBTES BELUM DIMULAI" BOLEH DICOBA ULANG.
 //
 // Server menolak jawaban untuk subtes yang belum punya baris SubtestProgress
-// (penjagaan anti pre-answering). Penyebab paling sering BUKAN kecurangan,
-// melainkan perlombaan: satu putaran flush kebetulan jalan sebelum
-// /subtest-start selesai membuat baris itu — hitungan detik. Dulu jawaban
-// seperti itu dibuang permanen; sekarang dicoba ulang.
+// (penjagaan anti pre-answering). Dua penyebabnya:
+//   1. Perlombaan: satu putaran flush jalan sebelum /subtest-start selesai
+//      membuat baris itu — hitungan detik.
+//   2. /subtest-start GAGAL TOTAL (jaringan sekolah putus >30 detik saat
+//      klik MULAI). Ini yang paling berbahaya: dulu jawaban seperti itu
+//      hanya dicoba ulang 2 menit lalu DIBUANG PERMANEN, badge tetap hijau
+//      "TERSIMPAN", siswa mengerjakan sampai habis, dan PDF-nya 0.
 //
-// Batasnya sengaja PENDEK. Kalau dicoba ulang berlama-lama, jawaban untuk
-// subtes yang belum dibuka akan ikut tersimpan begitu subtes itu akhirnya
-// dibuka — justru membuka lubang pre-answering yang dijaga server.
-const NOT_STARTED_RETRY_MAX_AGE_MS = 2 * 60 * 1000;
+// Sekarang batasnya disamakan dengan umur sesi (6 jam): jawaban tetap di
+// antrean sampai subtes benar-benar dimulai di server. Ini TIDAK membuka
+// lubang pre-answering baru — runner hanya meng-antre jawaban untuk subtes
+// yang sedang dibuka siswa, dan semua penjagaan server (progress harus ada,
+// waktu belum habis) tetap berlaku saat jawaban akhirnya diterima. Selain
+// dicoba ulang, penolakan ini juga MENYIARKAN event supaya runner memanggil
+// ulang /subtest-start (lihat SUBTEST_NOT_STARTED_EVENT).
+const NOT_STARTED_RETRY_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 // Batas waktu SATU request jawaban. Tanpa ini `fetch` bisa menggantung tanpa
 // batas: request dikirim dengan `keepalive`, dan jumlah request keepalive
@@ -133,6 +140,10 @@ function migrateLegacyKeys(sessionId?: string | null) {
 // tidak perlu berbagi instance hook dengan SubtestRunner.
 export const ANSWER_REJECTED_EVENT = "tmb:answer-rejected";
 export const SESSION_DEAD_EVENT = "tmb:session-dead";
+// Server bilang "subtes belum dimulai" — runner harus memanggil ulang
+// /subtest-start. Tanpa siaran ini, kegagalan /subtest-start saat klik MULAI
+// tidak pernah sembuh dan SEMUA jawaban subtes itu tertahan di antrean.
+export const SUBTEST_NOT_STARTED_EVENT = "tmb:subtest-not-started";
 
 function loadPending(sessionId?: string | null): Pending {
   if (typeof window === "undefined") return {};
@@ -209,7 +220,6 @@ export function useAnswerSync() {
   const [rejectedCount, setRejectedCount] = useState(0);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [status, setStatus] = useState<SyncStatus>("idle");
-  const flushingRef = useRef(false);
   const backoffRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onlineRef = useRef<boolean>(
@@ -335,17 +345,19 @@ export function useAnswerSync() {
         } catch {
           // body bukan JSON — pakai pesan bawaan di bawah.
         }
-        // "Subtes belum dimulai" hampir selalu PERLOMBAAN, bukan penolakan
-        // sungguhan: putaran flush ini jalan sebelum /subtest-start selesai
-        // membuat baris SubtestProgress, jadi server belum punya timer untuk
-        // memeriksa jawaban ini. Coba ulang — tapi hanya selama jawabannya
-        // masih sangat baru, supaya ini tidak berubah menjadi jalur
-        // pre-answering untuk subtes yang belum dibuka.
-        if (
-          code === "SUBTEST_NOT_STARTED" &&
-          answeredAgoMs < NOT_STARTED_RETRY_MAX_AGE_MS
-        ) {
-          return { kind: "retry" };
+        // "Subtes belum dimulai" = server belum punya baris SubtestProgress.
+        // Bisa perlombaan sesaat, bisa juga /subtest-start yang gagal total.
+        // Dua-duanya disembuhkan dengan cara yang sama: minta runner memanggil
+        // ulang /subtest-start (lewat event), lalu simpan jawaban di antrean
+        // sampai berhasil. Jangan pernah membuangnya diam-diam — itulah bug
+        // "siswa isi jawaban tapi PDF-nya 0".
+        if (code === "SUBTEST_NOT_STARTED") {
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent(SUBTEST_NOT_STARTED_EVENT));
+          }
+          if (answeredAgoMs < NOT_STARTED_RETRY_MAX_AGE_MS) {
+            return { kind: "retry" };
+          }
         }
         // 4xx lain (mis. 409 di luar jendela susulan) = penolakan permanen.
         // Mengulang tidak akan menolong, tapi ini WAJIB dicatat, bukan
@@ -369,9 +381,15 @@ export function useAnswerSync() {
   // Keep a stable ref to the latest flush so timers/listeners always invoke the
   // most recent implementation without re-binding.
   const flushRef = useRef<() => void>(() => {});
+  // Promise flush yang sedang berjalan. PENTING: pemanggil yang datang saat
+  // flush lain sedang jalan harus IKUT MENUNGGU flush itu, bukan langsung
+  // pulang. Versi lama langsung `return` bila flushingRef true — akibatnya
+  // `await sync.flush()` di tombol "SELESAIKAN SUBTES" selesai seketika TANPA
+  // menunggu apa pun, subtes dikunci saat antrean masih terkirim setengah,
+  // dan jumlah terjawab di daftar subtes tampak BERKURANG.
+  const flushPromiseRef = useRef<Promise<void> | null>(null);
 
-  const flush = useCallback(async () => {
-    if (flushingRef.current) return;
+  const doFlush = useCallback(async () => {
     if (typeof navigator !== "undefined" && !navigator.onLine) {
       setStatus("offline");
       return;
@@ -381,7 +399,6 @@ export function useAnswerSync() {
       setStatus("idle");
       return;
     }
-    flushingRef.current = true;
     setStatus("syncing");
     let anyFailed = false;
     let anyRejected = false;
@@ -477,15 +494,14 @@ export function useAnswerSync() {
       anyFailed = true;
     } finally {
       // WAJIB di finally. Sebelumnya tiga baris ini hanya jalan di jalur
-      // sukses: satu kesalahan tak terduga saja membuat flushingRef bernilai
-      // true SELAMANYA, sehingga setiap flush() berikutnya langsung keluar di
+      // sukses: satu kesalahan tak terduga saja membuat status flush macet
+      // SELAMANYA, sehingga setiap flush() berikutnya langsung keluar di
       // baris pertama, denyut latar 4 detik ikut mati, status terkunci di
       // "syncing" (badge macet di "MENYIMPAN…"), dan jawaban berhenti
       // terkirim tanpa peringatan apa pun ke siswa. Satu-satunya pemulihan
       // adalah muat ulang halaman — yang tidak diketahui siswa.
       persist();
       if (rejectedChanged) persistRejected();
-      flushingRef.current = false;
     }
 
     if (unauthorized) setSessionExpired(true);
@@ -527,6 +543,42 @@ export function useAnswerSync() {
       backoffRef.current = 0;
     }
   }, [persist, persistRejected]);
+
+  // Pembungkus yang menjamin: (1) hanya SATU flush berjalan pada satu waktu,
+  // (2) pemanggil kedua menunggu flush yang sedang berjalan itu selesai.
+  const flush = useCallback((): Promise<void> => {
+    if (flushPromiseRef.current) return flushPromiseRef.current;
+    const p = doFlush().finally(() => {
+      flushPromiseRef.current = null;
+    });
+    flushPromiseRef.current = p;
+    return p;
+  }, [doFlush]);
+
+  // KURAS ANTREAN SAMPAI KOSONG (atau jatah waktu habis). Dipakai tombol
+  // "SELESAIKAN SUBTES": subtes baru boleh dikunci setelah antrean jawaban
+  // benar-benar kosong, supaya jumlah terjawab di server sama dengan yang
+  // dilihat siswa di layar. Mengembalikan sisa antrean (0 = semua terkirim).
+  const flushUntilEmpty = useCallback(
+    async (budgetMs = 15000): Promise<number> => {
+      const deadline = Date.now() + budgetMs;
+      for (;;) {
+        if (Object.keys(pendingRef.current).length === 0) return 0;
+        if (Date.now() >= deadline) {
+          return Object.keys(pendingRef.current).length;
+        }
+        await flush();
+        if (Object.keys(pendingRef.current).length === 0) return 0;
+        if (Date.now() >= deadline) {
+          return Object.keys(pendingRef.current).length;
+        }
+        // Jeda singkat sebelum putaran berikutnya supaya tidak berputar
+        // kencang saat offline (flush langsung pulang tanpa mengirim).
+        await new Promise<void>((resolve) => setTimeout(resolve, 300));
+      }
+    },
+    [flush],
+  );
 
   // Keep the ref in sync so the setTimeout closure always uses the latest fn.
   useEffect(() => {
@@ -611,6 +663,7 @@ export function useAnswerSync() {
   return {
     queueAnswer,
     flush,
+    flushUntilEmpty,
     clearAll,
     clearRejected,
     status,
@@ -618,4 +671,121 @@ export function useAnswerSync() {
     rejectedCount,
     sessionExpired,
   };
+}
+
+// Adakah jawaban yang masih menunggu di antrean localStorage sesi ini?
+// Dipakai halaman daftar subtes untuk memutuskan perlu-tidaknya menguras.
+export function hasPendingAnswers(sessionId?: string | null): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const raw = window.localStorage.getItem(pendingStoreKey(sessionId));
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as Pending;
+    return Object.keys(parsed).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+// ── PENGURAS ANTREAN DI LUAR RUNNER ─────────────────────────────────────────
+//
+// Setelah subtes dikunci, runner memuat ulang penuh ke daftar subtes (/test).
+// Di halaman itu useAnswerSync TIDAK terpasang, jadi jawaban yang masih
+// tersisa di antrean localStorage tidak pernah terkirim — dan jumlah
+// terjawab di daftar tampak BERKURANG dibanding yang dikerjakan siswa.
+//
+// Fungsi ini membaca antrean langsung dari localStorage dan mengirimkannya
+// satu per satu (dengan answeredAgoMs, supaya diterima server sebagai jawaban
+// susulan bila subtesnya sudah terkunci). HANYA boleh dipakai di halaman yang
+// TIDAK memasang useAnswerSync (mis. daftar subtes) supaya tidak berebut
+// menulis localStorage dengan instance hook di runner.
+export async function drainPendingAnswers(
+  sessionId: string | null | undefined,
+  budgetMs = 12000,
+): Promise<number> {
+  if (typeof window === "undefined") return 0;
+  const deadline = Date.now() + budgetMs;
+  const key = pendingStoreKey(sessionId);
+  const load = (): Pending => {
+    try {
+      const raw = window.localStorage.getItem(key);
+      return raw ? (JSON.parse(raw) as Pending) : {};
+    } catch {
+      return {};
+    }
+  };
+  const save = (p: Pending) => {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(p));
+    } catch {
+      // localStorage penuh / tidak tersedia — antrean in-memory tetap benar.
+    }
+  };
+  const recordRejected = (
+    qid: string,
+    item: Pending[string],
+    status: number,
+    error: string,
+  ) => {
+    const list = readRejectedAnswers(sessionId)
+      .filter((r) => r.questionId !== qid)
+      .concat({ questionId: qid, selected: item.selected, ts: item.ts, status, error })
+      .slice(-MAX_REJECTED);
+    saveRejected(sessionId, list);
+  };
+
+  const pending = load();
+  const ids = Object.keys(pending);
+  if (ids.length === 0) return 0;
+
+  for (const qid of ids) {
+    if (Date.now() >= deadline) break;
+    const item = pending[qid];
+    if (!item) continue;
+    try {
+      const res = await fetch("/api/student/test/answer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          questionId: qid,
+          selected: item.selected,
+          answeredAgoMs: Math.max(0, Date.now() - item.ts),
+        }),
+        keepalive: true,
+      });
+      if (res.ok) {
+        delete pending[qid];
+        save(pending);
+        continue;
+      }
+      // Sesi mati — berhenti; antrean menunggu pemulihan lewat /lanjut.
+      if (res.status === 401) break;
+      // Sampah antrean sesi lain (bukan kehilangan data sesi ini).
+      if (isStaleStatus(res.status)) {
+        delete pending[qid];
+        save(pending);
+        continue;
+      }
+      // 429 / 5xx → biarkan di antrean, putaran berikutnya mencoba lagi.
+      if (res.status === 429 || res.status >= 500) continue;
+      // 4xx lain = penolakan permanen — keluarkan dari antrean TAPI catat
+      // sebagai kehilangan data supaya pengawas bisa memeriksanya.
+      let error = "";
+      let code = "";
+      try {
+        const body = (await res.json()) as { error?: unknown; code?: unknown };
+        if (typeof body?.error === "string") error = body.error;
+        if (typeof body?.code === "string") code = body.code;
+      } catch {
+        // body bukan JSON.
+      }
+      if (code === "SUBTEST_NOT_STARTED") continue; // tunggu subtest-start
+      recordRejected(qid, item, res.status, error || `Ditolak server (kode ${res.status}).`);
+      delete pending[qid];
+      save(pending);
+    } catch {
+      // Jaringan bermasalah — biarkan di antrean.
+    }
+  }
+  return Object.keys(load()).length;
 }
