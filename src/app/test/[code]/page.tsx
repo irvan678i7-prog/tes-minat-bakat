@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { getStudentFromCookies } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { shuffle } from "@/lib/random";
-import SubtestRunner from "@/components/student/SubtestRunner";
+import SubtestRunnerWithPending from "@/components/student/SubtestRunnerWithPending";
 import TimerHeartbeat from "@/components/student/TimerHeartbeat";
 import { BAKAT_SUBTESTS, MINAT_SUBTESTS } from "@/lib/test-config";
 import { computeSubtestLock } from "@/lib/subtestLock";
@@ -110,15 +110,24 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
       select: { questionId: true, selected: true },
     }),
   ]);
-  if (startInfo.locked) redirect("/test");
 
   const existingMap: Record<string, unknown> = {};
   for (const a of existing) existingMap[a.questionId] = a.selected;
 
-  // Subtes dianggap selesai kalau semua soal real sudah punya jawaban. Saat
-  // selesai, runner masuk mode read-only (tidak bisa diubah / ngulang).
-  const isCompleted =
-    realQuestions.length > 0 && existing.length >= realQuestions.length;
+  // SUBTES SELESAI = SUDAH DIKUNCI DI SERVER (SubtestProgress.finishedAt),
+  // bukan sekadar semua soal terjawab.
+  //
+  // Versi lama memakai `existing.length >= realQuestions.length`. Akibatnya
+  // siswa yang sudah mengisi semua soal lalu MEMUAT ULANG halaman langsung
+  // masuk layar read-only "Subtes Ini Sudah Selesai", padahal subtesnya belum
+  // pernah dikunci dan server masih menerima jawaban. Sebaliknya, subtes yang
+  // BENAR-BENAR terkunci justru dialihkan ke daftar subtes — jadi layar
+  // read-only itu hanya muncul pada kondisi yang salah.
+  //
+  // Sekarang keduanya konsisten dengan daftar subtes (TestHub):
+  //   terkunci      → layar read-only (tidak bisa diubah)
+  //   belum terkunci → tetap bisa dikerjakan / diperbaiki / dikunci ulang
+  const isCompleted = startInfo.locked;
 
   return (
     <>
@@ -128,7 +137,7 @@ export default async function SubtestPage({ params }: { params: Promise<{ code: 
           admin "Jeda & Kunci". Sejak timer memakai jam dinding, denyut tidak
           lagi memengaruhi sisa waktu — murni untuk pengawasan. */}
       <TimerHeartbeat subtestCode={subtest.code} />
-      <SubtestRunner
+      <SubtestRunnerWithPending
         subtest={{
           code: subtest.code,
           name: subtest.name,

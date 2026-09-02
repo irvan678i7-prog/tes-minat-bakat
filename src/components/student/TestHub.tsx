@@ -236,10 +236,18 @@ export default function TestHub({
         <ol className="space-y-3">
           {subtests.map((s, idx) => {
             const empty = s.total === 0;
-            const done = !empty && s.answered >= s.total;
             // Subtes terkunci: TIDAK BISA dibuka lagi. Warna abu, badge
             // SELESAI, tombol mati total (bukan <Link>).
+            //
+            // ACUAN "SELESAI" = KUNCI DI SERVER (SubtestProgress.finishedAt).
+            // Versi lama memakai done = answered >= total, sehingga subtes
+            // yang semua soalnya terjawab TAPI penguncian belum/gagal
+            // tersimpan tetap tampil hijau "REVIEW" — bertentangan dengan
+            // halaman subtesnya. Sekarang dua halaman memakai acuan yang sama.
             const locked = s.locked;
+            // Semua soal sudah terjawab tetapi subtes BELUM dikunci. Siswa
+            // masih harus membuka subtes lalu menekan SELESAIKAN SUBTES.
+            const answeredAll = !empty && s.answered >= s.total;
             const reasonLabel =
               s.finishReason === "TIME_UP"
                 ? "WAKTU HABIS"
@@ -249,7 +257,7 @@ export default function TestHub({
             let bg: string;
             if (empty) bg = "#fff";
             else if (locked) bg = "#d4d4d8"; // abu (zinc-300)
-            else if (done) bg = "#a3e635"; // hijau (lime-400)
+            else if (answeredAll) bg = "#a3e635"; // hijau (lime-400)
             else bg = "#22d3ee"; // cyan-400
             return (
               <li
@@ -285,6 +293,15 @@ export default function TestHub({
                             {reasonLabel}
                           </span>
                         )}
+                        {!locked && answeredAll && (
+                          <span
+                            className="brut-tag"
+                            style={{ background: "#facc15" }}
+                            title="Semua soal sudah dijawab, tetapi subtes belum dikunci. Buka subtes ini lalu tekan SELESAIKAN SUBTES."
+                          >
+                            BELUM DIKUNCI
+                          </span>
+                        )}
                       </>
                     )}
                   </div>
@@ -306,9 +323,9 @@ export default function TestHub({
                 ) : (
                   <Link
                     href={`/test/${s.code}`}
-                    className={`brut-btn ${done ? "brut-btn-black" : ""} ${empty ? "opacity-50 pointer-events-none" : ""}`}
+                    className={`brut-btn ${answeredAll ? "brut-btn-black" : ""} ${empty ? "opacity-50 pointer-events-none" : ""}`}
                   >
-                    {done ? "REVIEW" : s.answered > 0 ? "LANJUT" : "MULAI"}
+                    {answeredAll ? "LANJUT & KUNCI" : s.answered > 0 ? "LANJUT" : "MULAI"}
                   </Link>
                 )}
               </li>
