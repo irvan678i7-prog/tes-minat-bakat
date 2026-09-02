@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import toast from "react-hot-toast";
 import { useAntiCheat } from "./useAntiCheat";
-import { useAnswerSync } from "./useAnswerSync";
+import { SUBTEST_NOT_STARTED_EVENT, useAnswerSync } from "./useAnswerSync";
+import { useSessionScope } from "./SessionScope";
 import { useBrutConfirm } from "@/components/BrutConfirm";
 
 type OptionItem = { key: string; label: string; imageUrl?: string };
@@ -23,14 +24,23 @@ type Question = {
 
 type ExampleQuestion = Question & { correct: unknown };
 
-const STORAGE_KEY = (subtestCode: string) => `tmb-runner-${subtestCode}`;
-const STARTED_KEY = (subtestCode: string) => `tmb-runner-started-${subtestCode}`;
+// Kunci penyimpanan lokal DIPISAH PER SESI (Submission.id). Tanpa pemisah
+// ini, sisa state siswa sebelumnya di komputer lab yang sama ikut terbaca:
+// STARTED_KEY membuat layar intro terlewati, dan STORAGE_KEY lama membuat
+// hitungan mundur cadangan salah total.
+const STORAGE_KEY = (scope: string, subtestCode: string) =>
+  `tmb-runner-${scope}-${subtestCode}`;
+const STARTED_KEY = (scope: string, subtestCode: string) =>
+  `tmb-runner-started-${scope}-${subtestCode}`;
 
-// Batas waktu menunggu antrean jawaban terkirim sebelum subtes dikunci.
-// Sisanya tetap dikirim ulang di latar belakang oleh useAnswerSync, jadi
-// menunggu lebih lama tidak menambah keamanan data — hanya membuat tombol
-// "SELESAIKAN SUBTES" tampak macet.
-const FLUSH_WAIT_MS = 8000;
+// Batas waktu menguras antrean jawaban sebelum subtes dikunci. Antrean
+// dikuras SAMPAI KOSONG (bukan sekadar satu putaran flush) supaya jumlah
+// terjawab di server sama dengan yang siswa lihat di layar — inilah jawaban
+// untuk keluhan "sudah isi semua, klik selesai, hasilnya malah berkurang".
+// Sisa antrean setelah jatah ini tetap TERSELAMATKAN: server menerima
+// jawaban susulan yang dipilih sebelum subtes terkunci, dan halaman daftar
+// subtes ikut menguras antrean (drainPendingAnswers di TestHub).
+const FLUSH_WAIT_MS = 15000;
 // Batas waktu SATU percobaan request kunci subtes. Tanpa ini request yang
 // menggantung membuat tombol berhenti di "MENGUNCI…" tanpa ujung.
 const FINISH_TIMEOUT_MS = 12000;
@@ -235,6 +245,8 @@ export default function SubtestRunner({
 }) {
   const router = useRouter();
   const { confirm: brutConfirm, ConfirmModal } = useBrutConfirm();
+  // Pemisah penyimpanan lokal per sesi tes (Submission.id dari cookie).
+  const sessionScope = useSessionScope() ?? "anon";
   const [answers, setAnswers] = useState<Record<string, string | string[]>>(() => {
     const init: Record<string, string | string[]> = {};
     for (const q of questions) {
@@ -252,7 +264,8 @@ export default function SubtestRunner({
     () => () => {},
     () => {
       const wasStarted =
-        window.localStorage.getItem(STARTED_KEY(subtest.code)) === "1";
+        window.localStorage.getItem(STARTED_KEY(sessionScope, subtest.code)) ===
+        "1";
       const hasAnswers = Object.keys(existingAnswers).length > 0;
       return wasStarted || hasAnswers ? "1" : "0";
     },
@@ -307,11 +320,13 @@ export default function SubtestRunner({
       const impliedStart =
         Date.now() - Math.max(0, subtest.durationSec - base) * 1000;
       window.localStorage.setItem(
-        STORAGE_KEY(subtest.code),
+        STORAGE_KEY(sessionScope, subtest.code),
         String(impliedStart),
       );
     } else {
-      const saved = window.localStorage.getItem(STORAGE_KEY(subtest.code));
+      const saved = window.localStorage.getItem(
+        STORAGE_KEY(sessionScope, subtest.code),
+      );
       // WAJIB divalidasi. parseInt("abc") = NaN, dan satu nilai localStorage
       // yang rusak membuat sisa waktu NaN → timer tampil "NaN:NaN" dan timeUp
       // SELAMANYA false, jadi subtes tidak pernah terkunci otomatis dan siswa
@@ -326,7 +341,7 @@ export default function SubtestRunner({
       } else {
         base = subtest.durationSec;
         window.localStorage.setItem(
-          STORAGE_KEY(subtest.code),
+          STORAGE_KEY(sessionScope, subtest.code),
           String(Date.now()),
         );
       }
@@ -348,7 +363,7 @@ export default function SubtestRunner({
     update();
     const id = setInterval(update, 1000);
     return () => clearInterval(id);
-  }, [started, subtest.code, subtest.durationSec, serverRemainingSec]);
+  }, [started, subtest.code, subtest.durationSec, serverRemainingSec, sessionScope]);
 
   // Sebelum efek di atas sempat jalan, tampilkan durasi penuh (perilaku lama).
   const displayRemaining = remaining ?? subtest.durationSec;
@@ -405,19 +420,14 @@ export default function SubtestRunner({
     setForceFinishing(true);
     toast.error("Anda terdeteksi keluar/curang berkali-kali. Tes diselesaikan otomatis.");
     if (typeof window !== "undefined") {
-      window.localStorage.removeItem(STORAGE_KEY(subtest.code));
-      window.localStorage.removeItem(STARTED_KEY(subtest.code));
+      window.localStorage.removeItem(STORAGE_KEY(sessionScope, subtest.code));
+      window.localStorage.removeItem(STARTED_KEY(sessionScope, subtest.code));
     }
     (async () => {
       try {
-        // Flush any pending answers first — dibatasi FLUSH_WAIT_MS supaya
-        // request yang menggantung tidak menahan penyelesaian tes.
-        await Promise.race([
-          sync.flush(),
-          new Promise<void>((resolve) => {
-            setTimeout(() => resolve(), FLUSH_WAIT_MS);
-          }),
-        ]);
+        // Kuras antrean jawaban SAMPAI KOSONG (dibatasi FLUSH_WAIT_MS) supaya
+        // jawaban yang sah tetap masuk sebelum tes ditutup paksa.
+        await sync.flushUntilEmpty(FLUSH_WAIT_MS);
       } catch {
         // ignore; finish still runs.
       }
@@ -545,20 +555,31 @@ export default function SubtestRunner({
   const finishSub = async (reason: "MANUAL" | "TIME_UP" = "MANUAL") => {
     if (locking) return;
     setLocking(true);
-    // Flush jawaban yang masih dalam buffer ke server SEBELUM kunci
-    // subtes — supaya server tidak menolak dengan 409 "sudah dikunci".
-    // Menunggunya DIBATASI FLUSH_WAIT_MS: kalau antrean masih panjang atau
-    // jaringan lambat, sisanya tetap dikirim ulang di latar belakang oleh
-    // useAnswerSync. Tanpa batas ini tombol bisa berhenti di "MENGUNCI…".
+    // KURAS antrean jawaban SAMPAI KOSONG sebelum kunci subtes. Versi lama
+    // hanya menunggu satu putaran flush — dan kalau ada flush lain yang
+    // sedang berjalan, `sync.flush()` malah pulang SEKETIKA tanpa menunggu
+    // apa pun, lalu subtes dikunci saat sebagian jawaban masih di antrean.
+    // Itulah kenapa jumlah terjawab bisa BERKURANG setelah klik
+    // "SELESAIKAN SUBTES". Menunggunya tetap dibatasi FLUSH_WAIT_MS supaya
+    // tombol tidak macet; sisa antrean (kalau ada) tetap selamat lewat
+    // jalur jawaban susulan + penguras antrean di halaman daftar subtes.
+    let leftover = 0;
     try {
-      await Promise.race([
-        sync.flush(),
-        new Promise<void>((resolve) => {
-          setTimeout(() => resolve(), FLUSH_WAIT_MS);
-        }),
-      ]);
+      leftover = await sync.flushUntilEmpty(FLUSH_WAIT_MS);
     } catch {
       // ignore — retries will continue in background on next page
+    }
+    if (leftover > 0 && reason === "MANUAL") {
+      // Jaringan sedang buruk dan antrean belum kosong. Untuk klik manual,
+      // JANGAN kunci dulu — beri tahu siswa dan biarkan ia mencoba lagi.
+      // (Untuk TIME_UP tetap lanjut: waktu memang sudah habis, dan jawaban
+      // sisa antrean diterima server sebagai susulan.)
+      setLocking(false);
+      toast.error(
+        `Masih ada ${leftover} jawaban yang belum terkirim ke server. ` +
+          "Periksa koneksi internet, tunggu badge menjadi TERSIMPAN, lalu tekan tombol ini lagi.",
+      );
+      return;
     }
     // Kunci subtes di server. Idempoten, dan sudah ada percobaan ulang di
     // dalam lockSubtestOnServer.
@@ -576,8 +597,8 @@ export default function SubtestRunner({
       return;
     }
     if (typeof window !== "undefined") {
-      window.localStorage.removeItem(STORAGE_KEY(subtest.code));
-      window.localStorage.removeItem(STARTED_KEY(subtest.code));
+      window.localStorage.removeItem(STORAGE_KEY(sessionScope, subtest.code));
+      window.localStorage.removeItem(STARTED_KEY(sessionScope, subtest.code));
     }
     toast.success(
       reason === "TIME_UP"
@@ -621,6 +642,10 @@ export default function SubtestRunner({
   // sedetik saat klik MULAI cukup untuk membuat seluruh subtes tidak pernah
   // tersimpan, dan siswa tidak melihat tanda apa pun.
   const startingRef = useRef(false);
+  // Sudahkah server MENGONFIRMASI subtes ini dimulai? Dipakai supaya
+  // percobaan ulang berhenti begitu berhasil, dan antrean jawaban langsung
+  // dikirim ulang setelahnya.
+  const [serverStartOk, setServerStartOk] = useState(hasServerStart);
   const startSubtestOnServer = async () => {
     if (startingRef.current) return;
     startingRef.current = true;
@@ -636,12 +661,17 @@ export default function SubtestRunner({
             const data = await res
               .json()
               .catch(() => ({}) as { locked?: boolean });
+            setServerStartOk(true);
             // Kalau ternyata subtes sudah terkunci (mis. waktu sudah habis di
             // sesi sebelumnya), kembalikan siswa ke daftar subtes.
             if (data?.locked) {
               if (typeof window !== "undefined") {
-                window.localStorage.removeItem(STORAGE_KEY(subtest.code));
-                window.localStorage.removeItem(STARTED_KEY(subtest.code));
+                window.localStorage.removeItem(
+                  STORAGE_KEY(sessionScope, subtest.code),
+                );
+                window.localStorage.removeItem(
+                  STARTED_KEY(sessionScope, subtest.code),
+                );
                 // Muat ulang penuh, alasannya sama seperti di finishSub:
                 // daftar subtes tidak boleh tampil dari cache lama yang
                 // masih menganggap subtes ini terbuka.
@@ -649,7 +679,12 @@ export default function SubtestRunner({
                 return;
               }
               router.push("/test");
+              return;
             }
+            // Kirim ulang antrean SEKARANG — jawaban yang tadi ditolak
+            // "Subtes belum dimulai" langsung tersimpan tanpa menunggu
+            // putaran retry berikutnya.
+            void sync.flush();
             return;
           }
           // 4xx = penolakan sungguhan dari server (mis. subtes tidak valid).
@@ -668,22 +703,46 @@ export default function SubtestRunner({
   };
 
   // PEMULIHAN OTOMATIS. Kalau siswa sudah dianggap MULAI tapi server belum
-  // punya progress subtes ini, tandai sekarang juga.
+  // punya progress subtes ini, tandai sekarang juga — dan ULANGI TERUS
+  // sampai berhasil, bukan hanya satu rangkaian percobaan.
   //
   // Tanpa ini satu kegagalan /subtest-start tidak pernah bisa diperbaiki:
   // pada muat ulang berikutnya STARTED_KEY sudah "1" sehingga layar intro
   // dilewati dan handleStart TIDAK PERNAH dipanggil lagi. Siswa mengerjakan
   // sampai soal terakhir, badge tetap hijau "TERSIMPAN", tetapi server
-  // menolak semuanya karena subtesnya belum pernah dimulai.
+  // menolak semuanya karena subtesnya belum pernah dimulai — itulah bug
+  // "siswa isi jawaban tapi di PDF nilainya 0".
   useEffect(() => {
-    if (!started || hasServerStart || isCompleted) return;
+    if (!started || serverStartOk || isCompleted) return;
     void startSubtestOnServer();
+    // Rangkaian percobaan di dalam startSubtestOnServer memakan ±30 detik.
+    // Interval ini menjaganya terus dicoba selama halaman terbuka.
+    const id = setInterval(() => {
+      void startSubtestOnServer();
+    }, 45_000);
+    return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [started, hasServerStart, isCompleted]);
+  }, [started, serverStartOk, isCompleted]);
+
+  // Server menolak jawaban dengan "Subtes belum dimulai" → panggil ulang
+  // /subtest-start segera. Ini menutup celah terakhir: kalaupun state
+  // serverStartOk sempat salah (mis. baris progress terhapus), jalur
+  // penyembuhannya tetap ada.
+  useEffect(() => {
+    if (typeof window === "undefined" || isCompleted) return;
+    const onNotStarted = () => {
+      setServerStartOk(false);
+      void startSubtestOnServer();
+    };
+    window.addEventListener(SUBTEST_NOT_STARTED_EVENT, onNotStarted);
+    return () =>
+      window.removeEventListener(SUBTEST_NOT_STARTED_EVENT, onNotStarted);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCompleted]);
 
   const handleStart = () => {
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(STARTED_KEY(subtest.code), "1");
+      window.localStorage.setItem(STARTED_KEY(sessionScope, subtest.code), "1");
       // Mulai dari atas halaman soal pertama, bukan posisi scroll layar intro
       // (siswa biasanya sudah menggulir ke bawah untuk menekan MULAI).
       window.scrollTo(0, 0);
@@ -732,8 +791,12 @@ export default function SubtestRunner({
                 if (typeof window !== "undefined") {
                   // Bersihkan timer/started flag biar tidak nyangkut di state
                   // lama saat masuk ke subtes lain.
-                  window.localStorage.removeItem(STORAGE_KEY(subtest.code));
-                  window.localStorage.removeItem(STARTED_KEY(subtest.code));
+                  window.localStorage.removeItem(
+                    STORAGE_KEY(sessionScope, subtest.code),
+                  );
+                  window.localStorage.removeItem(
+                    STARTED_KEY(sessionScope, subtest.code),
+                  );
                 }
                 router.push("/test");
               }}

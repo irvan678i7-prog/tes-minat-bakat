@@ -42,6 +42,31 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
   });
 }
 
+/**
+ * Bersihkan angka tak-hingga/NaN di seluruh payload sebelum ditulis sebagai
+ * JSON. Postgres/Prisma menolak NaN dan Infinity di kolom Json — satu angka
+ * rusak saja (mis. pembagian 0/0 pada subtes tanpa soal) menggagalkan SELURUH
+ * penyimpanan hasil, dan siswa melihat "Gagal menyimpan hasil tes" terus-
+ * menerus tanpa bisa berbuat apa-apa. Angka rusak diganti null; strukturnya
+ * tetap utuh.
+ */
+function sanitizeJson<T>(value: T): T {
+  if (typeof value === "number") {
+    return (Number.isFinite(value) ? value : null) as unknown as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => sanitizeJson(v)) as unknown as T;
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = sanitizeJson(v);
+    }
+    return out as unknown as T;
+  }
+  return value;
+}
+
 /** Response sukses + hapus cookie sesi siswa (tes tidak boleh diulang). */
 function finishedResponse(extra: Record<string, unknown> = {}) {
   const res = NextResponse.json({ ok: true, ...extra });
@@ -108,7 +133,7 @@ export async function POST(req: NextRequest) {
     ]);
 
     // Compute scoring entirely in memory — no DB round-trips per answer.
-    const payload = computeScoringPayload(
+    const payload = sanitizeJson(computeScoringPayload(
       {
         testKind: sub.testKind,
         answers: sub.answers.map((a) => ({
@@ -128,7 +153,7 @@ export async function POST(req: NextRequest) {
       },
       subtestMeta,
       minatBidang,
-    );
+    ));
     const topProfiles = payload.bakat?.topProfiles.map((p) => p.name);
     const topPrograms = payload.minat?.programs.map((p) => p.bidang);
 

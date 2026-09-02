@@ -4,6 +4,7 @@ import {
   CATEGORY_LABEL,
   MINAT_BIDANG_TO_PROGRAM,
   categorize,
+  scoreUnit,
 } from "./test-config";
 import {
   computeProBakat,
@@ -116,7 +117,13 @@ export async function loadSubtestMeta(testKind: "BAKAT" | "MINAT"): Promise<Subt
     code: s.code,
     name: s.name,
     totalQuestions: s.questions.length,
-    totalParts: s.questions.reduce((a, q) => a + Math.max(1, q.parts || 1), 0),
+    // Satuan skor harus sama dengan satuan norma Tabel 4.1 (lihat SCORE_UNIT
+    // di test-config.ts). Subtes ber-unit "QUESTION" (mis. Penalaran Urutan)
+    // dinilai per-SOAL, jadi max = jumlah soal — bukan jumlah isian.
+    totalParts:
+      scoreUnit(s.code) === "QUESTION"
+        ? s.questions.length
+        : s.questions.reduce((a, q) => a + Math.max(1, q.parts || 1), 0),
   }));
 }
 
@@ -518,10 +525,18 @@ function scoreBakat(
     if (!subtestMeta) {
       // Fallback mode (caller tidak menyediakan meta): max diakumulasi
       // dari parts answered. Hanya untuk backward compat — caller
-      // produksi WAJIB mengirim subtestMeta.
-      perSubtest[code].max += Math.max(1, ans.question.parts || 1);
+      // produksi WAJIB mengirim subtestMeta. Satuan mengikuti SCORE_UNIT
+      // (per-SOAL untuk subtes seperti Penalaran Urutan).
+      perSubtest[code].max +=
+        scoreUnit(code) === "QUESTION" ? 1 : Math.max(1, ans.question.parts || 1);
     }
-    if (ans.question.parts && ans.question.parts > 1) {
+    if (scoreUnit(code) === "QUESTION") {
+      // Norma buku (Tabel 4.1) untuk subtes ini memakai satuan PER-SOAL:
+      // soal multi-bagian baru bernilai 1 bila SEMUA bagiannya benar.
+      // Menjumlahkan poin parsial per-isian menggembungkan raw hingga 2×
+      // dan menggeser kategori (mis. benar 3 soal → "Di atas rata-rata").
+      perSubtest[code].raw += g.isCorrect ? 1 : 0;
+    } else if (ans.question.parts && ans.question.parts > 1) {
       perSubtest[code].raw += g.partialScore || 0;
     } else {
       perSubtest[code].raw += g.isCorrect ? 1 : 0;

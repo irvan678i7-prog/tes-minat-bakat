@@ -2,9 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import toast from "react-hot-toast";
 import TestRules from "@/components/student/TestRules";
+import {
+  drainPendingAnswers,
+  hasPendingAnswers,
+} from "@/components/student/useAnswerSync";
+import { useSessionScope } from "@/components/student/SessionScope";
 import { useBrutConfirm } from "@/components/BrutConfirm";
 
 type Sub = {
@@ -53,9 +58,42 @@ export default function TestHub({
   subtests: Sub[];
 }) {
   const router = useRouter();
+  const sessionId = useSessionScope();
   const { confirm, ConfirmModal } = useBrutConfirm();
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // PENGURAS ANTREAN JAWABAN DI HALAMAN DAFTAR SUBTES.
+  //
+  // Runner mengunci subtes lalu memuat ulang penuh ke halaman ini. Kalau
+  // saat itu masih ada jawaban di antrean localStorage (jaringan lambat),
+  // useAnswerSync di runner sudah tidak hidup lagi — dulu jawaban itu
+  // TIDAK PERNAH terkirim, dan angka "terjawab" di daftar tampak berkurang.
+  // Sekarang halaman ini ikut mengirimkannya; server menerimanya sebagai
+  // jawaban susulan (dipilih sebelum subtes terkunci), lalu daftar dimuat
+  // ulang supaya angkanya benar.
+  const drainedRef = useRef(false);
+  useEffect(() => {
+    if (drainedRef.current) return;
+    drainedRef.current = true;
+    let alive = true;
+    (async () => {
+      try {
+        if (!hasPendingAnswers(sessionId)) return;
+        const leftover = await drainPendingAnswers(sessionId);
+        if (!alive) return;
+        if (leftover === 0) {
+          // Semua terkirim — muat ulang angka terjawab dari server.
+          router.refresh();
+        }
+      } catch {
+        // Jaringan bermasalah — percobaan berikutnya saat halaman dibuka lagi.
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [sessionId, router]);
   // "Semua subtes sudah dijalani" — boleh tombol SELESAIKAN TES aktif kalau
   // tiap subtes ATAU sudah dikunci (waktu habis / siswa klik selesai) ATAU
   // sudah dijawab penuh. Dengan kata lain: siswa tidak perlu menjawab semua
@@ -116,6 +154,13 @@ export default function TestHub({
     if (!ok) return;
     setSubmitting(true);
     setSubmitError(null);
+    // Terakhir kali: pastikan tidak ada jawaban yang tersisa di antrean
+    // sebelum hasil dihitung & sesi ditutup permanen.
+    try {
+      await drainPendingAnswers(sessionId);
+    } catch {
+      // best-effort — finish tetap jalan.
+    }
     const r = await attemptFinish();
     setSubmitting(false);
     if (!r.ok) {
@@ -129,6 +174,11 @@ export default function TestHub({
   const retryFinish = async () => {
     setSubmitting(true);
     setSubmitError(null);
+    try {
+      await drainPendingAnswers(sessionId);
+    } catch {
+      // best-effort.
+    }
     const r = await attemptFinish(6);
     setSubmitting(false);
     if (!r.ok) {
@@ -186,10 +236,18 @@ export default function TestHub({
         <ol className="space-y-3">
           {subtests.map((s, idx) => {
             const empty = s.total === 0;
-            const done = !empty && s.answered >= s.total;
             // Subtes terkunci: TIDAK BISA dibuka lagi. Warna abu, badge
             // SELESAI, tombol mati total (bukan <Link>).
+            //
+            // ACUAN "SELESAI" = KUNCI DI SERVER (SubtestProgress.finishedAt).
+            // Versi lama memakai done = answered >= total, sehingga subtes
+            // yang semua soalnya terjawab TAPI penguncian belum/gagal
+            // tersimpan tetap tampil hijau "REVIEW" — bertentangan dengan
+            // halaman subtesnya. Sekarang dua halaman memakai acuan yang sama.
             const locked = s.locked;
+            // Semua soal sudah terjawab tetapi subtes BELUM dikunci. Siswa
+            // masih harus membuka subtes lalu menekan SELESAIKAN SUBTES.
+            const answeredAll = !empty && s.answered >= s.total;
             const reasonLabel =
               s.finishReason === "TIME_UP"
                 ? "WAKTU HABIS"
@@ -199,7 +257,7 @@ export default function TestHub({
             let bg: string;
             if (empty) bg = "#fff";
             else if (locked) bg = "#d4d4d8"; // abu (zinc-300)
-            else if (done) bg = "#a3e635"; // hijau (lime-400)
+            else if (answeredAll) bg = "#a3e635"; // hijau (lime-400)
             else bg = "#22d3ee"; // cyan-400
             return (
               <li
@@ -235,6 +293,15 @@ export default function TestHub({
                             {reasonLabel}
                           </span>
                         )}
+                        {!locked && answeredAll && (
+                          <span
+                            className="brut-tag"
+                            style={{ background: "#facc15" }}
+                            title="Semua soal sudah dijawab, tetapi subtes belum dikunci. Buka subtes ini lalu tekan SELESAIKAN SUBTES."
+                          >
+                            BELUM DIKUNCI
+                          </span>
+                        )}
                       </>
                     )}
                   </div>
@@ -256,9 +323,9 @@ export default function TestHub({
                 ) : (
                   <Link
                     href={`/test/${s.code}`}
-                    className={`brut-btn ${done ? "brut-btn-black" : ""} ${empty ? "opacity-50 pointer-events-none" : ""}`}
+                    className={`brut-btn ${answeredAll ? "brut-btn-black" : ""} ${empty ? "opacity-50 pointer-events-none" : ""}`}
                   >
-                    {done ? "REVIEW" : s.answered > 0 ? "LANJUT" : "MULAI"}
+                    {answeredAll ? "LANJUT & KUNCI" : s.answered > 0 ? "LANJUT" : "MULAI"}
                   </Link>
                 )}
               </li>
