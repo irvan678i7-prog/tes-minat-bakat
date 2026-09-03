@@ -41,6 +41,15 @@ const PER_PAGE = 3;
 // di tes ini peserta diberi tombol SELESAI untuk menutup keseluruhan tes.
 const FINAL_SUBTEST_CODE = "3B_CONDITIONS";
 
+// ID TETAP untuk semua notifikasi status tes (waktu habis / terkunci / jeda /
+// selesai). react-hot-toast MENGGANTI notifikasi ber-id sama alih-alih membuat
+// yang baru, sehingga notifikasi tidak pernah menumpuk walau pemicunya datang
+// berkali-kali (beberapa jawaban yang masih terkirim tepat saat waktu habis,
+// atau halaman berpindah otomatis ke tes berikutnya). Durasinya juga dipatok
+// supaya notifikasi PASTI hilang sendiri.
+const STATUS_TOAST_ID = "cfit-status";
+const STATUS_TOAST_MS = 4000;
+
 function fmt(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
@@ -100,12 +109,16 @@ export default function CfitSubtestRunnerPage() {
         keepalive: true,
       }).catch(() => null);
       if (reason === "manual") {
-        toast.success("Tes selesai. Jawabanmu sudah tersimpan.");
+        toast.success("Tes selesai. Jawabanmu sudah tersimpan.", {
+          id: STATUS_TOAST_ID,
+          duration: STATUS_TOAST_MS,
+        });
       } else {
         toast.error(
           reason === "cheat"
             ? "Batas pelanggaran terlampaui! Tes ini dikunci dan hasilmu ditandai."
             : "Waktu habis! Tes ini dikunci.",
+          { id: STATUS_TOAST_ID, duration: STATUS_TOAST_MS },
         );
       }
       router.replace("/cfit/test");
@@ -127,18 +140,28 @@ export default function CfitSubtestRunnerPage() {
         return;
       }
       if (res.status === 423) {
-        toast.error("Tes ini sudah terkunci.");
+        toast.error("Tes ini sudah terkunci.", {
+          id: STATUS_TOAST_ID,
+          duration: STATUS_TOAST_MS,
+        });
         router.replace("/cfit/test");
         return;
       }
       if (res.status === 425) {
         // Masih dalam jeda antar subtes — kembalikan ke layar jeda.
-        toast(data.error || "Masih dalam jeda antar tes.", { icon: "⏳" });
+        toast(data.error || "Masih dalam jeda antar tes.", {
+          icon: "⏳",
+          id: STATUS_TOAST_ID,
+          duration: STATUS_TOAST_MS,
+        });
         router.replace("/cfit/test");
         return;
       }
       if (!res.ok) {
-        toast.error(data.error || "Gagal memuat tes");
+        toast.error(data.error || "Gagal memuat tes", {
+          id: STATUS_TOAST_ID,
+          duration: STATUS_TOAST_MS,
+        });
         router.replace("/cfit/test");
         return;
       }
@@ -215,6 +238,16 @@ export default function CfitSubtestRunnerPage() {
     return () => clearInterval(t);
   }, [timerActive, finishSubtest]);
 
+  // GULIR OTOMATIS KE ATAS setiap kali halaman soal berpindah (tombol HALAMAN
+  // BERIKUTNYA / SEBELUMNYA, tombol navigasi nomor soal, dan saat tahap
+  // berganti dari contoh ke soal asli). Tanpa ini peserta harus menggulir
+  // sendiri ke atas untuk melihat soal pertama pada halaman baru — memakan
+  // waktu padahal timer terus berjalan.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [page, phase]);
+
   const loaded = phase !== null && !!subtest;
 
   // Anti-curang — aturan SAMA dengan tes minat-bakat: pindah tab, keluar
@@ -245,11 +278,24 @@ export default function CfitSubtestRunnerPage() {
         keepalive: true,
       });
       if (res.status === 423) {
-        toast.error("Waktu sudah habis — jawaban terakhir tidak tersimpan.");
+        // Cukup SATU notifikasi. Kalau penutupan subtes sudah berjalan, jangan
+        // menambah notifikasi lagi — beberapa jawaban yang masih terkirim saat
+        // waktu habis semuanya dijawab 423, dan dulu tiap jawaban membuat
+        // notifikasi baru sehingga notif "waktu habis" terlihat menumpuk dan
+        // seolah tidak mau hilang.
+        if (!finishedRef.current) {
+          toast.error("Waktu sudah habis — jawaban terakhir tidak tersimpan.", {
+            id: STATUS_TOAST_ID,
+            duration: STATUS_TOAST_MS,
+          });
+        }
         void finishSubtest("time");
       } else if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        toast.error(data.error || "Gagal menyimpan jawaban");
+        toast.error(data.error || "Gagal menyimpan jawaban", {
+          id: "cfit-save-error",
+          duration: STATUS_TOAST_MS,
+        });
       }
     },
     [finishSubtest],
