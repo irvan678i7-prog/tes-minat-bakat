@@ -45,6 +45,23 @@ export type CfitComputedResult = {
    * muncul pada data lama atau token yang dibuat manual.
    */
   singleForm: boolean
+  /**
+   * Kode subtes yang TIDAK TERSENTUH: soalnya tersedia (`total > 0`), tapi
+   * tidak satu pun jawaban peserta tersimpan (`answered === 0`).
+   */
+  untouchedSubtests: string[]
+  /**
+   * True bila administrasi tes TIDAK LENGKAP: ada subtes yang sama sekali
+   * tidak dikerjakan (mis. sesi terputus karena mati lampu, browser tertutup,
+   * atau peserta berhenti di tengah jalan).
+   *
+   * Penting: subtes yang terlewat ikut dihitung 0 benar, sehingga RS total
+   * mengecil dan IQ hasil konversi UNDERESTIMATE — padahal tabel norma hanya
+   * sah untuk administrasi PENUH. Nilai tetap dihitung supaya penyelesaian tes
+   * tidak gagal dan data lama tidak berubah, tapi ditandai agar laporan bisa
+   * memberi peringatan dan hasilnya tidak dipakai mengambil keputusan.
+   */
+  incomplete: boolean
   perSubtest: CfitSubtestScore[]
 }
 
@@ -55,6 +72,11 @@ export type CfitComputedResult = {
  * IQ, dengan kolom terpisah untuk usia 15, 16, dan 17 tahun ke atas. Kolom
  * dipilih otomatis dari usia peserta; usia lain (termasuk yang tidak diisi)
  * memakai kolom 17 tahun ke atas.
+ *
+ * Catatan kelengkapan: tabel norma hanya sah bila SELURUH subtes dikerjakan.
+ * Fungsi ini tidak menolak data yang tidak lengkap (supaya alur penyelesaian
+ * tes tidak pernah gagal), tetapi menandainya lewat `incomplete` dan
+ * `untouchedSubtests`.
  */
 export function computeCfitResult(
   form: CfitFormCode,
@@ -74,6 +96,16 @@ export function computeCfitResult(
   const iq = cfitRawScoreToIq(rawScoreTotal, normGroup)
   const cls = classifyCfitIq(iq)
 
+  // ── Deteksi administrasi tidak lengkap ──
+  // Subtes yang soalnya ada tapi nol jawaban tersimpan dianggap TIDAK
+  // DIKERJAKAN. Pemanggil (api/cfit/test/finish) selalu menyusun `perSubtest`
+  // dari seluruh subtes milik bentuk yang dipakai, sehingga subtes yang
+  // terlewat tetap muncul sebagai baris dengan answered = 0.
+  const scorableSubtests = perSubtest.filter((s) => s.total > 0)
+  const untouchedSubtests = scorableSubtests
+    .filter((s) => s.answered === 0)
+    .map((s) => s.subtestCode)
+
   return {
     form,
     rawScoreA,
@@ -85,6 +117,10 @@ export function computeCfitResult(
     normGroup,
     belowNorm: isBelowCfitNormRange(rawScoreTotal),
     singleForm: form !== "FORM_3AB",
+    untouchedSubtests,
+    // Tidak ada satu pun subtes berskor juga dihitung tidak lengkap: itu berarti
+    // rincian subtes gagal disusun, bukan peserta yang menjawab nol.
+    incomplete: untouchedSubtests.length > 0 || scorableSubtests.length === 0,
     perSubtest,
   }
 }
