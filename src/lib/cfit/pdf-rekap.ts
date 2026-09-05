@@ -125,6 +125,10 @@ type Band = {
 
 // Gradasi sian untuk kategori atas → kuning/oranye/merah lembut untuk kategori
 // bawah, mengikuti palet versi tampilan sebelumnya.
+//
+// PENTING: batas & label di bawah ini HARUS sama dengan classifyCfitIq() pada
+// src/lib/cfit/norms.ts (9 kategori). Kalau berbeda, warna/legenda rekap akan
+// bertabrakan dengan isi kolom "Klasifikasi" yang tersimpan di database.
 const CFIT_BANDS: Band[] = [
 	{ range: "170+", short: "JENIUS", label: "Jenius (Genius)", min: 170, max: 9999, color: "#0F172A", onDark: true },
 	{ range: "140-169", short: "SGT SUP", label: "Sangat Superior (Very Superior)", min: 140, max: 169, color: "#155E75", onDark: true },
@@ -133,7 +137,8 @@ const CFIT_BANDS: Band[] = [
 	{ range: "90-109", short: "RATA2", label: "Rata-rata (Average)", min: 90, max: 109, color: "#A5F3FC", onDark: false },
 	{ range: "80-89", short: "DI BAWAH", label: "Di Bawah Rata-rata (Low Average)", min: 80, max: 89, color: "#FDE68A", onDark: false },
 	{ range: "70-79", short: "BORDER", label: "Borderline", min: 70, max: 79, color: "#FDBA74", onDark: false },
-	{ range: "< 70", short: "TERHAMBAT", label: "Terhambat (Mentally Defective)", min: -9999, max: 69, color: "#FCA5A5", onDark: false },
+	{ range: "30-69", short: "DEFEKTIF", label: "Defektif Secara Mental (Mentally Defective)", min: 30, max: 69, color: "#FCA5A5", onDark: false },
+	{ range: "<= 29", short: "TDK TERKLAS", label: "Tidak Terklasifikasi (Unclassified)", min: -9999, max: 29, color: "#F87171", onDark: false },
 ];
 
 function bandFor(iq: number): Band {
@@ -386,7 +391,7 @@ function drawKpiCard(
 	textHex(doc, INK);
 }
 
-/** Grafik batang sebaran klasifikasi (8 kategori). */
+/** Grafik batang sebaran klasifikasi (9 kategori). */
 function drawBandChart(
 	doc: jsPDF,
 	iqs: number[],
@@ -861,8 +866,8 @@ function drawMethodology(
 	const notes = [
 		"Instrumen: Culture Fair Intelligence Test (CFIT) Skala 3, Bentuk A dan B, terdiri atas 4 subtes yaitu Series, Classification, Matrices, dan Conditions (Topology).",
 		"Penskoran: jawaban benar setiap subtes dijumlahkan menjadi Raw Score (RS) Bentuk A dan Bentuk B, lalu digabung menjadi RS Total. Penilaian dilakukan sepenuhnya di sisi server; kunci jawaban tidak pernah dikirim ke perangkat peserta.",
-		"Konversi: RS Total dikonversi menjadi skor IQ memakai tabel norma CFIT Skala 3 dengan kolom norma yang dipilih otomatis sesuai usia peserta (15 tahun, 16 tahun, dan 17 tahun ke atas).",
-		"Klasifikasi: mengikuti pembagian kategori Cattell, yaitu Jenius (170 ke atas), Sangat Superior (140-169), Superior (120-139), Di Atas Rata-rata (110-119), Rata-rata (90-109), Di Bawah Rata-rata (80-89), Borderline (70-79), dan Terhambat (di bawah 70).",
+		"Konversi: RS Total dikonversi menjadi skor IQ memakai tabel norma CFIT Skala 3 dengan kolom norma yang dipilih otomatis sesuai usia peserta (15 tahun, 16 tahun, dan 17 tahun ke atas). Tabel norma disusun untuk RS gabungan Bentuk A + B (100 soal), sehingga peserta yang hanya mengerjakan satu bentuk atau meninggalkan subtes tertentu akan memperoleh skor IQ yang lebih rendah dari kemampuan sebenarnya.",
+		"Klasifikasi: mengikuti pembagian kategori Cattell, yaitu Jenius (170 ke atas), Sangat Superior (140-169), Superior (120-139), Di Atas Rata-rata (110-119), Rata-rata (90-109), Di Bawah Rata-rata (80-89), Borderline (70-79), Defektif Secara Mental (30-69), dan Tidak Terklasifikasi (29 ke bawah).",
 		"Keterbatasan: skor merupakan estimasi kemampuan penalaran umum pada saat pengukuran dan dapat dipengaruhi kondisi fisik, motivasi, serta situasi ruang tes. Hasil sebaiknya dibaca bersama data prestasi belajar, observasi, dan wawancara konseling, bukan sebagai satu-satunya dasar pengambilan keputusan.",
 		"Kerahasiaan: dokumen ini bersifat rahasia dan hanya diperuntukkan bagi keperluan layanan bimbingan dan konseling di satuan pendidikan yang bersangkutan.",
 	];
@@ -1110,8 +1115,8 @@ export function buildCfitRekapPDF(
 	);
 	y = drawParticipantTable(doc, rows, margin, y);
 
-	// Legenda warna klasifikasi (dua baris agar muat pada halaman potret)
-	y = ensureSpace(doc, y, 44, 40);
+	// Legenda warna klasifikasi (tiga baris agar muat pada halaman potret)
+	y = ensureSpace(doc, y, 60, 40);
 	textHex(doc, SOFT_INK);
 	doc.setFont("helvetica", "bold");
 	doc.setFontSize(7);
