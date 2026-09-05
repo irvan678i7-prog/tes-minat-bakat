@@ -6,10 +6,11 @@ import AdminQuestions from "@/components/admin/AdminQuestions";
 import AdminSubmissions from "@/components/admin/AdminSubmissions";
 import AdminPanduan from "@/components/admin/AdminPanduan";
 import AdminJedaKunci from "@/components/admin/AdminJedaKunci";
+import AdminInvoice from "@/components/admin/AdminInvoice";
 import CfitAdminPanel from "@/components/admin/cfit/CfitAdminPanel";
 
-type Tab = "tokens" | "questions" | "submissions" | "jeda" | "panduan" | "cfit";
-const TABS = ["tokens", "questions", "submissions", "jeda", "panduan", "cfit"] as const;
+type Tab = "tokens" | "questions" | "submissions" | "jeda" | "panduan" | "cfit" | "invoice";
+const TABS = ["tokens", "questions", "submissions", "jeda", "panduan", "cfit", "invoice"] as const;
 
 export default function AdminDashboard() {
   const [tab, setTab] = useState<Tab>(() => {
@@ -37,6 +38,7 @@ export default function AdminDashboard() {
           ["jeda", "Jeda & Kunci"],
           ["panduan", "Panduan"],
           ["cfit", "Tes IQ (CFIT)"],
+          ["invoice", "Invoice"],
         ] as const).map(([k, l]) => (
           <button
             key={k}
@@ -63,6 +65,7 @@ export default function AdminDashboard() {
       {tab === "jeda" && <AdminJedaKunci />}
       {tab === "panduan" && <AdminPanduan />}
       {tab === "cfit" && <CfitAdminPanel />}
+      {tab === "invoice" && <AdminInvoice />}
     </div>
   );
 }
