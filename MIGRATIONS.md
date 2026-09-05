@@ -51,6 +51,7 @@ di DB, lalu menjalankan `ALTER TABLE` yang diperlukan secara otomatis.
 | `prisma/sql/0009_cfit_pause_and_resume.sql` | **Anti mati lampu TES IQ**: kolom `consumedSec`, `lastSeenAt`, `pauseCount`, `pausedSec` di `CfitSubtestProgress` + `resumeCode` (unique) di `CfitSubmission` + backfill sesi lama & sesi berjalan | **PERLU DI-APPLY** |
 | `prisma/sql/0010_resume_link_single_use.sql` | Link pemulihan SEKALI PAKAI: kolom `resumeLinkJti` & `resumeLinkUsedAt` di `Submission` dan `CfitSubmission` | **PERLU DI-APPLY** |
 | `prisma/sql/0011_token_school_columns.sql` | **Fix tombol BUAT TOKEN**: kolom `school` di `AccessToken`, `school` & `grade` di `CfitAccessToken`, plus `nis` di `CfitSubmission` — kolom yang sudah dipakai kode tapi belum pernah punya migrasi | **PERLU DI-APPLY** |
+| `prisma/sql/0012_retire_legacy_cfit_norm.sql` | Hapus hanya 50 baris seed norma CFIT lama yang masih cocok persis dengan 0006; norma aktif dan hasil peserta tidak berubah | **PERLU DI-APPLY** |
 
 Setiap SQL di folder `prisma/sql/` ditulis idempoten, jadi tidak masalah
 kalau kamu jalankan ulang.
@@ -78,6 +79,26 @@ Berbeda dari 0009/0010, yang ini **tidak** ada jalur amannya di kode: tombol
 "BUAT TOKEN" (minat-bakat maupun tes IQ) akan gagal dengan pesan umum "Gagal
 generate", dan daftar token tampil kosong karena request GET-nya juga ikut
 gagal. Tanpa token, tidak ada siswa yang bisa mulai tes.
+
+### Khusus 0012: pembersihan data norma CFIT lama
+
+- Jalankan **file SQL 0012** setelah `0006` tersedia, diawali uji staging dan
+  backup. Ini pembersihan **data**, bukan perubahan schema: `prisma db push`
+  maupun deploy Vercel **tidak menjalankan pembersihan ini**.
+- Hanya baris seed `0006` yang cocok pada **id, normGroup, rawScore, dan iq**
+  sekaligus yang dihapus. Baris yang sudah diubah atau ditambahkan manual
+  dipertahankan; bukan berarti baris tersisa telah divalidasi sebagai norma.
+- Norma aktif tetap `src/lib/cfit/norms.ts`. Tidak ada perubahan skor peserta,
+  bank soal, tabel tes minat-bakat, atau definisi enum `CfitForm`.
+- File dijalankan dalam satu transaksi. Jika timeout atau gagal, transaksi
+  harus di-rollback; jangan melanjutkan sebagian perintah lalu commit manual.
+- Bila `0006` dijalankan ulang setelah `0012`, jalankan `0012` lagi karena seed
+  lama dapat terisi kembali. Jangan mengubah migrasi historis `0006`.
+
+Pembatasan **sesi CFIT baru wajib 3A+3B** dilakukan di endpoint redeem dan
+**tidak memerlukan penghapusan enum**. Penanda `FORM_3A` / `FORM_3B` tetap
+dibutuhkan bank soal serta riwayat/sesi lama. Sesi lama tetap boleh dilanjutkan;
+token satu bentuk tidak bisa dipakai membuat sesi baru, termasuk `forceNew`.
 
 ## Untuk perubahan schema ke depan
 

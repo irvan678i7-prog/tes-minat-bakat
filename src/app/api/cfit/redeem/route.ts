@@ -27,7 +27,8 @@ const REDEEM_WINDOW_MS = 5 * 60 * 1000;
 
 type NewSubmissionData = {
   tokenId: string;
-  form: "FORM_3A" | "FORM_3B" | "FORM_3AB";
+  // Sesi baru wajib lengkap; bentuk tunggal tetap dipakai bank soal/data lama.
+  form: "FORM_3AB";
   school: string | null;
   grade: string | null;
   randomSeed: string;
@@ -90,6 +91,14 @@ export async function POST(req: NextRequest) {
     if (!submission) {
       if (tok.expiresAt < new Date()) {
         return NextResponse.json({ error: "Token sudah kadaluarsa. Minta token baru ke admin." }, { status: 410 });
+      }
+      // Bentuk A/B tetap diperlukan untuk bank soal dan riwayat peserta.
+      // Tolak hanya sesi BARU satu bentuk; sesi lama di atas tetap boleh resume.
+      if (tok.form !== "FORM_3AB") {
+        return NextResponse.json(
+          { error: "Tes IQ baru wajib lengkap 3A + 3B. Token ini hanya untuk satu bentuk. Minta token 3A + 3B ke admin." },
+          { status: 410 },
+        );
       }
       // Sekolah & kelas diwarisi dari token (diisi admin saat membuat token),
       // supaya semua peserta satu sesi punya tulisan yang identik.
