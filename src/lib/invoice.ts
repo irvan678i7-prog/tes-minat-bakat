@@ -38,6 +38,8 @@ export function emptyInvoiceForm(): InvoiceForm {
   };
 }
 
+const FORM_FIELDS = Object.keys(emptyInvoiceForm()) as Array<keyof InvoiceForm>;
+
 export function jakartaDate(now = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit",
@@ -65,6 +67,10 @@ export function formatRupiah(value: number): string {
   return `Rp ${new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 }).format(value)}`;
 }
 
+export function formatCount(value: number): string {
+  return new Intl.NumberFormat("id-ID").format(value);
+}
+
 export function formatInvoiceDate(value: string): string {
   return new Intl.DateTimeFormat("id-ID", {
     day: "2-digit", month: "long", year: "numeric", timeZone: "Asia/Jakarta",
@@ -81,9 +87,15 @@ export function validateInvoice(form: InvoiceForm, today = jakartaDate()):
   { ok: true; value: Invoice } |
   { ok: false; errors: InvoiceErrors } {
   const errors: InvoiceErrors = {};
-  const clean = Object.fromEntries(Object.entries(form).map(([key, value]) => [
-    key, value.trim().replace(/\r\n?/g, "\n"),
-  ])) as InvoiceForm;
+  // Only the known text fields are normalised. A built invoice also carries
+  // numbers (quantity, unitPrice, total), so extra or non-string values are
+  // ignored instead of trimmed: the PDF export revalidates its input and must
+  // never crash on a numeric value.
+  const clean = {} as InvoiceForm;
+  for (const key of FORM_FIELDS) {
+    const value = form[key];
+    clean[key] = typeof value === "string" ? value.trim().replace(/\r\n?/g, "\n") : "";
+  }
   const limits: Partial<Record<keyof InvoiceForm, number>> = {
     number: 48, issuer: 100, issuerDetails: 240, customer: 100,
     customerDetails: 240, paymentDetails: 300, notes: 400,
@@ -123,6 +135,25 @@ export function validateInvoice(form: InvoiceForm, today = jakartaDate()):
   }
   if (Object.keys(errors).length) return { ok: false, errors };
   return { ok: true, value: { ...clean, issuedAt, test: clean.test as InvoiceTest, quantity, unitPrice, total } };
+}
+
+export function invoiceFormOf(invoice: Invoice): InvoiceForm {
+  // Explicit mapping keeps numbers out of the text fields when the PDF export
+  // revalidates an invoice that was already built.
+  return {
+    number: invoice.number,
+    issuedAt: invoice.issuedAt,
+    dueAt: invoice.dueAt,
+    issuer: invoice.issuer,
+    issuerDetails: invoice.issuerDetails,
+    customer: invoice.customer,
+    customerDetails: invoice.customerDetails,
+    test: invoice.test,
+    quantity: String(invoice.quantity),
+    unitPrice: String(invoice.unitPrice),
+    paymentDetails: invoice.paymentDetails,
+    notes: invoice.notes,
+  };
 }
 
 export function invoiceFilename(number: string): string {
