@@ -51,6 +51,11 @@ const WHITE = "#FFFFFF"
 const ACCENT = "#22D3EE"
 const ACCENT_DEEP = "#0E7490"
 const HIGHLIGHT = "#CFFAFE"
+// Warna peringatan (amber) untuk catatan penskoran yang perlu perhatian:
+// tes hanya satu bentuk, dan/atau ada subtes yang tidak dikerjakan.
+const WARN_BG = "#FEF3C7"
+const WARN_LINE = "#B45309"
+const WARN_INK = "#7C2D12"
 
 // ─── Identitas penanda tangan ───
 // Default sesuai penanda tangan resmi; masih bisa ditimpa lewat environment
@@ -214,7 +219,12 @@ function drawRahasiaBadge(doc: jsPDF, pageW: number, margin: number) {
 function drawScoreCard(
   doc: jsPDF,
   result: CfitPdfResult,
-  info: { normGroup: string; classificationEn?: string; belowNorm?: boolean },
+  info: {
+    normGroup: string
+    classificationEn?: string
+    belowNorm?: boolean
+    flagged?: boolean
+  },
   margin: number,
   yIn: number,
   pageW: number,
@@ -237,8 +247,9 @@ function drawScoreCard(
   doc.setFontSize(30)
   // Catatan: tanda "kurang dari sama dengan" ditulis ASCII karena font bawaan
   // jsPDF (WinAnsi) tidak punya glyph untuk simbol matematis.
+  // Tanda "*" berarti penskoran perlu perhatian (lihat catatan di bawah).
   doc.text(
-    `${info.belowNorm ? "<=" : ""}${result.iq}`,
+    `${info.belowNorm ? "<=" : ""}${result.iq}${info.flagged ? "*" : ""}`,
     scoreCx,
     yIn + 48,
     { align: "center" },
@@ -496,10 +507,25 @@ export function buildCfitReportPDF(
     normGroup?: string
     classificationEn?: string
     belowNorm?: boolean
+    singleForm?: boolean
+    incomplete?: boolean
+    untouchedSubtests?: string[]
   }
   const perSubtest = payload.perSubtest ?? []
   const normGroup = payload.normGroup ?? "17+"
   const normGroupLabel = NORM_GROUP_LABEL[normGroup] ?? `usia ${normGroup}`
+  const formLabel = FORM_LABEL[sub.form] ?? "Bentuk A + B"
+  // Penanda keabsahan penskoran. Laporan lama yang payload-nya belum menyimpan
+  // flag ini tetap ditandai dengan benar karena nilainya dihitung ulang dari
+  // data yang tersedia.
+  const singleForm = payload.singleForm ?? (sub.form !== "FORM_3AB")
+  const untouched =
+    payload.untouchedSubtests ??
+    perSubtest
+      .filter((s) => s.total > 0 && s.answered === 0)
+      .map((s) => s.subtestCode)
+  const incomplete = payload.incomplete ?? (untouched.length > 0)
+  const flagged = singleForm || incomplete
   const reportCode = buildReportCode("IQ", sub.id)
 
   // Kop resmi + penanda RAHASIA
@@ -515,7 +541,7 @@ export function buildCfitReportPDF(
   doc.setFont("helvetica", "normal")
   doc.setFontSize(8.4)
   doc.text(
-    `Culture Fair Intelligence Test (CFIT) Skala 3 \u2014 ${FORM_LABEL[sub.form] ?? "Bentuk A + B"}`,
+    `Culture Fair Intelligence Test (CFIT) Skala 3 \u2014 ${formLabel}`,
     pageW / 2,
     115,
     { align: "center" },
@@ -576,6 +602,7 @@ export function buildCfitReportPDF(
       normGroup,
       classificationEn: payload.classificationEn,
       belowNorm: payload.belowNorm,
+      flagged,
     },
     margin,
     y + 6,
@@ -583,12 +610,13 @@ export function buildCfitReportPDF(
   )
 
   // Rincian per tes — Bentuk A + B LANGSUNG DIGABUNG (4 baris), memakai nama
-  // subtes lengkap (Subtes 1: Series, dst.).
+  // subtes lengkap (Subtes 1: Series, dst.). Judul mengikuti bentuk tes yang
+  // benar-benar dikerjakan peserta.
   y += 11
   setTextHex(doc, INK)
   doc.setFont("helvetica", "bold")
   doc.setFontSize(9)
-  doc.text("RINCIAN PER TES (BENTUK A + B)", margin, y)
+  doc.text(`RINCIAN PER TES (${formLabel.toUpperCase()})`, margin, y)
 
   autoTable(doc, {
     startY: y + 5,
@@ -630,9 +658,14 @@ export function buildCfitReportPDF(
 
   // Catatan penskoran — dipaksa MUAT DALAM SATU BARIS: ukuran huruf dikecilkan
   // bertahap sampai teksnya cukup, bukan dipotong jadi beberapa baris.
+  // Label Raw Score mengikuti bentuk tes yang benar-benar dikerjakan supaya
+  // laporan tidak pernah mengklaim "(A + B)" untuk tes satu bentuk saja.
+  const rsLabel = singleForm
+    ? `Raw Score total (${formLabel})`
+    : "Raw Score total (A + B)"
   const noteText = payload.belowNorm
-    ? `Skor IQ diperoleh dengan mengonversi Raw Score total (A + B) = ${result.rawScoreTotal} memakai tabel norma CFIT Skala 3 kelompok ${normGroupLabel}. Raw Score berada di bawah rentang tabel norma (baris terendah 20), sehingga skor ditampilkan sebagai batas terendah norma.`
-    : `Skor IQ diperoleh dengan mengonversi Raw Score total (A + B) = ${result.rawScoreTotal} memakai tabel norma CFIT Skala 3 kelompok ${normGroupLabel}.`
+    ? `Skor IQ diperoleh dengan mengonversi ${rsLabel} = ${result.rawScoreTotal} memakai tabel norma CFIT Skala 3 kelompok ${normGroupLabel}. Raw Score berada di bawah rentang tabel norma (baris terendah 20), sehingga skor ditampilkan sebagai batas terendah norma.`
+    : `Skor IQ diperoleh dengan mengonversi ${rsLabel} = ${result.rawScoreTotal} memakai tabel norma CFIT Skala 3 kelompok ${normGroupLabel}.`
   const noteMaxW = innerW - 16
   doc.setFont("helvetica", "normal")
   let noteFontSize = 6.8
@@ -641,15 +674,54 @@ export function buildCfitReportPDF(
     noteFontSize -= 0.1
     doc.setFontSize(noteFontSize)
   }
-  const noteH = 18
-  setFillHex(doc, HIGHLIGHT)
-  setDrawHex(doc, ACCENT_DEEP)
+
+  // Peringatan penskoran (ditandai "*" pada angka IQ): tabel norma CFIT Skala 3
+  // disusun untuk RS gabungan Bentuk A + B (100 soal), jadi tes satu bentuk
+  // atau subtes yang tidak dikerjakan membuat IQ lebih rendah dari kemampuan
+  // sebenarnya. Angka tetap dicetak, tetapi wajib diberi keterangan.
+  const warnSentences: string[] = []
+  if (singleForm) {
+    warnSentences.push(
+      `Tes hanya dikerjakan ${formLabel} (maksimum 50 soal), sedangkan tabel norma CFIT Skala 3 disusun untuk Raw Score gabungan Bentuk A + B (100 soal). Skor IQ di atas karena itu UNDERESTIMATE (lebih rendah dari kemampuan sebenarnya) dan tidak dapat dibandingkan dengan peserta yang mengerjakan Bentuk A + B.`,
+    )
+  }
+  if (incomplete) {
+    warnSentences.push(
+      untouched.length > 0
+        ? `Ada ${untouched.length} subtes yang tidak dijawab sama sekali (${untouched
+            .map((code) => code.replace(/_/g, " "))
+            .join(", ")}), sehingga Raw Score total tidak mewakili seluruh materi tes dan skor IQ menjadi lebih rendah dari kemampuan sebenarnya.`
+        : "Administrasi tes tidak lengkap, sehingga Raw Score total tidak mewakili seluruh materi tes dan skor IQ perlu ditafsirkan dengan hati-hati.",
+    )
+  }
+
+  const warnLines: string[] = []
+  if (warnSentences.length > 0) {
+    doc.setFont("helvetica", "bold")
+    doc.setFontSize(6.2)
+    const warnText = `PERHATIAN (*): ${warnSentences.join(" ")}`
+    const split = doc.splitTextToSize(warnText, noteMaxW) as string[]
+    warnLines.push(...split.slice(0, 4))
+  }
+
+  const noteH = 18 + (warnLines.length > 0 ? warnLines.length * 8.2 + 3 : 0)
+  setFillHex(doc, warnLines.length > 0 ? WARN_BG : HIGHLIGHT)
+  setDrawHex(doc, warnLines.length > 0 ? WARN_LINE : ACCENT_DEEP)
   doc.setLineWidth(0.6)
   doc.rect(margin, y, innerW, noteH, "FD")
   setTextHex(doc, INK)
   doc.setFont("helvetica", "normal")
   doc.setFontSize(noteFontSize)
   doc.text(noteText, margin + 8, y + 11.5)
+  if (warnLines.length > 0) {
+    setTextHex(doc, WARN_INK)
+    doc.setFont("helvetica", "bold")
+    doc.setFontSize(6.2)
+    warnLines.forEach((line, i) => {
+      doc.text(line, margin + 8, y + 21.5 + i * 8.2)
+    })
+    setTextHex(doc, INK)
+  }
   y += noteH + 12
 
   // Grafik pengganti tabel skala klasifikasi. Jarak grafik → QR sengaja

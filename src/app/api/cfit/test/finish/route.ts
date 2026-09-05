@@ -64,6 +64,12 @@ export async function POST(req: NextRequest) {
     // Ditandai kalau tes hanya satu bentuk (3A/3B): norma yang dipakai adalah
     // norma RS gabungan A + B, sehingga IQ-nya underestimate.
     singleForm: computed.singleForm,
+    // Ditandai kalau ada subtes yang sama sekali tidak dijawab (mis. sesi
+    // terputus sebelum semua subtes dikerjakan). RS total jadi tidak
+    // mencerminkan administrasi penuh, sehingga IQ-nya underestimate dan
+    // laporan wajib memberi peringatan.
+    incomplete: computed.incomplete,
+    untouchedSubtests: computed.untouchedSubtests,
   };
 
   const result = await prisma.cfitResult.upsert({
