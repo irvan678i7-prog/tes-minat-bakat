@@ -45,7 +45,6 @@ export default function CfitAdminResults() {
   const [finishedOnly, setFinishedOnly] = useState(true);
   const [selSchool, setSelSchool] = useState("");
   const [selGrade, setSelGrade] = useState("");
-  const [searchName, setSearchName] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<ResultRow | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -104,15 +103,15 @@ export default function CfitAdminResults() {
     return [...set].sort((a, b) => Number(a) - Number(b));
   }, [rows]);
 
-  const visible = useMemo(() => {
-    const q = searchName.trim().toLowerCase();
-    return rows.filter(
-      (r) =>
-        (!selSchool || schoolKey(r.school) === selSchool) &&
-        (!selGrade || gradeKey(r.grade) === selGrade) &&
-        (!q || (r.fullName ?? "").toLowerCase().includes(q)),
-    );
-  }, [rows, selSchool, selGrade, searchName]);
+  const visible = useMemo(
+    () =>
+      rows.filter(
+        (r) =>
+          (!selSchool || schoolKey(r.school) === selSchool) &&
+          (!selGrade || gradeKey(r.grade) === selGrade),
+      ),
+    [rows, selSchool, selGrade],
+  );
 
   const rekapQuery = useMemo(() => {
     const q = new URLSearchParams();
@@ -194,20 +193,10 @@ export default function CfitAdminResults() {
       </div>
 
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-3 flex-wrap">
-          <label className="brut-checkbox">
-            <input type="checkbox" checked={finishedOnly} onChange={(e) => setFinishedOnly(e.target.checked)} />
-            Hanya yang sudah selesai
-          </label>
-          <input
-            type="search"
-            className="brut-input text-sm"
-            placeholder="Cari nama peserta..."
-            value={searchName}
-            onChange={(e) => setSearchName(e.target.value)}
-            title="Cari peserta berdasarkan nama"
-          />
-        </div>
+        <label className="brut-checkbox">
+          <input type="checkbox" checked={finishedOnly} onChange={(e) => setFinishedOnly(e.target.checked)} />
+          Hanya yang sudah selesai
+        </label>
         <button className="brut-btn brut-btn-lime text-sm" onClick={exportCsv} disabled={visible.length === 0}>
           ⬇ EKSPOR CSV ({visible.length})
         </button>

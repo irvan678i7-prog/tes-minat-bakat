@@ -151,7 +151,6 @@ export default function AdminSubmissions() {
   const [filterSchool, setFilterSchool] = useState("");
   const [filterGrade, setFilterGrade] = useState("");
   const [filterKind, setFilterKind] = useState<"" | "MINAT" | "BAKAT">("");
-  const [filterName, setFilterName] = useState("");
   const [deleting, setDeleting] = useState<string | null>(null);
   const [onlyFlagged, setOnlyFlagged] = useState(false);
   const [openLogId, setOpenLogId] = useState<string | null>(null);
@@ -300,14 +299,12 @@ export default function AdminSubmissions() {
     }
   };
 
-  const nameQuery = filterName.trim().toLowerCase();
   const filteredItems = items
     .filter(
       (s) =>
         (!filterSchool || schoolKey(s.school) === filterSchool) &&
         (!filterGrade || gradeKey(s.grade) === filterGrade) &&
         (!filterKind || s.testKind === filterKind) &&
-        (!nameQuery || (s.fullName || "").toLowerCase().includes(nameQuery)) &&
         (!onlyFlagged || s.flaggedCheating || s.violationCount >= 5),
     )
     .sort((a, b) =>
@@ -408,14 +405,6 @@ export default function AdminSubmissions() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h3 className="text-2xl font-black uppercase">Daftar Peserta</h3>
         <div className="flex items-center gap-3 flex-wrap">
-          <input
-            type="search"
-            className="brut-input text-sm"
-            placeholder="Cari nama peserta..."
-            value={filterName}
-            onChange={(e) => setFilterName(e.target.value)}
-            title="Cari peserta berdasarkan nama"
-          />
           <span
             className="text-xs font-bold"
             style={liveBadgeStyle}
