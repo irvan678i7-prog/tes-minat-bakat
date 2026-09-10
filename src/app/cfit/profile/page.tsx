@@ -144,7 +144,7 @@ export default function CfitProfilePage() {
             <input
               className="brut-input w-full"
               value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
+              onChange={(e) => setFullName(e.target.value.toUpperCase())}
               disabled={pending}
               autoComplete="off"
             />
@@ -156,7 +156,7 @@ export default function CfitProfilePage() {
               className="brut-input w-full"
               placeholder="Nomor Induk Siswa"
               value={nis}
-              onChange={(e) => setNis(e.target.value)}
+              onChange={(e) => setNis(e.target.value.toUpperCase())}
               disabled={pending}
               autoComplete="off"
             />
@@ -185,7 +185,7 @@ export default function CfitProfilePage() {
               className="brut-input w-full"
               placeholder="cth: SMA Negeri 1 Bandung"
               value={school}
-              onChange={(e) => setSchool(e.target.value)}
+              onChange={(e) => setSchool(e.target.value.toUpperCase())}
               disabled={pending}
               readOnly={schoolLocked}
               style={schoolLocked ? { background: "#f3f4f6" } : undefined}
@@ -239,7 +239,7 @@ export default function CfitProfilePage() {
                 className="brut-input w-full"
                 placeholder="cth: XII TKJ 1"
                 value={grade}
-                onChange={(e) => setGrade(e.target.value)}
+                onChange={(e) => setGrade(e.target.value.toUpperCase())}
                 disabled={pending}
                 readOnly={gradeLocked}
                 style={gradeLocked ? { background: "#f3f4f6" } : undefined}

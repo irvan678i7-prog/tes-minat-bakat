@@ -59,7 +59,7 @@ export default function ProfileForm({ initial }: { initial: Initial }) {
     <form onSubmit={submit} className="grid md:grid-cols-2 gap-4 brut-card" style={{ background: "#fff" }}>
       <div className="md:col-span-2">
         <label className="text-xs font-black uppercase block mb-1">Nama Lengkap *</label>
-        <input className="brut-input w-full" value={d.fullName} onChange={(e) => set("fullName", e.target.value)} required />
+        <input className="brut-input w-full" value={d.fullName} onChange={(e) => set("fullName", e.target.value.toUpperCase())} required />
       </div>
       <div>
         <label className="text-xs font-black uppercase block mb-1">Jenis Kelamin *</label>
@@ -83,7 +83,7 @@ export default function ProfileForm({ initial }: { initial: Initial }) {
       </div>
       <div>
         <label className="text-xs font-black uppercase block mb-1">Tempat Lahir</label>
-        <input className="brut-input w-full" value={d.birthPlace} onChange={(e) => set("birthPlace", e.target.value)} />
+        <input className="brut-input w-full" value={d.birthPlace} onChange={(e) => set("birthPlace", e.target.value.toUpperCase())} />
       </div>
       <div>
         <label className="text-xs font-black uppercase block mb-1">Tanggal Lahir</label>
@@ -111,15 +111,15 @@ export default function ProfileForm({ initial }: { initial: Initial }) {
       </div>
       <div>
         <label className="text-xs font-black uppercase block mb-1">Sekolah *</label>
-        <input className="brut-input w-full" value={d.school} onChange={(e) => set("school", e.target.value)} required />
+        <input className="brut-input w-full" value={d.school} onChange={(e) => set("school", e.target.value.toUpperCase())} required />
       </div>
       <div>
         <label className="text-xs font-black uppercase block mb-1">Kelas</label>
-        <input className="brut-input w-full" value={d.grade} onChange={(e) => set("grade", e.target.value)} placeholder="X / XI / XII" />
+        <input className="brut-input w-full" value={d.grade} onChange={(e) => set("grade", e.target.value.toUpperCase())} placeholder="X / XI / XII" />
       </div>
       <div>
         <label className="text-xs font-black uppercase block mb-1">Jurusan</label>
-        <input className="brut-input w-full" value={d.major} onChange={(e) => set("major", e.target.value)} />
+        <input className="brut-input w-full" value={d.major} onChange={(e) => set("major", e.target.value.toUpperCase())} />
       </div>
       <div>
         <label className="text-xs font-black uppercase block mb-1">No. HP</label>
