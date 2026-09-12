@@ -212,7 +212,8 @@
   line-height: 1.55;
   white-space: pre-wrap;
 }
-/* Kolom tanda tangan: kotak di kanan bawah kertas, sama seperti pada PDF. */
+/* Kolom tanda tangan: kotak di kanan bawah kertas, sama seperti pada PDF.
+   Jabatan di atas, ruang tanda tangan, lalu nama penanda tangan. */
 .signature {
   display: flex;
   justify-content: flex-end;
@@ -226,7 +227,7 @@
 }
 .signSpace {
   height: 56px;
-  margin: 12px 0 8px;
+  margin: 10px 0 6px;
   border-bottom: 2px solid #000;
 }
 .signRole {
@@ -235,6 +236,12 @@
 }
 .signRole span {
   font-size: 12px;
+  font-weight: 900;
+  line-height: 1.35;
+}
+.signName {
+  margin: 0;
+  font-size: 13px;
   font-weight: 900;
   line-height: 1.35;
 }
