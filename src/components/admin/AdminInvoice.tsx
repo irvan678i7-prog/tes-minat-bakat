@@ -17,6 +17,18 @@ import {
   type InvoiceErrors,
   type InvoiceForm,
 } from "@/lib/invoice";
+import {
+  INVOICE_SIGNATURE_LABEL,
+  INVOICE_SIGNER_LINES,
+} from "@/lib/invoice-signature";
+import {
+  addInvoiceHistory,
+  invoiceHistoryTotal,
+  loadInvoiceHistory,
+  removeInvoiceHistory,
+  saveInvoiceHistory,
+  type InvoiceHistoryEntry,
+} from "@/lib/invoice-history";
 import styles from "./AdminInvoice.module.css";
 
 type FieldOptions = {
@@ -39,6 +51,7 @@ export default function AdminInvoice() {
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [history, setHistory] = useState<InvoiceHistoryEntry[]>([]);
 
   useEffect(() => {
     // Nomor acak dan tanggal WIB dibuat di browser supaya hasil render server
@@ -48,6 +61,9 @@ export default function AdminInvoice() {
       const today = jakartaDate();
       return { ...current, number: invoiceNumber(today), issuedAt: today };
     });
+    // Riwayat pemasukan hanya ada di browser, jadi dibaca setelah komponen
+    // terpasang.
+    setHistory(loadInvoiceHistory());
   }, []);
 
   const quantityText = form.quantity.trim();
@@ -92,11 +108,43 @@ export default function AdminInvoice() {
       // Dimuat saat dibutuhkan agar pustaka PDF tidak menambah beban halaman panel.
       const { buildInvoicePDF } = await import("@/lib/invoice-pdf");
       buildInvoicePDF(invoice).save(invoiceFilename(invoice.number));
+      // Invoice yang sudah diunduh dicatat sebagai pemasukan di browser ini.
+      const next = addInvoiceHistory(history, invoice);
+      setHistory(next);
+      saveInvoiceHistory(next);
     } catch {
       setMessage("Gagal membuat PDF. Muat ulang halaman, lalu buat pratinjau invoice lagi.");
     } finally {
       setBusy(false);
     }
+  }
+
+  async function removeHistoryEntry(entry: InvoiceHistoryEntry) {
+    const ok = await confirm({
+      title: "Hapus riwayat",
+      message: `Hapus catatan invoice ${entry.number} (${formatRupiah(entry.total)}) dari riwayat pemasukan?`,
+      confirmLabel: "HAPUS",
+      cancelLabel: "Batal",
+      tone: "danger",
+    });
+    if (!ok) return;
+    const next = removeInvoiceHistory(history, entry.id);
+    setHistory(next);
+    saveInvoiceHistory(next);
+  }
+
+  async function clearHistory() {
+    if (!history.length) return;
+    const ok = await confirm({
+      title: "Hapus semua riwayat",
+      message: "Hapus seluruh riwayat pemasukan invoice di browser ini? Tindakan ini tidak bisa dibatalkan.",
+      confirmLabel: "HAPUS SEMUA",
+      cancelLabel: "Batal",
+      tone: "danger",
+    });
+    if (!ok) return;
+    setHistory([]);
+    saveInvoiceHistory([]);
   }
 
   async function reset() {
@@ -189,6 +237,7 @@ export default function AdminInvoice() {
   }
 
   const testInvalid = Boolean(errors.test);
+  const historyTotal = invoiceHistoryTotal(history);
 
   return (
     <div className="space-y-6">
@@ -474,6 +523,17 @@ export default function AdminInvoice() {
                 <p>{invoice.notes}</p>
               </section>
             ) : null}
+            <section className={styles.signature} aria-label="Kolom tanda tangan">
+              <div className={styles.signBox}>
+                <span className={styles.chip}>{INVOICE_SIGNATURE_LABEL}</span>
+                <div className={styles.signSpace} aria-hidden="true" />
+                <div className={styles.signRole}>
+                  {INVOICE_SIGNER_LINES.map((line) => (
+                    <span key={line}>{line}</span>
+                  ))}
+                </div>
+              </div>
+            </section>
             <p className={styles.foot}>
               Cantumkan nomor invoice saat melakukan pembayaran. Invoice ini merupakan tagihan, bukan
               bukti pembayaran atau faktur pajak.
@@ -481,6 +541,87 @@ export default function AdminInvoice() {
           </article>
         </section>
       ) : null}
+
+      <section className="brut-card space-y-4" aria-label="Riwayat pemasukan invoice">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b-4 border-black pb-3">
+          <div className="min-w-0">
+            <h3 className="text-lg font-black uppercase leading-tight">Riwayat pemasukan</h3>
+            <p className="text-xs font-bold opacity-70">
+              Invoice tercatat otomatis saat PDF diunduh. Riwayat hanya tersimpan di browser ini dan
+              bisa dihapus kapan saja.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="brut-tag" style={{ background: "#a3e635" }}>
+              {formatCount(history.length)} INVOICE
+            </span>
+            <button
+              type="button"
+              className="brut-btn brut-btn-white text-sm"
+              onClick={clearHistory}
+              disabled={history.length === 0}
+            >
+              HAPUS SEMUA
+            </button>
+          </div>
+        </div>
+
+        {history.length === 0 ? (
+          <p className="text-sm font-bold opacity-70">
+            Belum ada riwayat. Unduh PDF invoice untuk mencatat pemasukan.
+          </p>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="brut-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Tanggal</th>
+                    <th scope="col">Nomor invoice</th>
+                    <th scope="col">Ditagihkan kepada</th>
+                    <th scope="col">Layanan tes</th>
+                    <th scope="col">Siswa</th>
+                    <th scope="col">Harga / siswa</th>
+                    <th scope="col">Total</th>
+                    <th scope="col">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map((item) => (
+                    <tr key={item.id}>
+                      <td className="whitespace-nowrap">{formatInvoiceDate(item.issuedAt)}</td>
+                      <td className="font-bold">{item.number}</td>
+                      <td>{item.customer}</td>
+                      <td>{INVOICE_TESTS[item.test]}</td>
+                      <td className="text-right">{formatCount(item.quantity)}</td>
+                      <td className="whitespace-nowrap text-right">{formatRupiah(item.unitPrice)}</td>
+                      <td className="whitespace-nowrap text-right font-black">{formatRupiah(item.total)}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="brut-btn brut-btn-pink text-xs"
+                          onClick={() => removeHistoryEntry(item)}
+                        >
+                          HAPUS
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div
+              className="flex flex-wrap items-center justify-between gap-3 border-4 border-black p-3"
+              style={{ background: "#000", color: "#fff" }}
+            >
+              <p className="text-xs font-black uppercase" style={{ color: "#facc15" }}>
+                Total pemasukan tercatat
+              </p>
+              <p className="text-xl font-black leading-tight md:text-2xl">{formatRupiah(historyTotal)}</p>
+            </div>
+          </>
+        )}
+      </section>
     </div>
   );
 }
