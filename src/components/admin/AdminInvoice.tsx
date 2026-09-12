@@ -18,8 +18,10 @@ import {
   type InvoiceForm,
 } from "@/lib/invoice";
 import {
-  INVOICE_SIGNATURE_LABEL,
   INVOICE_SIGNER_LINES,
+  MAX_SIGNER_NAME,
+  normalizeSignerName,
+  signerNameError,
 } from "@/lib/invoice-signature";
 import {
   addInvoiceHistory,
@@ -48,6 +50,9 @@ export default function AdminInvoice() {
   const [form, setForm] = useState<InvoiceForm>(emptyInvoiceForm);
   const [errors, setErrors] = useState<InvoiceErrors>({});
   const [invoice, setInvoice] = useState<Invoice | null>(null);
+  const [signerName, setSignerName] = useState("");
+  const [signer, setSigner] = useState("");
+  const [signerError, setSignerError] = useState("");
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -80,6 +85,13 @@ export default function AdminInvoice() {
     setMessage("");
   }
 
+  function changeSigner(value: string) {
+    setSignerName(value);
+    setSignerError("");
+    setDirty(true);
+    setMessage("");
+  }
+
   function preview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const fields = event.currentTarget.elements;
@@ -95,8 +107,19 @@ export default function AdminInvoice() {
       if (target instanceof HTMLElement) target.focus();
       return;
     }
+    const signerIssue = signerNameError(signerName);
+    if (signerIssue) {
+      setErrors({});
+      setSignerError(signerIssue);
+      setMessage("Periksa kembali isian yang ditandai. Pratinjau belum diperbarui.");
+      const target = fields.namedItem("signerName");
+      if (target instanceof HTMLElement) target.focus();
+      return;
+    }
     setErrors({});
+    setSignerError("");
     setInvoice(result.value);
+    setSigner(normalizeSignerName(signerName));
     setDirty(false);
     setMessage("");
   }
@@ -123,7 +146,7 @@ export default function AdminInvoice() {
     try {
       // Dimuat saat dibutuhkan agar pustaka PDF tidak menambah beban halaman panel.
       const { buildInvoicePDF } = await import("@/lib/invoice-pdf");
-      buildInvoicePDF(invoice).save(invoiceFilename(invoice.number));
+      buildInvoicePDF(invoice, signer).save(invoiceFilename(invoice.number));
       // Invoice yang sudah diunduh dicatat sebagai pemasukan di browser ini.
       storeInvoice(invoice);
     } catch {
@@ -175,6 +198,9 @@ export default function AdminInvoice() {
     setForm({ ...emptyInvoiceForm(), number: invoiceNumber(today), issuedAt: today });
     setErrors({});
     setInvoice(null);
+    setSignerName("");
+    setSigner("");
+    setSignerError("");
     setDirty(false);
     setMessage("");
     setSavedNumber("");
@@ -401,7 +427,11 @@ export default function AdminInvoice() {
           </section>
 
           <section className="brut-card space-y-4">
-            {sectionHead("04", "Pembayaran & catatan", "Instruksi transfer dan keterangan tambahan pada invoice.")}
+            {sectionHead(
+              "04",
+              "Pembayaran, catatan & tanda tangan",
+              "Instruksi transfer, keterangan tambahan, dan nama penanda tangan invoice.",
+            )}
             <div className="grid gap-4 md:grid-cols-2">
               {field("paymentDetails", "Informasi pembayaran", {
                 multiline: true,
@@ -415,6 +445,39 @@ export default function AdminInvoice() {
                 placeholder: "Jadwal pelaksanaan tes, termin pembayaran, dll.",
                 hint: "Opsional. Maksimal 5 baris.",
               })}
+            </div>
+            <div className="min-w-0 md:max-w-md">
+              <label htmlFor="invoice-signerName" className="mb-1 block text-xs font-black uppercase">
+                Nama kaprodi
+              </label>
+              <input
+                id="invoice-signerName"
+                name="signerName"
+                type="text"
+                value={signerName}
+                maxLength={MAX_SIGNER_NAME}
+                placeholder="Nama lengkap beserta gelar"
+                className="brut-input w-full text-sm"
+                style={signerError ? INVALID_STYLE : undefined}
+                aria-invalid={Boolean(signerError)}
+                aria-describedby={
+                  signerError ? "invoice-signerName-error" : "invoice-signerName-hint"
+                }
+                onChange={(event) => changeSigner(event.target.value)}
+              />
+              <p id="invoice-signerName-hint" className="mt-1 text-xs font-bold opacity-70">
+                Dicetak di bawah ruang tanda tangan, di bawah tulisan
+                “Kaprodi S2 Bimbingan dan Konseling”. Opsional.
+              </p>
+              {signerError ? (
+                <p
+                  id="invoice-signerName-error"
+                  className="mt-1 text-xs font-black"
+                  style={{ color: ERROR_COLOR }}
+                >
+                  {signerError}
+                </p>
+              ) : null}
             </div>
           </section>
 
@@ -550,13 +613,13 @@ export default function AdminInvoice() {
             ) : null}
             <section className={styles.signature} aria-label="Kolom tanda tangan">
               <div className={styles.signBox}>
-                <span className={styles.chip}>{INVOICE_SIGNATURE_LABEL}</span>
-                <div className={styles.signSpace} aria-hidden="true" />
                 <div className={styles.signRole}>
                   {INVOICE_SIGNER_LINES.map((line) => (
                     <span key={line}>{line}</span>
                   ))}
                 </div>
+                <div className={styles.signSpace} aria-hidden="true" />
+                {signer ? <p className={styles.signName}>{signer}</p> : null}
               </div>
             </section>
             <p className={styles.foot}>

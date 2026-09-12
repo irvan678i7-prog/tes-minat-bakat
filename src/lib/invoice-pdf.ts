@@ -3,7 +3,7 @@ import {
   INVOICE_TESTS, formatCount, formatInvoiceDate, formatRupiah, invoiceFormOf,
   validateInvoice, type Invoice,
 } from "./invoice";
-import { INVOICE_SIGNER_LINES } from "./invoice-signature";
+import { INVOICE_SIGNER_LINES, normalizeSignerName } from "./invoice-signature";
 
 // Palet mengikuti tema panel admin: hitam tebal + aksen kuning, latar putih
 // supaya dokumen tetap enak dibaca dan ramah saat dicetak hitam-putih.
@@ -17,7 +17,7 @@ const TERMS =
   "Cantumkan nomor invoice saat melakukan pembayaran. Invoice ini merupakan tagihan, bukan bukti pembayaran atau faktur pajak.";
 
 /** Pure client-side export: no test records, tokens or payment state are changed. */
-export function buildInvoicePDF(invoice: Invoice): jsPDF {
+export function buildInvoicePDF(invoice: Invoice, signerName = ""): jsPDF {
   // Revalidate lewat pemetaan eksplisit: nominal pada PDF selalu dihitung ulang
   // dari jumlah siswa dan harga, bukan dari total yang dikirim pemanggil.
   const checked = validateInvoice(invoiceFormOf(invoice));
@@ -80,7 +80,7 @@ export function buildInvoicePDF(invoice: Invoice): jsPDF {
     y += 50;
   };
 
-  // ── Kop dokumen ────────────────────────────────────────────────
+  // ── Kop dokumen ────────────────────────────────────────────
   font(11, true, WHITE);
   const numberLines = lines(data.number, 190);
   const bandHeight = Math.max(64, 40 + numberLines.length * 13 + 10);
@@ -96,7 +96,7 @@ export function buildInvoicePDF(invoice: Invoice): jsPDF {
   fill(YELLOW, margin, y, contentWidth, 8);
   y += 8;
 
-  // ── Penagih & penerima ─────────────────────────────────────────
+  // ── Penagih & penerima ────────────────────────────────────
   const columnWidth = contentWidth / 2;
   const partyTop = y;
   const party = (x: number, label: string, name: string, details: string): number => {
@@ -125,7 +125,7 @@ export function buildInvoicePDF(invoice: Invoice): jsPDF {
   divider(margin + columnWidth, partyTop, partyBottom);
   y = partyBottom + 26;
 
-  // ── Tanggal & layanan ──────────────────────────────────────────
+  // ── Tanggal & layanan ─────────────────────────────────────
   const metaHeight = 48;
   ensure(metaHeight + 20);
   const metaTop = y;
@@ -145,7 +145,7 @@ export function buildInvoicePDF(invoice: Invoice): jsPDF {
   metaCell(2, "LAYANAN TES", INVOICE_TESTS[data.test]);
   y = metaTop + metaHeight + 26;
 
-  // ── Rincian tagihan ────────────────────────────────────────────
+  // ── Rincian tagihan ───────────────────────────────────────
   const cols = [
     margin,
     margin + contentWidth * 0.38,
@@ -182,7 +182,7 @@ export function buildInvoicePDF(invoice: Invoice): jsPDF {
   doc.text(amountText, cols[4] - 12, y + 24, { align: "right" });
   y += rowHeight + 20;
 
-  // ── Total tagihan ──────────────────────────────────────────────
+  // ── Total tagihan ─────────────────────────────────────────
   const totalWidth = 268;
   const totalHeight = 62;
   ensure(totalHeight + 16);
@@ -198,7 +198,7 @@ export function buildInvoicePDF(invoice: Invoice): jsPDF {
   doc.text(amountText, right - 20, y + 48, { align: "right" });
   y += totalHeight + 28;
 
-  // ── Keterangan tambahan ────────────────────────────────────────
+  // ── Keterangan tambahan ───────────────────────────────────
   const block = (label: string, text: string) => {
     if (!text) return;
     font(9.5, false, "#1A1A1A");
@@ -217,24 +217,36 @@ export function buildInvoicePDF(invoice: Invoice): jsPDF {
   block("INFORMASI PEMBAYARAN", data.paymentDetails);
   block("CATATAN", data.notes);
 
-  // ── Kolom tanda tangan ─────────────────────────────────────────
+  // ── Kolom tanda tangan: jabatan di atas, ruang tanda tangan, lalu nama ──
   const signWidth = 280;
   const signX = right - signWidth;
   font(8.5, true, BLACK);
-  const signerLines = INVOICE_SIGNER_LINES.flatMap((line) => lines(line, signWidth - 28));
-  const signHeight = 84 + signerLines.length * 11;
+  const roleLines = INVOICE_SIGNER_LINES.flatMap((line) => lines(line, signWidth - 28));
+  const signer = normalizeSignerName(signerName);
+  font(10, true, BLACK);
+  const nameLines = signer ? lines(signer, signWidth - 28) : [];
+  const roleTop = 22;
+  const ruleOffset = roleTop + roleLines.length * 12 + 48;
+  const nameTop = ruleOffset + 16;
+  const signHeight =
+    (nameLines.length ? nameTop + (nameLines.length - 1) * 13 : ruleOffset) + 16;
   ensure(signHeight + 20);
   const signTop = y;
   stroke(signX, signTop, signWidth, signHeight);
-  chip("TANDA TANGAN", signX + 14, signTop + 22);
-  doc.setDrawColor(BLACK);
-  doc.setLineWidth(0.8);
-  doc.line(signX + 14, signTop + 66, signX + signWidth - 14, signTop + 66);
-  let signCursor = signTop + 80;
-  for (const line of signerLines) {
+  let signCursor = signTop + roleTop;
+  for (const line of roleLines) {
     font(8.5, true, BLACK);
     doc.text(line, signX + 14, signCursor);
-    signCursor += 11;
+    signCursor += 12;
+  }
+  doc.setDrawColor(BLACK);
+  doc.setLineWidth(0.8);
+  doc.line(signX + 14, signTop + ruleOffset, signX + signWidth - 14, signTop + ruleOffset);
+  signCursor = signTop + nameTop;
+  for (const line of nameLines) {
+    font(10, true, BLACK);
+    doc.text(line, signX + 14, signCursor);
+    signCursor += 13;
   }
   y = signTop + signHeight + 24;
 
@@ -252,7 +264,7 @@ export function buildInvoicePDF(invoice: Invoice): jsPDF {
     y += 12;
   }
 
-  // ── Kaki halaman ───────────────────────────────────────────────
+  // ── Kaki halaman ──────────────────────────────────────────
   const pages = doc.getNumberOfPages();
   for (let page = 1; page <= pages; page++) {
     doc.setPage(page);
