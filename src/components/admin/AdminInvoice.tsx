@@ -52,6 +52,7 @@ export default function AdminInvoice() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [history, setHistory] = useState<InvoiceHistoryEntry[]>([]);
+  const [savedNumber, setSavedNumber] = useState("");
 
   useEffect(() => {
     // Nomor acak dan tanggal WIB dibuat di browser supaya hasil render server
@@ -100,6 +101,21 @@ export default function AdminInvoice() {
     setMessage("");
   }
 
+  // Menyimpan invoice yang sudah dipratinjau ke riwayat pemasukan tanpa harus
+  // mengunduh PDF lebih dulu.
+  function storeInvoice(target: Invoice) {
+    const next = addInvoiceHistory(history, target);
+    setHistory(next);
+    saveInvoiceHistory(next);
+    setSavedNumber(target.number);
+  }
+
+  function saveToHistory() {
+    if (!invoice || dirty || busy) return;
+    storeInvoice(invoice);
+    setMessage("");
+  }
+
   async function download() {
     if (!invoice || dirty || busy) return;
     setBusy(true);
@@ -109,9 +125,7 @@ export default function AdminInvoice() {
       const { buildInvoicePDF } = await import("@/lib/invoice-pdf");
       buildInvoicePDF(invoice).save(invoiceFilename(invoice.number));
       // Invoice yang sudah diunduh dicatat sebagai pemasukan di browser ini.
-      const next = addInvoiceHistory(history, invoice);
-      setHistory(next);
-      saveInvoiceHistory(next);
+      storeInvoice(invoice);
     } catch {
       setMessage("Gagal membuat PDF. Muat ulang halaman, lalu buat pratinjau invoice lagi.");
     } finally {
@@ -163,6 +177,7 @@ export default function AdminInvoice() {
     setInvoice(null);
     setDirty(false);
     setMessage("");
+    setSavedNumber("");
   }
 
   function field(name: keyof InvoiceForm, label: string, options: FieldOptions = {}) {
@@ -238,6 +253,7 @@ export default function AdminInvoice() {
 
   const testInvalid = Boolean(errors.test);
   const historyTotal = invoiceHistoryTotal(history);
+  const isSaved = Boolean(invoice && !dirty && savedNumber === invoice.number);
 
   return (
     <div className="space-y-6">
@@ -435,6 +451,15 @@ export default function AdminInvoice() {
               </span>
               <button
                 type="button"
+                className="brut-btn brut-btn-lime"
+                onClick={saveToHistory}
+                disabled={dirty || busy}
+                title="Catat invoice ini ke riwayat pemasukan"
+              >
+                {isSaved ? "TERSIMPAN DI RIWAYAT" : "SIMPAN KE RIWAYAT"}
+              </button>
+              <button
+                type="button"
                 className="brut-btn brut-btn-black"
                 onClick={download}
                 disabled={dirty || busy}
@@ -547,8 +572,8 @@ export default function AdminInvoice() {
           <div className="min-w-0">
             <h3 className="text-lg font-black uppercase leading-tight">Riwayat pemasukan</h3>
             <p className="text-xs font-bold opacity-70">
-              Invoice tercatat otomatis saat PDF diunduh. Riwayat hanya tersimpan di browser ini dan
-              bisa dihapus kapan saja.
+              Tekan SIMPAN KE RIWAYAT pada pratinjau, atau unduh PDF, untuk mencatat invoice.
+              Riwayat hanya tersimpan di browser ini dan bisa dihapus kapan saja.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
@@ -568,7 +593,7 @@ export default function AdminInvoice() {
 
         {history.length === 0 ? (
           <p className="text-sm font-bold opacity-70">
-            Belum ada riwayat. Unduh PDF invoice untuk mencatat pemasukan.
+            Belum ada riwayat. Simpan atau unduh invoice untuk mencatat pemasukan.
           </p>
         ) : (
           <>
