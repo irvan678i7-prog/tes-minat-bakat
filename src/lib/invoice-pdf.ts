@@ -3,6 +3,7 @@ import {
   INVOICE_TESTS, formatCount, formatInvoiceDate, formatRupiah, invoiceFormOf,
   validateInvoice, type Invoice,
 } from "./invoice";
+import { INVOICE_SIGNER_LINES } from "./invoice-signature";
 
 // Palet mengikuti tema panel admin: hitam tebal + aksen kuning, latar putih
 // supaya dokumen tetap enak dibaca dan ramah saat dicetak hitam-putih.
@@ -215,6 +216,27 @@ export function buildInvoicePDF(invoice: Invoice): jsPDF {
   };
   block("INFORMASI PEMBAYARAN", data.paymentDetails);
   block("CATATAN", data.notes);
+
+  // ── Kolom tanda tangan ─────────────────────────────────────────
+  const signWidth = 280;
+  const signX = right - signWidth;
+  font(8.5, true, BLACK);
+  const signerLines = INVOICE_SIGNER_LINES.flatMap((line) => lines(line, signWidth - 28));
+  const signHeight = 84 + signerLines.length * 11;
+  ensure(signHeight + 20);
+  const signTop = y;
+  stroke(signX, signTop, signWidth, signHeight);
+  chip("TANDA TANGAN", signX + 14, signTop + 22);
+  doc.setDrawColor(BLACK);
+  doc.setLineWidth(0.8);
+  doc.line(signX + 14, signTop + 66, signX + signWidth - 14, signTop + 66);
+  let signCursor = signTop + 80;
+  for (const line of signerLines) {
+    font(8.5, true, BLACK);
+    doc.text(line, signX + 14, signCursor);
+    signCursor += 11;
+  }
+  y = signTop + signHeight + 24;
 
   font(8.5, false, MUTED);
   const terms = lines(TERMS, contentWidth - 4);
