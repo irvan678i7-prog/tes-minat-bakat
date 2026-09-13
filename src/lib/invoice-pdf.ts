@@ -11,6 +11,9 @@ const BLACK = "#000000";
 const WHITE = "#FFFFFF";
 const YELLOW = "#FACC15";
 const CREAM = "#FEF9C3";
+// Hijau untuk tabel rincian, dipasangkan dengan aksen kuning.
+const GREEN = "#A3E635";
+const GREEN_SOFT = "#F7FEE7";
 const MUTED = "#4A4A4A";
 const HAIRLINE = "#BDBDBD";
 const TERMS =
@@ -155,8 +158,9 @@ export function buildInvoicePDF(invoice: Invoice, signerName = ""): jsPDF {
   ];
   const headHeight = 26;
   ensure(headHeight + 120);
-  fill(BLACK, margin, y, contentWidth, headHeight);
-  font(7.5, true, WHITE);
+  fill(GREEN, margin, y, contentWidth, headHeight);
+  stroke(margin, y, contentWidth, headHeight);
+  font(7.5, true, BLACK);
   doc.text("DESKRIPSI LAYANAN", cols[0] + 12, y + 17);
   doc.text("SISWA", cols[2] - 12, y + 17, { align: "right" });
   doc.text("HARGA / SISWA", cols[3] - 12, y + 17, { align: "right" });
@@ -166,6 +170,7 @@ export function buildInvoicePDF(invoice: Invoice, signerName = ""): jsPDF {
   font(11, true);
   const descLines = lines(INVOICE_TESTS[data.test], cols[1] - cols[0] - 24);
   const rowHeight = Math.max(38, 22 + descLines.length * 14);
+  fill(GREEN_SOFT, margin, y, contentWidth, rowHeight);
   stroke(margin, y, contentWidth, rowHeight);
   for (const x of cols.slice(1, 4)) divider(x, y, y + rowHeight);
   font(11, true);
