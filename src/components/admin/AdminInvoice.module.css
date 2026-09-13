@@ -1,5 +1,5 @@
 /* Kertas invoice: mengikuti tema brutalism panel admin (garis hitam tebal,
-   aksen kuning) tapi tetap dibaca seperti dokumen tagihan resmi. Tampilan ini
+   aksen hijau) tapi tetap dibaca seperti dokumen tagihan resmi. Tampilan ini
    dibuat mirip dengan PDF yang diunduh. */
 .paper {
   background: #fff;
@@ -30,7 +30,7 @@
   font-weight: 900;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: #facc15;
+  color: #a3e635;
 }
 .headNumber {
   max-width: 58%;
@@ -42,7 +42,7 @@
   font-weight: 900;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: #facc15;
+  color: #a3e635;
 }
 .headNumber strong {
   display: block;
@@ -52,7 +52,7 @@
 }
 .accent {
   height: 8px;
-  background: #facc15;
+  background: #a3e635;
   border-bottom: 4px solid #000;
 }
 .chip {
@@ -188,7 +188,7 @@
   padding: 14px 20px;
   background: #000;
   color: #fff;
-  border-left: 8px solid #facc15;
+  border-left: 8px solid #a3e635;
 }
 .total span {
   display: block;
@@ -196,7 +196,7 @@
   font-weight: 900;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: #facc15;
+  color: #a3e635;
 }
 .total strong {
   display: block;
