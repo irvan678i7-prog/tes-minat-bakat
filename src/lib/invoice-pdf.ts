@@ -5,15 +5,16 @@ import {
 } from "./invoice";
 import { INVOICE_SIGNER_LINES, normalizeSignerName } from "./invoice-signature";
 
-// Palet mengikuti tema panel admin: hitam tebal + aksen kuning, latar putih
-// supaya dokumen tetap enak dibaca dan ramah saat dicetak hitam-putih.
+// Palet mengikuti tema panel admin: garis hitam tebal, box hijau dengan strip
+// kuning, latar putih supaya dokumen tetap enak dibaca dan ramah saat dicetak.
 const BLACK = "#000000";
 const WHITE = "#FFFFFF";
 const YELLOW = "#FACC15";
 const CREAM = "#FEF9C3";
-// Hijau untuk kop, tabel rincian, dan total tagihan.
+// Hijau untuk box kop, tabel rincian, dan total tagihan.
 const GREEN = "#A3E635";
 const GREEN_SOFT = "#F7FEE7";
+const GREEN_DEEP = "#365314";
 const MUTED = "#4A4A4A";
 const HAIRLINE = "#BDBDBD";
 const TERMS =
@@ -75,28 +76,28 @@ export function buildInvoicePDF(invoice: Invoice, signerName = ""): jsPDF {
     if (y + needed <= footerTop - 16) return;
     doc.addPage();
     y = margin;
-    fill(BLACK, margin, y, contentWidth, 24);
-    font(8, true, WHITE);
+    fill(GREEN, margin, y, contentWidth, 24);
+    font(8, true, BLACK);
     doc.text(lines(`INVOICE ${data.number}`, contentWidth - 100)[0] || "INVOICE", margin + 10, y + 16);
-    font(8, true, GREEN);
+    font(8, true, GREEN_DEEP);
     doc.text("LANJUTAN", right - 10, y + 16, { align: "right" });
     y += 50;
   };
 
   // ── Kop dokumen ────────────────────────────────────────────
-  font(11, true, WHITE);
+  font(11, true, BLACK);
   const numberLines = lines(data.number, 190);
   const bandHeight = Math.max(64, 40 + numberLines.length * 13 + 10);
-  fill(BLACK, margin, y, contentWidth, bandHeight);
-  font(26, true, WHITE);
+  fill(GREEN, margin, y, contentWidth, bandHeight);
+  font(26, true, BLACK);
   doc.text("INVOICE", margin + 18, y + 34);
-  font(7.5, true, GREEN);
+  font(7.5, true, GREEN_DEEP);
   doc.text("TAGIHAN PEMBAYARAN TES", margin + 19, y + 50);
   doc.text("NOMOR INVOICE", right - 18, y + 24, { align: "right" });
-  font(11, true, WHITE);
+  font(11, true, BLACK);
   doc.text(numberLines, right - 18, y + 40, { align: "right", lineHeightFactor: 1.2 });
   y += bandHeight;
-  fill(GREEN, margin, y, contentWidth, 8);
+  fill(YELLOW, margin, y, contentWidth, 8);
   y += 8;
 
   // ── Penagih & penerima ────────────────────────────────────
@@ -194,12 +195,12 @@ export function buildInvoicePDF(invoice: Invoice, signerName = ""): jsPDF {
   const totalX = right - totalWidth;
   font(9, false, MUTED);
   doc.text(`${formatCount(data.quantity)} siswa \u00D7 ${priceText}`, margin, y + 26);
-  fill(BLACK, totalX, y, totalWidth, totalHeight);
-  fill(GREEN, totalX, y, 8, totalHeight);
-  font(8, true, GREEN);
+  fill(GREEN, totalX, y, totalWidth, totalHeight);
+  fill(YELLOW, totalX, y, 8, totalHeight);
+  font(8, true, GREEN_DEEP);
   doc.text("TOTAL TAGIHAN", totalX + 24, y + 24);
-  font(20, true, WHITE);
-  if (doc.getTextWidth(amountText) > totalWidth - 46) font(15.5, true, WHITE);
+  font(20, true, BLACK);
+  if (doc.getTextWidth(amountText) > totalWidth - 46) font(15.5, true, BLACK);
   doc.text(amountText, right - 20, y + 48, { align: "right" });
   y += totalHeight + 28;
 

@@ -1,6 +1,6 @@
 /* Kertas invoice: mengikuti tema brutalism panel admin (garis hitam tebal,
-   aksen hijau) tapi tetap dibaca seperti dokumen tagihan resmi. Tampilan ini
-   dibuat mirip dengan PDF yang diunduh. */
+   box hijau dengan strip kuning) tapi tetap dibaca seperti dokumen tagihan
+   resmi. Tampilan ini dibuat mirip dengan PDF yang diunduh. */
 .paper {
   background: #fff;
   color: #000;
@@ -14,8 +14,8 @@
   justify-content: space-between;
   gap: 20px;
   padding: 20px 24px;
-  background: #000;
-  color: #fff;
+  background: #a3e635;
+  color: #000;
 }
 .head h4 {
   margin: 0;
@@ -30,7 +30,7 @@
   font-weight: 900;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: #a3e635;
+  color: #365314;
 }
 .headNumber {
   max-width: 58%;
@@ -42,7 +42,7 @@
   font-weight: 900;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: #a3e635;
+  color: #365314;
 }
 .headNumber strong {
   display: block;
@@ -52,7 +52,7 @@
 }
 .accent {
   height: 8px;
-  background: #a3e635;
+  background: #facc15;
   border-bottom: 4px solid #000;
 }
 .chip {
@@ -186,9 +186,9 @@
   min-width: 250px;
   max-width: 100%;
   padding: 14px 20px;
-  background: #000;
-  color: #fff;
-  border-left: 8px solid #a3e635;
+  background: #a3e635;
+  color: #000;
+  border-left: 8px solid #facc15;
 }
 .total span {
   display: block;
@@ -196,7 +196,7 @@
   font-weight: 900;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: #a3e635;
+  color: #365314;
 }
 .total strong {
   display: block;
